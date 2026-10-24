@@ -5,6 +5,7 @@
 // pulling in server-only imports. Keep this file free of side effects and of any
 // server-only dependency (no supabase clients, no process.env reads).
 import { z } from "zod";
+import { resendKinds } from "./email-resend";
 // Domain constants for the knowledge base. `kb.ts` is the same kind of
 // module as this one (pure, no server imports), and owns the vocabulary its
 // permission rules are written in; importing it here keeps the wire schema and
@@ -2823,8 +2824,33 @@ export const managerAgentActions = [
   "cancel_item_invoice",
   "delete_item_invoice",
   "get_club_settings",
+  "resend_email",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
+
+/** Which email to resend, for which record (`docs/emails.md`, "Resending"). */
+export const resendPreviewSchema = z
+  .object({ kind: z.enum(resendKinds), record_id: z.string().uuid() })
+  .strict();
+
+/**
+ * A manager's resend from the screen. `client_submission_id` is the click:
+ * `useResilientSubmit` keeps it across automatic retries of one press and mints
+ * a new one for the next press, which is exactly what the resend's idempotency
+ * key and once-a-minute limit need (`email-resend.ts`).
+ */
+export const resendEmailSchema = resendPreviewSchema
+  .extend({ client_submission_id: z.string().uuid() })
+  .strict();
+
+/**
+ * `resend_email` over the agent API. The click id is optional there: an agent
+ * that sends one gets a safe retry, and one that does not gets a fresh send
+ * each call, still held to once a minute per email per record.
+ */
+export const agentResendEmailSchema = resendPreviewSchema
+  .extend({ client_submission_id: z.string().uuid().optional() })
+  .strict();
 
 /** Payment methods an invoice can carry (mirrors the memberships CHECK). */
 export const invoicePaymentMethods = ["bank_transfer", "stripe", "manual"] as const;

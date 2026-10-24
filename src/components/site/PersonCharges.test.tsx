@@ -14,6 +14,12 @@ vi.mock("@tanstack/react-router", () => ({
   Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
 }));
 vi.mock("@tanstack/react-start", () => ({ useServerFn: (fn: unknown) => fn }));
+// The Resend buttons on these rows have their own tests
+// (ResendEmailButton.test.tsx); here they only need to render.
+vi.mock("@/lib/email-resend.functions", () => ({
+  getResendPreview: vi.fn(),
+  resendClubEmail: vi.fn(),
+}));
 vi.mock("@/lib/item-invoices.functions", () => ({
   listChargeItems: (...args: unknown[]) => listChargeItems(...args),
   listItemInvoices: (...args: unknown[]) => listItemInvoices(...args),

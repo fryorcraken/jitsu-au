@@ -141,7 +141,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "21",
+  version: "22",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -154,6 +154,16 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "22",
+      // Purely additive: one new action. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        'New action resend_email: {"kind":"...","record_id":"<uuid>"} sends one email again to the person it went to (the guardian, for a child), rebuilt from today\'s records: an invoice carries the amount owed now and the club\'s current bank details, a waiver confirmation a fresh PDF link. kind is one of membership_invoice, membership_receipt, item_invoice, item_invoice_receipt (record_id: the invoice), waiver_confirmation, account_activated (record_id: the waiver), email_verification (record_id: the person).',
+        "Each email for each record can be resent once a minute: a second call inside that is 429 rate_limited with a Retry-After. Pass client_submission_id (a UUID) and reuse it to retry one resend safely after a lost answer or a 503 email_not_sent; a new id is a new send. Reusing an id whose email already went, more than a minute later, is 409 already_sent rather than a second email.",
+        "Refusals name what is wrong, as the error code: 404 not_found; 409 paid, unpaid, cancelled, not_approved, locked or already_verified when the record has moved on, checked again at the send (resend the receipt rather than the invoice, and so on); 409 already_sent for a reused client_submission_id; 422 paper, no_address, dependant or free when there is nothing that can be sent.",
+      ],
+    },
     {
       version: "21",
       // Purely additive: one new action. Nothing that worked before changes.
@@ -1099,6 +1109,32 @@ export const AGENT_MANIFEST: {
       summary:
         "Read the club-wide settings: email_reply_to (where a reply to any club email goes, or null when unset) and payment_details (the bank account members pay into, or null when not published). 503 settings_unreadable when they could not be read: that is not the same as nothing being set, so retry rather than treating it as empty.",
       params: [],
+    },
+    {
+      name: "resend_email",
+      method: "POST",
+      summary:
+        "Send one email again to the person it went to (the guardian, for a child), rebuilt from today's records rather than replayed: an invoice carries the amount owed now and the club's current bank details, a waiver confirmation a fresh PDF link, a verification email a fresh link. Managers are not copied. Once a minute per email per record (429 rate_limited, with Retry-After). 404 not_found; 409 paid | unpaid | cancelled | not_approved | locked | already_verified when the record has moved on (checked again at the send); 409 already_sent when this client_submission_id already sent it; 422 paper | no_address | dependant | free when nothing can be sent; 503 email_not_sent when it did not go out (retry with the same client_submission_id). Returns to and to_belongs_to: print the two together.",
+      params: [
+        {
+          name: "kind",
+          required: true,
+          description:
+            "membership_invoice | membership_receipt | item_invoice | item_invoice_receipt | waiver_confirmation | account_activated | email_verification.",
+        },
+        {
+          name: "record_id",
+          required: true,
+          description:
+            "The membership's id (membership_*), the item invoice's id (item_invoice*), the waiver's id (waiver_confirmation, account_activated), or the person's user_id (email_verification).",
+        },
+        {
+          name: "client_submission_id",
+          required: false,
+          description:
+            "A UUID for this resend. Reuse it to retry the same resend safely; omit it and every call is a new send.",
+        },
+      ],
     },
   ],
 };

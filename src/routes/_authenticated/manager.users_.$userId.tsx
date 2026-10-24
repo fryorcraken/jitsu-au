@@ -16,6 +16,7 @@ import { AddMembershipCard } from "@/components/site/AddMembershipCard";
 import { PersonCharges } from "@/components/site/PersonCharges";
 import { MembershipRowActions } from "@/components/site/MembershipRowActions";
 import { PaidNote } from "@/components/site/PaymentReceived";
+import { ResendEmailButton } from "@/components/site/ResendEmailButton";
 import { formatDate, formatDateOnly, formatDateTime } from "@/lib/dates";
 import { BELT_SIZE_HINT, BeltSizeSelect, GiSizeSelect } from "@/components/site/KitSizeSelect";
 import {
@@ -47,12 +48,7 @@ import {
 import { emailVerificationLabel, isEmailVerified } from "@/lib/email-verification";
 import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
-import {
-  getClubUser,
-  resendClubUserVerification,
-  setClubUserEmail,
-  setClubUserKitSizes,
-} from "@/lib/club-user.functions";
+import { getClubUser, setClubUserEmail, setClubUserKitSizes } from "@/lib/club-user.functions";
 import { attachCheckInCoverage, transferCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
@@ -311,7 +307,6 @@ function EmailCard({
   onChanged: () => void;
 }) {
   const changeEmail = useServerFn(setClubUserEmail);
-  const resend = useServerFn(resendClubUserVerification);
   const [editing, setEditing] = useState(false);
   // ⚠️ NOT prefilled for a dependant. The address on screen is their
   // GUARDIAN's, so prefilling it here would offer a manager a Save that writes
@@ -349,23 +344,6 @@ function EmailCard({
     }
   }
 
-  async function sendAgain() {
-    setBusy(true);
-    try {
-      const res = await resend({ data: { userId } });
-      toast.success(
-        res.alreadyVerified
-          ? "That address is already confirmed."
-          : "Verification email sent to " + res.email,
-      );
-      onChanged();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not send that email.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="rounded-lg border p-4">
       <h2 className="mb-3 text-lg font-bold">Email</h2>
@@ -379,7 +357,7 @@ function EmailCard({
 
       {/* A dependant's address is their guardian's, and both writes behind these
           buttons now refuse one outright (`setClubUserEmail` and
-          `resendClubUserVerification`). Offering a manager a Save the server
+          the verification resend). Offering a manager a Save the server
           will not take is worse than offering nothing: they would read the
           refusal as the page being broken rather than as the rule it is. The
           address still shows, captioned above with whose it is. */}
@@ -419,9 +397,12 @@ function EmailCard({
             Change email
           </Button>
           {!verified && email ? (
-            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={sendAgain}>
-              {busy ? "Sending..." : "Resend verification"}
-            </Button>
+            <ResendEmailButton
+              kind="email_verification"
+              recordId={userId}
+              // "Already confirmed" means this card is stale: reload it.
+              onStale={onChanged}
+            />
           ) : null}
         </div>
       )}

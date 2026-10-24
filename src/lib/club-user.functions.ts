@@ -674,56 +674,9 @@ export const setClubUserEmail = createServerFn({ method: "POST" })
     return changeClubUserEmail(admin, data.userId, normalizeEmail(data.email));
   });
 
-/** Manager: send the person a fresh "confirm your email address" link. */
-export const resendClubUserVerification = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context as { supabase: MembershipClient; userId: string });
-
-    const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
-
-    // A dependant is never sent a verification link, and this is the one path
-    // that could have sent one. #102 asks for that guarantee and #106 asks for
-    // it to be CONFIRMED rather than assumed, so here is the confirmation: of
-    // the four places that mint an `email_verification_tokens` row, the waiver
-    // confirmation and the code-of-conduct link both resolve to the contact
-    // person already, an interest registration is a lead with no person record
-    // at all, and this one takes a bare `userId` from a manager's screen and
-    // would happily mint against a child.
-    //
-    // What that produced was not dangerous so much as incoherent: a token bound
-    // to a reserved address in a subdomain the club routes no mail for, posted
-    // nowhere, redeemable by nobody, sitting in the table looking like somebody
-    // was asked to confirm something. Refused outright instead.
-    //
-    // `changeClubUserEmail` above asks the same question for the same reason,
-    // and was the neighbouring hole this comment used to point at. Both are
-    // closed now: two call sites of one shared rule, not two rules.
-    if (await isDependantUser(admin, data.userId)) {
-      throw new Error(
-        "This person is on somebody else's account and has no email of their own. Send the link to the account holder instead.",
-      );
-    }
-
-    const { data: got, error } = await admin.auth.admin.getUserById(data.userId);
-    if (error) throw new Error(error.message);
-    if (!got.user?.email) throw new Error("That person has no email on file.");
-    if (got.user.email_confirmed_at) {
-      return { ok: true as const, alreadyVerified: true, email: got.user.email };
-    }
-
-    const { sendVerificationEmail } = await import("@/lib/email-verification.server");
-    const { sent } = await sendVerificationEmail({
-      admin,
-      to: got.user.email,
-      purpose: "manager_resend",
-      userId: data.userId,
-      next: "/account",
-    });
-    if (!sent) throw new Error("We couldn't send that email just now. Try again shortly.");
-    return { ok: true as const, alreadyVerified: false, email: got.user.email };
-  });
+// Sending somebody a fresh "confirm your email address" link is a manager's
+// Resend now (`email_verification` in `email-resend.functions.ts`), the same
+// pattern as every other resend, with its dependant refusal intact.
 
 // ---- Manager: correct a person's kit sizes ----
 //
