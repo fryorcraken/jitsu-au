@@ -129,7 +129,9 @@ system. (The contact form stores a message, not a person.)
    equipment sizing and the experience is context for instructors, not
    anything being declared, so no `waivers` column holds either, neither is on
    the PDF, and both go straight onto the profile. Leaving either blank writes
-   nothing, so signing again never wipes one already on file, and the gi size
+   nothing, so signing again never wipes one already on file (which is why
+   the gi picker's empty option here reads "Not sure, skip this" rather than
+   the "Not on file" it says on `/account`), and the gi size
    seeds a belt size only when there is none (the two kids' gi sizes have no
    belt counterpart and take the shortest belt). Gi and belt size are editable
    afterwards on `/account` and by a manager; martial arts experience is not

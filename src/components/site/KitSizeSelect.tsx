@@ -30,7 +30,12 @@ import {
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm";
 
-/** Shown under a gi picker. Sizes are cut for a wearer's height, so nobody is exactly one. */
+/**
+ * Shown under a gi picker. The height each size is cut for is already in the
+ * option label (`giSizeLabel`), so this only says what to do with it: nobody is
+ * exactly one height. No screen adds its own sentence explaining the number;
+ * that is the label's job, so it reads the same everywhere.
+ */
 export const GI_SIZE_HINT = "Round up or down depending on your body build.";
 
 /**
@@ -40,11 +45,27 @@ export const GI_SIZE_HINT = "Round up or down depending on your body build.";
 export const BELT_SIZE_HINT =
   "The length is the belt itself, not your waist. If you are between sizes, take the next size up.";
 
+/** The empty option's default label: see `emptyLabel`. */
+export const EMPTY_SIZE_LABEL = "Not on file";
+
+/**
+ * `/waiver`'s empty gi option. Leaving it empty keeps whatever is on file, and
+ * it is what somebody who does not know their size should pick.
+ */
+export const WAIVER_GI_EMPTY_LABEL = "Not sure, skip this";
+
 type BaseProps = {
   id: string;
   disabled?: boolean;
   className?: string;
-  /** Label for the "no size chosen" option. Both fields are always optional. */
+  /**
+   * Label for the empty option. Both fields are always optional. The default
+   * is right wherever an empty pick means "no size on file" and saving it
+   * clears the size (`/account`, a manager's view of a record). `/waiver`
+   * passes its own, because there an empty pick keeps whatever is on file
+   * (docs/waivers.md, rule 3), so a label claiming there is none would be
+   * untrue for a returning signer whose size was not prefilled.
+   */
   emptyLabel?: string;
 };
 
@@ -54,7 +75,7 @@ export function GiSizeSelect({
   onChange,
   disabled,
   className,
-  emptyLabel = "Not set",
+  emptyLabel = EMPTY_SIZE_LABEL,
 }: BaseProps & {
   value: GiSize | "";
   onChange: (value: GiSize | "") => void;
@@ -83,7 +104,7 @@ export function BeltSizeSelect({
   onChange,
   disabled,
   className,
-  emptyLabel = "Not set",
+  emptyLabel = EMPTY_SIZE_LABEL,
 }: BaseProps & {
   value: BeltSize | "";
   onChange: (value: BeltSize | "") => void;

@@ -164,7 +164,7 @@ describe("/account", () => {
     // The code leads and the measurement is the parenthetical aid, never the
     // other way round: somebody who knows their size must be able to find it.
     expect(
-      within(screen.getByLabelText("Gi size")).getByRole("option", { name: "4 (170 cm)" }),
+      within(screen.getByLabelText("Gi size")).getByRole("option", { name: "4 (for 170 cm tall)" }),
     ).toBeInTheDocument();
     // "belt" on the belt option, so 240 cm does not read as a waist.
     expect(
@@ -176,7 +176,9 @@ describe("/account", () => {
     await renderLoaded();
     const belt = within(screen.getByLabelText("Belt size"));
     expect(
-      within(screen.getByLabelText("Gi size")).getByRole("option", { name: "000 (110 cm)" }),
+      within(screen.getByLabelText("Gi size")).getByRole("option", {
+        name: "000 (for 110 cm tall)",
+      }),
     ).toBeInTheDocument();
     expect(belt.queryByRole("option", { name: /^000/ })).toBeNull();
     expect(belt.queryByRole("option", { name: /^00 / })).toBeNull();

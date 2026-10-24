@@ -509,3 +509,15 @@ describe("/waiver opened on a named person", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("/waiver gi size", () => {
+  // An empty pick here keeps whatever size is on file (docs/waivers.md, rule 3),
+  // so the empty option must not say there is none.
+  it("offers 'Not sure, skip this' rather than claiming no size is on file", async () => {
+    renderWaiver();
+    const picker = await screen.findByLabelText(/gi size/i);
+    const first = within(picker).getAllByRole("option")[0];
+    expect(first).toHaveTextContent("Not sure, skip this");
+    expect(within(picker).queryByRole("option", { name: "Not on file" })).toBeNull();
+  });
+});

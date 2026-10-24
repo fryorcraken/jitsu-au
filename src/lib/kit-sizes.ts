@@ -60,12 +60,18 @@ export const BELT_LENGTH_CM: Record<BeltSize, number> = {
 
 /**
  * A gi size as it is shown to a person: the size code first, with the height as
- * a parenthetical aid, e.g. `1 (140 cm)`. The code leads and is never replaced
- * by the height, so somebody who already knows their size can pick it straight
- * off and somebody who does not can find it from their height.
+ * a parenthetical aid, e.g. `1 (for 140 cm tall)`. The code leads and is never
+ * replaced by the height, so somebody who already knows their size can pick it
+ * straight off and somebody who does not can find it from their height.
+ *
+ * "for ... tall" is load-bearing, for the same reason as "belt" below: a bare
+ * `5 (180 cm)` reads as a measurement of the garment. It is said here, in the
+ * label, rather than in a sentence under the picker, because the label is what
+ * every screen shows, including the chosen option once any hint has scrolled
+ * away and the manager's read-only view, which has no hint at all.
  */
 export function giSizeLabel(size: GiSize): string {
-  return `${size} (${GI_HEIGHT_CM[size]} cm)`;
+  return `${size} (for ${GI_HEIGHT_CM[size]} cm tall)`;
 }
 
 /**
