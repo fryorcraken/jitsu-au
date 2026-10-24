@@ -16,6 +16,8 @@ import {
   reconciledEditBlockers,
   reconciledEditMessage,
   safeEqual,
+  mergeAgentBlogPostEdit,
+  projectAgentBlogPost,
 } from "./manager-agent";
 import {
   createInvoiceSchema,
@@ -498,7 +500,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("24");
+    expect(AGENT_MANIFEST.version).toBe("25");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -845,5 +847,74 @@ describe("projectAgentCodeOfConductVersion", () => {
     expect(
       projectAgentCodeOfConductVersion({ ...version, first_published_at: null }, 4).status,
     ).toBe("Draft");
+  });
+});
+
+describe("mergeAgentBlogPostEdit", () => {
+  const stored = {
+    id: "5b0f3c1e-9a8d-4c2b-8e7f-1a2b3c4d5e6f",
+    slug: "2026-09-01-welcome",
+    title: "Welcome",
+    excerpt: "Hello.",
+    body_md: "Hello, and welcome.",
+    cover_image_path: "drafts/cover.jpg",
+    status: "published",
+  };
+
+  it("keeps every field the agent left out", () => {
+    expect(mergeAgentBlogPostEdit(stored, { id: stored.id, title: "Welcome all" })).toEqual({
+      ...stored,
+      title: "Welcome all",
+    });
+  });
+
+  // The shared writer reads a missing status as draft and a missing cover as
+  // none, so this is the line between "fix a typo" and "take the post down".
+  it("leaves a live post live and its cover in place when neither is sent", () => {
+    const merged = mergeAgentBlogPostEdit(stored, { id: stored.id, body_md: "New body." });
+    expect(merged.status).toBe("published");
+    expect(merged.cover_image_path).toBe("drafts/cover.jpg");
+  });
+
+  it("clears the excerpt and the cover when sent empty", () => {
+    const merged = mergeAgentBlogPostEdit(stored, {
+      id: stored.id,
+      excerpt: "",
+      cover_image_path: "",
+    });
+    expect(merged.excerpt).toBe("");
+    expect(merged.cover_image_path).toBe("");
+  });
+
+  it("reads a stored null as empty", () => {
+    const merged = mergeAgentBlogPostEdit(
+      { ...stored, excerpt: null, cover_image_path: null, status: "draft" },
+      { id: stored.id, title: "x" },
+    );
+    expect(merged).toMatchObject({ excerpt: "", cover_image_path: "", status: "draft" });
+  });
+});
+
+describe("projectAgentBlogPost", () => {
+  const post = {
+    id: "5b0f3c1e-9a8d-4c2b-8e7f-1a2b3c4d5e6f",
+    slug: "2026-09-01-welcome",
+    title: "Welcome",
+    status: "published",
+    published_at: "2026-09-01T00:00:00Z",
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+  };
+
+  it("gives a live post its public address on the real site", () => {
+    expect(projectAgentBlogPost(post).url).toBe("https://utsjitsu.com.au/blog/2026-09-01-welcome");
+  });
+
+  // The public route 404s on a draft, so an address for one is a dead link
+  // to whoever it is handed to. The manager's own screen works either way.
+  it("gives a draft no public address, only the manager's screen", () => {
+    const projected = projectAgentBlogPost({ ...post, status: "draft" });
+    expect(projected.url).toBeNull();
+    expect(projected.edit_url).toBe(`https://utsjitsu.com.au/manager/blog/${post.id}`);
   });
 });

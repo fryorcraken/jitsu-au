@@ -63,7 +63,9 @@
                 "list_kb_comments",
                 "list_items",
                 "list_item_invoices",
-                "get_club_settings"
+                "get_club_settings",
+                "list_blog_posts",
+                "get_blog_post"
               ],
               "description": "The read-only action to run."
             },
@@ -116,7 +118,10 @@
                 "mark_item_invoice_paid",
                 "cancel_item_invoice",
                 "delete_item_invoice",
-                "resend_email"
+                "resend_email",
+                "save_blog_post",
+                "delete_blog_post",
+                "upload_blog_image"
               ],
               "description": "The action to run."
             },
