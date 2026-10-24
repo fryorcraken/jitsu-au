@@ -231,7 +231,13 @@ export type SavedBlogPost = {
   excerpt: string | null;
   status: BlogPostStatus;
   published_at: string | null;
-  /** True when this save took the post live for the first time and announced it. */
+  /**
+   * True when this save took the post live for the FIRST time, which is when
+   * members are told. A republish after a trip back to draft also calls the
+   * announcement, but the unique index makes that a no-op, so it is not
+   * reported as one. Says the announcement was asked for, not that it was
+   * delivered: it is best-effort (`announcePost`).
+   */
   announced: boolean;
 };
 
@@ -333,10 +339,12 @@ export async function updateBlogPostRow(
   // published post: editing a typo is not news. The unique index makes a
   // repeat harmless anyway, so this is about not doing the work rather than
   // about correctness.
-  const announced = data.status === "published" && existing.status !== "published";
-  if (announced) {
+  if (data.status === "published" && existing.status !== "published") {
     await announcePost(data.id, slug, data.title, actorId);
   }
+  // `published_at` is stamped once and never cleared, so a null one means the
+  // post has never been live before this save.
+  const announced = data.status === "published" && existing.published_at === null;
   return { id: data.id, slug, excerpt, status: data.status, published_at: publishedAt, announced };
 }
 
@@ -354,13 +362,30 @@ export async function deleteBlogPostRow(
   if (error) throw new Error(error.message);
   // Best-effort: the post row is gone either way, so a storage cleanup
   // failure must not be reported as the delete having failed.
-  if (row?.cover_image_path) {
+  if (row?.cover_image_path && !(await blogImageInUse(admin, row.cover_image_path))) {
     await admin.storage
       .from(BUCKET)
       .remove([row.cover_image_path])
       .catch(() => {});
   }
   return { deleted: (gone ?? []).length > 0 };
+}
+
+/**
+ * Whether any remaining post shows this stored image, as its cover or in its
+ * body. The composer always uploaded a fresh cover, so a cover was only ever
+ * its own post's; the agent API can set any stored path as a cover, so one
+ * image may now be several posts'. Removing it with one of them would break
+ * the others for good. A failed check counts as in use: an orphaned file costs
+ * nothing, a deleted one cannot be brought back.
+ */
+async function blogImageInUse(admin: AdminClient, path: string): Promise<boolean> {
+  const [asCover, inBody] = await Promise.all([
+    admin.from("blog_posts").select("id").eq("cover_image_path", path).limit(1),
+    admin.from("blog_posts").select("id").ilike("body_md", `%${path}%`).limit(1),
+  ]);
+  if (asCover.error || inBody.error) return true;
+  return (asCover.data ?? []).length > 0 || (inBody.data ?? []).length > 0;
 }
 
 /**

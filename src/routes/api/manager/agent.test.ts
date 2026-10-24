@@ -1162,11 +1162,18 @@ describe("manager agent route: the blog", () => {
         eq: (col: string, val: unknown) => (filters.push((r) => r[col] === val), c),
         neq: (col: string, val: unknown) => (filters.push((r) => r[col] !== val), c),
         ilike: (col: string, pattern: string) => {
-          const prefix = pattern.replace(/%$/, "").toLowerCase();
-          filters.push((r) => String(r[col]).toLowerCase().startsWith(prefix));
+          const re = new RegExp(
+            `^${pattern
+              .split("%")
+              .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+              .join(".*")}$`,
+            "i",
+          );
+          filters.push((r) => re.test(String(r[col])));
           return c;
         },
         order: () => c,
+        limit: () => c,
         select: () => c,
         maybeSingle: () => Promise.resolve(ok(run()[0] ?? null)),
         then: (resolve: (r: unknown) => void) => resolve(ok(run())),
@@ -1291,6 +1298,22 @@ describe("manager agent route: the blog", () => {
     expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
   });
 
+  // Members were told the first time. Republishing calls the announcement
+  // again, but the unique index swallows it, so it must not be reported as one.
+  it("does not report a republish as announcing the post again", async () => {
+    const fake = fakeBlog([{ ...LIVE, status: "draft" }]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { id: LIVE_ID, status: "published" },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toMatchObject({
+      announced: false,
+      post: { status: "published", published_at: "2026-09-01T00:00:00Z" },
+    });
+  });
+
   it("creates a new post as a draft with no public address unless told otherwise", async () => {
     const fake = fakeBlog([]);
     currentAdmin = fake.db;
@@ -1361,6 +1384,20 @@ describe("manager agent route: the blog", () => {
 
     const again = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
     expect(again.status).toBe(404);
+  });
+
+  // The agent can give two posts the same stored picture. Deleting one must
+  // not take the picture away from the other.
+  it("keeps a cover another post still shows", async () => {
+    const fake = fakeBlog([
+      DRAFT,
+      { ...LIVE, cover_image_path: null, body_md: "![x](https://cdn/blog-media/drafts/cover.jpg)" },
+    ]);
+    currentAdmin = fake.db;
+    const res = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
+    expect(res.status).toBe(200);
+    expect(fake.rows.map((r) => r.id)).toEqual([LIVE_ID]);
+    expect(fake.removed).toEqual([]);
   });
 
   // A one-pixel PNG: the smallest real image there is.
