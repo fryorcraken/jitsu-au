@@ -9,6 +9,7 @@ import {
   resendIdempotencyKey,
   resendMarkerKey,
   resendWaitSeconds,
+  sameClickVerdict,
 } from "./email-resend";
 
 describe("resendIdempotencyKey", () => {
@@ -66,5 +67,33 @@ describe("the once-a-minute marker", () => {
     const fresh = formatResendMarker({ at: secondsAgo(10), resendId: "0000" });
     expect(stale < cutoff).toBe(true);
     expect(fresh < cutoff).toBe(false);
+  });
+});
+
+describe("a press whose click id already holds the slot", () => {
+  const now = new Date("2026-10-23T04:00:00.000Z");
+  const ago = (s: number) => new Date(now.getTime() - s * 1000).toISOString();
+
+  it("keeps the sent flag through a round trip, and still sorts by time", () => {
+    const marker = { at: ago(5), resendId: "click-1", sent: true };
+    expect(parseResendMarker(formatResendMarker(marker))).toEqual(marker);
+    expect(formatResendMarker({ ...marker, at: ago(90) }) < resendCutoff(now)).toBe(true);
+  });
+
+  it("is a retry while its email has not gone, however long ago", () => {
+    expect(sameClickVerdict({ at: ago(3600), resendId: "click-1" }, now)).toBe("retry");
+  });
+
+  it("is a retry racing its own success within the minute", () => {
+    expect(sameClickVerdict({ at: ago(30), resendId: "click-1", sent: true }, now)).toBe("retry");
+  });
+
+  it("is a reuse once its email went more than a minute ago", () => {
+    expect(
+      sameClickVerdict(
+        { at: ago(RESEND_COOLDOWN_SECONDS + 1), resendId: "click-1", sent: true },
+        now,
+      ),
+    ).toBe("already_sent");
   });
 });

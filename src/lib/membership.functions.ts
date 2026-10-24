@@ -513,8 +513,11 @@ export type MembershipEmailOutcome =
        * `no_address`: nobody on file to send it to.
        * `nothing_owed`: unpaid but free, so there is no invoice to send.
        * `not_sent`: the email was composed and the send failed or was skipped.
+       * `moved_on`: the caller asked for one of the two emails (`only`) and
+       * the row no longer calls for it: paid or cancelled since, for an
+       * invoice; not paid, for a receipt. Nothing was sent.
        */
-      reason: "not_found" | "no_address" | "nothing_owed" | "not_sent";
+      reason: "not_found" | "no_address" | "nothing_owed" | "not_sent" | "moved_on";
     };
 
 /**
@@ -532,16 +535,29 @@ export type MembershipEmailOutcome =
 export async function emailMembershipRecord(
   admin: MembershipClient,
   membershipId: string,
-  /** A manager's resend: the member copy only, under a key of its own. */
-  opts: { resendId?: string } = {},
+  opts: {
+    /** A manager's resend: the member copy only, under a key of its own. */
+    resendId?: string;
+    /**
+     * Send this email or nothing. A Resend button asks for one of the two by
+     * name, and the row can change between the check and the send (a bank
+     * import marks it paid, another manager cancels it). Without this the
+     * send would follow the row and deliver a receipt for "Resend invoice",
+     * or a "pay this" for a membership cancelled a moment ago.
+     */
+    only?: "invoice" | "receipt";
+  } = {},
 ): Promise<MembershipEmailOutcome> {
   const { data: membership, error } = await admin
     .from("memberships")
-    .select("id, user_id, plan_id, price_cents, payment_reference, paid_at")
+    .select("id, user_id, plan_id, price_cents, payment_reference, paid_at, status")
     .eq("id", membershipId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!membership || !membership.user_id) return { sent: false, reason: "not_found" };
+  if (opts.only === "receipt" && !membership.paid_at) return { sent: false, reason: "moved_on" };
+  if (opts.only === "invoice" && (membership.paid_at || membership.status === "cancelled"))
+    return { sent: false, reason: "moved_on" };
 
   const [{ data: plan }, { data: profile }, recipient] = await Promise.all([
     admin.from("membership_plans").select("*").eq("id", membership.plan_id).maybeSingle(),
@@ -585,36 +601,45 @@ export async function emailMembershipRecord(
   // A mandatory insurance invoice can ride on this SAME reference
   // (`resolveInsuranceCover` + `enrolMember`'s bundling), combined into ONE
   // invoice email under this membership's id. Sending only this row's amount
-  // would under-bill the member for what they actually owe, so an unpaid
-  // sibling on the same reference is folded in, which is exactly the bundle
-  // `enrolMember` raises.
+  // would under-bill the member for what they actually owe, so that insurance
+  // is folded in: exactly the bundle `enrolMember` raises, and nothing else.
   //
-  // A CANCELLED sibling is excluded, the same rule `isUnpaid` and
-  // `reconcileUnmatched` already use: a manager closed that invoice on
-  // purpose, so it is owed nothing, and folding it back in here would bill the
-  // member for a charge that was deliberately withdrawn.
-  const { data: bundled } = await admin
+  // "Nothing else" is the point of every filter below. An undated plan's
+  // reference is per PERSON (`buildPaymentReference`), so the same reference
+  // also sits on their free trial, on an older plan they still owe for, and
+  // in a rare collision on somebody else's row. Folding those in asked a new
+  // member to pay for their trial, billed an old debt under a new plan's
+  // name, and could name another person's plan. So only this person's
+  // insurance, still active, unpaid and actually charged, the same insurance
+  // row `enrolMember` reuses or raises. A CANCELLED one is never folded in,
+  // the rule `isUnpaid` and `reconcileUnmatched` use: a manager withdrew it.
+  const { data: siblings } = await admin
     .from("memberships")
     .select("price_cents, plan_id")
     .eq("payment_reference", membership.payment_reference)
+    .eq("user_id", membership.user_id)
     .neq("id", membership.id)
-    .neq("status", "cancelled")
+    .eq("status", "active")
+    .gt("price_cents", 0)
     .is("paid_at", null);
   let totalCents = membership.price_cents;
   let planName = plan?.name ?? "your membership";
-  if (bundled?.length) {
+  if (siblings?.length) {
     const { data: siblingPlans } = await admin
       .from("membership_plans")
-      .select("id, name")
+      .select("id, name, kind")
       .in(
         "id",
-        bundled.map((b) => b.plan_id),
+        siblings.map((b) => b.plan_id),
       );
-    const nameById = new Map((siblingPlans ?? []).map((p) => [p.id, p.name]));
-    for (const row of bundled) {
+    const insuranceById = new Map(
+      (siblingPlans ?? []).filter((p) => p.kind === "insurance").map((p) => [p.id, p.name]),
+    );
+    for (const row of siblings) {
+      const insuranceName = insuranceById.get(row.plan_id);
+      if (insuranceName === undefined) continue;
       totalCents += row.price_cents;
-      const siblingName = nameById.get(row.plan_id);
-      if (siblingName) planName = `${planName} + ${siblingName}`;
+      planName = `${planName} + ${insuranceName}`;
     }
   }
   // Nothing is owed, on this row or anything bundled with it.

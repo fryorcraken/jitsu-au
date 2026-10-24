@@ -46,13 +46,17 @@ const UNPAID = {
  * like the real one where the claim depends on it: insert refuses a duplicate
  * key with 23505, and the conditional update really compares the stored value.
  */
-function fakeDb(invoice: typeof UNPAID | null) {
+function fakeDb(invoice: typeof UNPAID | null, ...later: (typeof UNPAID | null)[]) {
   const settings = new Map<string, string>();
+  // Each read of the invoice takes the next row given, staying on the last: so
+  // a test can have it paid between the check and the send.
+  const reads = [invoice, ...later];
+  const nextInvoice = () => (reads.length > 1 ? reads.shift()! : reads[0]);
   const db = {
     from: (table: string) => {
       if (table === "item_invoices") {
         return {
-          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(ok(invoice)) }) }),
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(ok(nextInvoice())) }) }),
         };
       }
       if (table === "club_settings") {
@@ -70,18 +74,24 @@ function fakeDb(invoice: typeof UNPAID | null) {
             }),
           }),
           update: (patch: { value: string }) => {
-            const filter: { key?: string; lt?: string } = {};
+            const filter: { key?: string; value?: string; lt?: string } = {};
+            const apply = () => {
+              const current = settings.get(filter.key!);
+              const matches =
+                current !== undefined &&
+                (filter.lt === undefined || current < filter.lt) &&
+                (filter.value === undefined || current === filter.value);
+              if (matches) settings.set(filter.key!, patch.value);
+              return matches;
+            };
             const chain = {
-              eq: (_col: string, key: string) => ((filter.key = key), chain),
+              eq: (col: string, v: string) => (
+                col === "value" ? (filter.value = v) : (filter.key = v),
+                chain
+              ),
               lt: (_col: string, cutoff: string) => ((filter.lt = cutoff), chain),
-              select: () => {
-                const current = settings.get(filter.key!);
-                if (current !== undefined && current < filter.lt!) {
-                  settings.set(filter.key!, patch.value);
-                  return Promise.resolve(ok([{ key: filter.key }]));
-                }
-                return Promise.resolve(ok([]));
-              },
+              select: () => Promise.resolve(ok(apply() ? [{ key: filter.key }] : [])),
+              then: (resolve: (r: { error: null }) => void) => (apply(), resolve({ error: null })),
             };
             return chain;
           },
@@ -210,6 +220,55 @@ describe("resending an item invoice", () => {
     expect(other).toMatchObject({ sent: false, reason: "rate_limited" });
   });
 
+  // The same id reused for what is meant as a new send would go out under the
+  // same key and be dropped by the provider, while the answer said "sent".
+  it("refuses a click id reused after its email went, rather than reporting a silent drop", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-23T04:00:00Z"));
+      const { db } = fakeDb(UNPAID);
+      const input = { kind: "item_invoice" as const, record_id: INVOICE_ID, resendId: "click-1" };
+      expect((await resendEmail(db, input, "agent")).sent).toBe(true);
+
+      vi.setSystemTime(new Date("2026-10-24T04:00:00Z"));
+      const reused = await resendEmail(db, input, "agent");
+      expect(reused).toMatchObject({ sent: false, reason: "already_sent" });
+      expect(sent()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still lets Try again through long after a failed send", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-23T04:00:00Z"));
+      const { db } = fakeDb(UNPAID);
+      const input = { kind: "item_invoice" as const, record_id: INVOICE_ID, resendId: "click-1" };
+      sendLovableEmail.mockRejectedValueOnce(new Error("provider down"));
+      await expect(resendEmail(db, input, "manager-1")).rejects.toBeInstanceOf(ResendNotSentError);
+
+      vi.setSystemTime(new Date("2026-10-23T04:10:00Z"));
+      expect((await resendEmail(db, input, "manager-1")).sent).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Paid between the check and the send (a bank import, another manager):
+  // following the row would deliver a receipt for "Resend invoice".
+  it("sends nothing when the invoice is paid between the check and the send", async () => {
+    const { db } = fakeDb(UNPAID, { ...UNPAID, paid_at: "2026-10-23T04:00:30Z" });
+    const result = await resendEmail(
+      db,
+      { kind: "item_invoice", record_id: INVOICE_ID, resendId: "click-1" },
+      "manager-1",
+    );
+    expect(result).toMatchObject({ sent: false, reason: "paid" });
+    expect(sent()).toHaveLength(0);
+  });
+
   it("refuses the invoice once it is paid, pointing at the receipt", async () => {
     const { db } = fakeDb({ ...UNPAID, paid_at: "2026-10-01T00:00:00Z" });
     const result = await resendEmail(
@@ -302,10 +361,9 @@ describe("resending the account email", () => {
     } as unknown as SupabaseClient<Database>;
   }
 
-  // "Your account is active" from an older waiver, or from a re-sign approved
-  // while the account was already open, would be news to nobody and confusing
-  // to them. The screen only offers it on the live waiver; the API must refuse
-  // the rest on its own.
+  // The email is about the login, offered in one place per person: their live
+  // waiver, where the screen shows the button. The API is held to the same
+  // place, so an agent cannot send it from every waiver on file.
   it("refuses any approved waiver but the person's current one", async () => {
     const preview = await previewResend(waiversDb(), "account_activated", OLD);
     expect(preview).toMatchObject({ available: false, reason: "not_approved" });

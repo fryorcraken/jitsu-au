@@ -571,7 +571,9 @@ are not copied.
   `429 rate_limited` with a `Retry-After`. Do not loop on it.
 - **Mint a `client_submission_id` per resend and reuse it only to retry that
   resend** (after a lost answer or `503 email_not_sent`). A new id is a new
-  email in somebody's inbox.
+  email in somebody's inbox. Reusing an id whose email already went is
+  `409 already_sent`, never a second email: mint a new id if the manager
+  really wants it sent again.
 - A `409` means the record has moved on (`paid`: resend the receipt instead;
   `already_verified`: nothing to send). A `422` means nothing can be sent
   (`no_address`, `paper`, `dependant`, `free`). Report it; do not retry.

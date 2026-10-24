@@ -1419,6 +1419,7 @@ const RESEND_REFUSAL_STATUS: Record<ResendRefusal, number> = {
   not_approved: 409,
   locked: 409,
   already_verified: 409,
+  already_sent: 409,
   paper: 422,
   no_address: 422,
   dependant: 422,

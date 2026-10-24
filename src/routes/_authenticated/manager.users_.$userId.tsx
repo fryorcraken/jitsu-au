@@ -401,7 +401,7 @@ function EmailCard({
               kind="email_verification"
               recordId={userId}
               // "Already confirmed" means this card is stale: reload it.
-              onSettled={onChanged}
+              onStale={onChanged}
             />
           ) : null}
         </div>

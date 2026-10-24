@@ -1299,6 +1299,8 @@ type SiblingRow = {
   plan_id: string;
   status: string;
   paid_at: string | null;
+  /** Whose row it is. Defaults to the primary membership's person. */
+  user_id?: string;
 };
 
 function fakeInvoiceEmailAdmin(
@@ -1358,11 +1360,17 @@ function fakeInvoiceEmailAdmin(
     const excludeCancelled = filters.some(
       ([c, v, val]) => c === "status" && v === "neq" && val === "cancelled",
     );
+    const onlyStatus = filters.find(([c, v]) => c === "status" && v === "eq")?.[2];
+    const onlyUser = filters.find(([c, v]) => c === "user_id" && v === "eq")?.[2];
+    const minPrice = filters.find(([c, v]) => c === "price_cents" && v === "gt")?.[2];
     const paidOnlyNull = filters.some(([c, v]) => c === "paid_at" && v === "is");
     return ok(
       siblings.filter((s) => {
         if (excludedId != null && s.id === excludedId) return false;
         if (excludeCancelled && s.status === "cancelled") return false;
+        if (onlyStatus != null && s.status !== onlyStatus) return false;
+        if (onlyUser != null && (s.user_id ?? "user-1") !== onlyUser) return false;
+        if (typeof minPrice === "number" && !(s.price_cents > minPrice)) return false;
         if (paidOnlyNull && s.paid_at !== null) return false;
         return true;
       }),
@@ -1386,6 +1394,7 @@ function fakeInvoiceEmailAdmin(
       eq: (col: string, val: unknown) => (op.filters.push([col, "eq", val]), builder),
       neq: (col: string, val: unknown) => (op.filters.push([col, "neq", val]), builder),
       in: (col: string, val: unknown) => (op.filters.push([col, "in", val]), builder),
+      gt: (col: string, val: unknown) => (op.filters.push([col, "gt", val]), builder),
       is: (col: string, val: unknown) => (op.filters.push([col, "is", val]), builder),
       maybeSingle: () => settle(),
       then: (resolve: (r: Result) => unknown, reject?: (e: unknown) => unknown) =>
@@ -1476,7 +1485,7 @@ describe("ensureCasualInvoiceEmailed", () => {
   it("folds an unpaid bundled invoice (e.g. insurance) into the amount and plan name", async () => {
     const admin = fakeInvoiceEmailAdmin({
       bundled: ok([{ price_cents: 6000, plan_id: "plan-insurance" }]),
-      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance", kind: "insurance" }]),
     });
     await ensureInvoiceEmailed(admin);
     expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
@@ -1508,7 +1517,7 @@ describe("ensureCasualInvoiceEmailed", () => {
           paid_at: null,
         },
       ],
-      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance", kind: "insurance" }]),
     });
     await ensureInvoiceEmailed(admin);
     expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
@@ -1535,11 +1544,57 @@ describe("ensureCasualInvoiceEmailed", () => {
         paid_at: null,
       }),
       bundled: ok([{ price_cents: 6000, plan_id: "plan-insurance" }]),
-      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance" }]),
+      siblingPlans: ok([{ id: "plan-insurance", name: "Yearly insurance", kind: "insurance" }]),
     });
     await ensureInvoiceEmailed(admin);
     expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
       expect.objectContaining({ planName: "Casual class + Yearly insurance", amount: "$60" }),
+    );
+  });
+
+  // An undated plan's reference is per PERSON, so it also sits on their free
+  // trial, on an older plan they still owe for, and (in a rare collision) on
+  // somebody else's row. Only the insurance `enrolMember` bundles belongs in
+  // this invoice; folding the rest in billed a new member for their trial
+  // ("Monthly + Free trial") or for an old debt under a new plan's name.
+  it("folds in only this person's active, charged insurance, nothing else on the reference", async () => {
+    const admin = fakeInvoiceEmailAdmin({
+      siblings: [
+        { id: "trial", price_cents: 0, plan_id: "plan-trial", status: "active", paid_at: null },
+        { id: "old", price_cents: 9000, plan_id: "plan-monthly", status: "active", paid_at: null },
+        {
+          id: "lapsed-ins",
+          price_cents: 6000,
+          plan_id: "plan-insurance",
+          status: "expired",
+          paid_at: null,
+        },
+        {
+          id: "theirs",
+          price_cents: 6000,
+          plan_id: "plan-insurance",
+          status: "active",
+          paid_at: null,
+          user_id: "user-2",
+        },
+        {
+          id: "ins",
+          price_cents: 6000,
+          plan_id: "plan-insurance",
+          status: "active",
+          paid_at: null,
+        },
+      ],
+      siblingPlans: ok([
+        { id: "plan-trial", name: "Free trial", kind: "trial" },
+        { id: "plan-monthly", name: "Monthly", kind: "period" },
+        { id: "plan-insurance", name: "Yearly insurance", kind: "insurance" },
+      ]),
+    });
+    await ensureInvoiceEmailed(admin);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledTimes(1);
+    expect(sendMembershipPaymentEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ planName: "Casual class + Yearly insurance", amount: "$90" }),
     );
   });
 
@@ -1558,6 +1613,53 @@ describe("ensureCasualInvoiceEmailed", () => {
   it("never lets a failed send escape — the check-in it guards must never fail", async () => {
     sendMembershipPaymentEmail.mockRejectedValueOnce(new Error("Lovable is down"));
     await expect(ensureInvoiceEmailed(fakeInvoiceEmailAdmin({}))).resolves.toBeUndefined();
+  });
+});
+
+// A Resend button asks for one email by name, and the row can change between
+// the check and the send. `only` makes the send refuse rather than follow the
+// row into the other email.
+describe("emailMembershipRecord with `only`", () => {
+  beforeEach(() => {
+    sendMembershipPaymentEmail.mockClear();
+    sendMembershipPaidEmail.mockClear();
+  });
+
+  const row = (over: Record<string, unknown>) =>
+    ok({
+      id: "mem-casual",
+      user_id: "user-1",
+      plan_id: CASUAL_PLAN.id,
+      price_cents: 3000,
+      payment_reference: "JITSU-ADA-1234",
+      paid_at: null,
+      status: "active",
+      ...over,
+    });
+
+  it("does not send a receipt for 'Resend invoice' once the row is paid", async () => {
+    const { emailMembershipRecord } = await import("./membership.functions");
+    const admin = fakeInvoiceEmailAdmin({ membership: row({ paid_at: "2026-10-20T00:00:00Z" }) });
+    const outcome = await emailMembershipRecord(admin as never, "mem-casual", { only: "invoice" });
+    expect(outcome).toEqual({ sent: false, reason: "moved_on" });
+    expect(sendMembershipPaidEmail).not.toHaveBeenCalled();
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not invoice a membership cancelled since the check", async () => {
+    const { emailMembershipRecord } = await import("./membership.functions");
+    const admin = fakeInvoiceEmailAdmin({ membership: row({ status: "cancelled" }) });
+    const outcome = await emailMembershipRecord(admin as never, "mem-casual", { only: "invoice" });
+    expect(outcome).toEqual({ sent: false, reason: "moved_on" });
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not send an invoice for 'Resend receipt' when nothing is paid", async () => {
+    const { emailMembershipRecord } = await import("./membership.functions");
+    const admin = fakeInvoiceEmailAdmin({ membership: row({}) });
+    const outcome = await emailMembershipRecord(admin as never, "mem-casual", { only: "receipt" });
+    expect(outcome).toEqual({ sent: false, reason: "moved_on" });
+    expect(sendMembershipPaymentEmail).not.toHaveBeenCalled();
   });
 });
 

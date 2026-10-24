@@ -43,6 +43,7 @@ import {
   resendIdempotencyKey,
   resendMarkerKey,
   resendWaitSeconds,
+  sameClickVerdict,
   type ResendKind,
   type ResendPreview,
   type ResendRefusal,
@@ -61,8 +62,17 @@ type Planned = {
   to: string;
   toBelongsTo: string | null;
   what: string;
-  /** Send it under this click's id. True when it went out. */
-  send: (resendId: string) => Promise<boolean>;
+  /**
+   * The record the once-a-minute limit counts against, when it is not the one
+   * the button is on. The account email is about a login, not a waiver.
+   */
+  limitId?: string;
+  /**
+   * Send it under this click's id. True when it went out, false when it did
+   * not (worth a retry), or a refusal when the record changed between the
+   * check and the send and this email is no longer the right one.
+   */
+  send: (resendId: string) => Promise<boolean | Refused>;
 };
 
 function refuse(reason: ResendRefusal, message: string): Refused {
@@ -83,19 +93,18 @@ function noAddress(recipient: DeliveryRecipient): Refused {
   );
 }
 
-async function planMembership(
-  admin: MembershipClient,
-  kind: "membership_invoice" | "membership_receipt",
-  id: string,
-): Promise<Planned | Refused> {
-  const { data: row, error } = await admin
-    .from("memberships")
-    .select("id, user_id, plan_id, price_cents, paid_at, status, payment_reference")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!row || !row.user_id)
-    return refuse("not_found", "That membership is no longer there. Refresh the page.");
+type MembershipKind = "membership_invoice" | "membership_receipt";
+
+/** Why this membership cannot have this email now, or null when it can. */
+function membershipRefusal(
+  kind: MembershipKind,
+  row: {
+    price_cents: number;
+    paid_at: string | null;
+    status: string;
+    payment_reference: string | null;
+  },
+): Refused | null {
   if (row.price_cents === 0)
     return refuse("free", "This membership is free, so there is no invoice or receipt to send.");
   if (kind === "membership_invoice" && row.paid_at)
@@ -109,6 +118,33 @@ async function planMembership(
       "unpaid",
       "No payment has been recorded yet, so there is no receipt. Resend the invoice instead.",
     );
+  return null;
+}
+
+async function readMembership(admin: MembershipClient, id: string) {
+  const { data: row, error } = await admin
+    .from("memberships")
+    .select("id, user_id, plan_id, price_cents, paid_at, status, payment_reference")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return row;
+}
+
+const MEMBERSHIP_GONE = refuse(
+  "not_found",
+  "That membership is no longer there. Refresh the page.",
+);
+
+async function planMembership(
+  admin: MembershipClient,
+  kind: MembershipKind,
+  id: string,
+): Promise<Planned | Refused> {
+  const row = await readMembership(admin, id);
+  if (!row || !row.user_id) return MEMBERSHIP_GONE;
+  const refused = membershipRefusal(kind, row);
+  if (refused) return refused;
 
   const [recipient, { data: plan }] = await Promise.all([
     deliveryRecipientFor(admin, row.user_id),
@@ -124,19 +160,51 @@ async function planMembership(
     toBelongsTo: belongsTo(recipient),
     what:
       kind === "membership_invoice"
-        ? `The invoice with reference ${row.payment_reference}, for the amount owed today (anything billed on the same reference included) and with the club's current bank details.`
+        ? `The invoice for ${planName}, reference ${row.payment_reference}, for the amount owed today (with any insurance billed alongside it) and the club's current bank details.`
         : `The receipt for ${planName}, ${formatCents(row.price_cents)}.`,
-    // Whatever went out counts as sent. If the invoice was paid between the
-    // preview and the press, the record now asks for the receipt and that is
-    // what goes; reporting "not sent" over an email that went would invite a
-    // retry into a refusal.
-    send: async (resendId) => (await emailMembershipRecord(admin, row.id, { resendId })).sent,
+    // The email the manager asked for, or nothing. The row is checked again at
+    // the send (and once more inside the composer, `only`), because a bank
+    // import or another manager can change it in between: following the row
+    // instead delivered a receipt for "Resend invoice", or a "pay this" for a
+    // membership cancelled a moment ago.
+    send: async (resendId) => {
+      const fresh = await readMembership(admin, row.id);
+      if (!fresh) return MEMBERSHIP_GONE;
+      const nowRefused = membershipRefusal(kind, fresh);
+      if (nowRefused) return nowRefused;
+      const outcome = await emailMembershipRecord(admin, row.id, {
+        resendId,
+        only: kind === "membership_invoice" ? "invoice" : "receipt",
+      });
+      if (outcome.sent) return true;
+      if (outcome.reason === "moved_on")
+        return refuse("not_found", "This membership changed while sending. Refresh the page.");
+      return false;
+    },
   };
+}
+
+type ItemInvoiceKind = "item_invoice" | "item_invoice_receipt";
+
+function itemInvoiceRefusal(
+  kind: ItemInvoiceKind,
+  invoice: { paid_at: string | null; cancelled_at: string | null },
+): Refused | null {
+  if (kind === "item_invoice" && invoice.paid_at)
+    return refuse("paid", "This invoice has been paid. Resend the receipt instead.");
+  if (kind === "item_invoice" && invoice.cancelled_at)
+    return refuse("cancelled", "This invoice was cancelled, so nothing is owed on it.");
+  if (kind === "item_invoice_receipt" && !invoice.paid_at)
+    return refuse(
+      "unpaid",
+      "No payment has been recorded yet, so there is no receipt. Resend the invoice instead.",
+    );
+  return null;
 }
 
 async function planItemInvoice(
   admin: MembershipClient,
-  kind: "item_invoice" | "item_invoice_receipt",
+  kind: ItemInvoiceKind,
   id: string,
 ): Promise<Planned | Refused> {
   const { data: invoice, error } = await admin
@@ -148,15 +216,8 @@ async function planItemInvoice(
   if (!invoice || !invoice.user_id)
     return refuse("not_found", "That invoice is no longer there. Refresh the page.");
   const reference = invoiceReference(invoice);
-  if (kind === "item_invoice" && invoice.paid_at)
-    return refuse("paid", "This invoice has been paid. Resend the receipt instead.");
-  if (kind === "item_invoice" && invoice.cancelled_at)
-    return refuse("cancelled", "This invoice was cancelled, so nothing is owed on it.");
-  if (kind === "item_invoice_receipt" && !invoice.paid_at)
-    return refuse(
-      "unpaid",
-      "No payment has been recorded yet, so there is no receipt. Resend the invoice instead.",
-    );
+  const refused = itemInvoiceRefusal(kind, invoice);
+  if (refused) return refused;
 
   const recipient = await deliveryRecipientFor(admin, invoice.user_id);
   if (!recipient.email) return noAddress(recipient);
@@ -170,7 +231,20 @@ async function planItemInvoice(
       kind === "item_invoice"
         ? `Invoice ${reference} for ${formatCents(invoice.total_cents)}, with the club's current bank details.`
         : `The receipt for invoice ${reference}, ${formatCents(invoice.total_cents)}.`,
-    send: async (resendId) => (await emailItemInvoiceRecord(admin, invoice, { resendId })).sent,
+    // Read again at the send and built from that row, for the same reason as a
+    // membership: the email asked for, or nothing.
+    send: async (resendId) => {
+      const { data: fresh, error: freshError } = await admin
+        .from("item_invoices")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (freshError) throw new Error(freshError.message);
+      if (!fresh) return refuse("not_found", "That invoice is no longer there. Refresh the page.");
+      const nowRefused = itemInvoiceRefusal(kind, fresh);
+      if (nowRefused) return nowRefused;
+      return (await emailItemInvoiceRecord(admin, fresh, { resendId })).sent;
+    },
   };
 }
 
@@ -273,10 +347,15 @@ async function planAccountActivated(
       "not_approved",
       "This waiver has not been approved, so there is no open account to tell them about.",
     );
-  // Only the person's live waiver, the same "active" the waivers screen shows.
-  // An older approved one, or a later re-sign approved while the account was
-  // already open, never sent this email, so "your account is active" from it
-  // would read as news.
+  // The email is about a LOGIN, not a waiver: "your account is open, sign in
+  // with this address". Whichever approval opened it, that is a statement of
+  // today's fact, true for as long as the login is open (checked below). So it
+  // is offered in one place per person, their live waiver (the same "active"
+  // the waivers screen shows), where a manager looks for them, and the
+  // once-a-minute limit counts per login (`limitId`), so pressing it on two
+  // waivers cannot send it twice. No waiver can say whether IT sent the
+  // original: approving a re-sign while the account was already open sends
+  // nothing, so "the waiver that sent it" is not something the records hold.
   const { data: approvedRows, error: approvedErr } = await admin
     .from("waivers")
     .select("id, user_id, approval_status, approved_at, signed_at")
@@ -305,6 +384,7 @@ async function planAccountActivated(
     to: contact.email,
     toBelongsTo: contact.forDependant ? belongsTo(recipient) : null,
     what: "The “your account is active” email, with the address they sign in with.",
+    limitId: contact.userId,
     send: async (resendId) =>
       (await emailAccountActivated(admin, waiver, contact, { resendId })).sent,
   };
@@ -404,7 +484,11 @@ export async function claimResendSlot(
   recordId: string,
   resendId: string,
   now: Date = new Date(),
-): Promise<{ claimed: true } | { claimed: false; waitSeconds: number }> {
+): Promise<
+  | { claimed: true }
+  | { claimed: false; waitSeconds: number }
+  | { claimed: false; alreadySent: true }
+> {
   const key = resendMarkerKey(kind, recordId);
   const value = formatResendMarker({ at: now.toISOString(), resendId });
 
@@ -421,8 +505,13 @@ export async function claimResendSlot(
     .maybeSingle();
   if (readError) throw new Error(readError.message);
   const marker = parseResendMarker(existing?.value);
-  // A retry of the click that holds the slot: let it through untouched.
-  if (marker?.resendId === resendId) return { claimed: true };
+  // The click that holds the slot: a retry, or the same id reused after its
+  // email went (see `sameClickVerdict`).
+  if (marker?.resendId === resendId) {
+    return sameClickVerdict(marker, now) === "retry"
+      ? { claimed: true }
+      : { claimed: false, alreadySent: true };
+  }
 
   const { data: swapped, error: swapError } = await admin
     .from("club_settings")
@@ -436,6 +525,32 @@ export async function claimResendSlot(
     claimed: false,
     waitSeconds: Math.max(1, resendWaitSeconds(marker, resendId, now) || RESEND_COOLDOWN_SECONDS),
   };
+}
+
+/**
+ * Mark the slot's click as sent, so the same id reused later is refused rather
+ * than dropped by the provider as a duplicate. Only overwrites this click's own
+ * marker, never a newer claim. Best-effort: losing it costs only that refusal.
+ */
+async function markResendSent(
+  admin: MembershipClient,
+  kind: ResendKind,
+  recordId: string,
+  resendId: string,
+): Promise<void> {
+  const key = resendMarkerKey(kind, recordId);
+  try {
+    const { data } = await admin.from("club_settings").select("value").eq("key", key).maybeSingle();
+    const marker = parseResendMarker(data?.value);
+    if (!marker || marker.resendId !== resendId || marker.sent) return;
+    await admin
+      .from("club_settings")
+      .update({ value: formatResendMarker({ ...marker, sent: true }) })
+      .eq("key", key)
+      .eq("value", data!.value);
+  } catch (e) {
+    console.error(`[email-resend] could not mark ${key} as sent:`, e);
+  }
 }
 
 /** Thrown when the email was composed but did not go out: worth a retry. */
@@ -463,7 +578,16 @@ export async function resendEmail(
   const plan = await planResend(admin, input.kind, input.record_id);
   if (!plan.available) return { sent: false, reason: plan.reason, message: plan.message };
 
-  const slot = await claimResendSlot(admin, input.kind, input.record_id, input.resendId);
+  const limitId = plan.limitId ?? input.record_id;
+  const slot = await claimResendSlot(admin, input.kind, limitId, input.resendId);
+  if (!slot.claimed && "alreadySent" in slot) {
+    return {
+      sent: false,
+      reason: "already_sent",
+      message:
+        "That press already sent this email. To send it again, press Resend again (an agent: use a new client_submission_id).",
+    };
+  }
   if (!slot.claimed) {
     return {
       sent: false,
@@ -473,10 +597,11 @@ export async function resendEmail(
     };
   }
 
-  const sent = await plan.send(input.resendId).catch((e) => {
+  const outcome = await plan.send(input.resendId).catch((e) => {
     console.error(`[email-resend] ${input.kind} ${input.record_id} failed:`, e);
-    return false;
+    return false as const;
   });
+  const sent = outcome === true;
   // The record of it, in the server log. No address and no token: the kind,
   // the record and the manager are enough to answer "did anyone resend this?".
   console.info(
@@ -493,7 +618,13 @@ export async function resendEmail(
   // agent's retry with the same id do. Giving it back would let a slow first
   // attempt that fails AFTER its retry succeeded free the slot for a second,
   // separate press inside the minute.
+  // Changed between the check and the send: nothing went out, and this email
+  // is no longer the right one, so it is a refusal to show, not a failure to
+  // retry.
+  if (typeof outcome === "object")
+    return { sent: false, reason: outcome.reason, message: outcome.message };
   if (!sent) throw new ResendNotSentError();
+  await markResendSent(admin, input.kind, limitId, input.resendId);
   return { sent: true, to: plan.to, toBelongsTo: plan.toBelongsTo };
 }
 

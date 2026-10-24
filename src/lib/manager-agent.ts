@@ -160,8 +160,8 @@ export const AGENT_MANIFEST: {
       breaking: false,
       notes: [
         'New action resend_email: {"kind":"...","record_id":"<uuid>"} sends one email again to the person it went to (the guardian, for a child), rebuilt from today\'s records: an invoice carries the amount owed now and the club\'s current bank details, a waiver confirmation a fresh PDF link. kind is one of membership_invoice, membership_receipt, item_invoice, item_invoice_receipt (record_id: the invoice), waiver_confirmation, account_activated (record_id: the waiver), email_verification (record_id: the person).',
-        "Each email for each record can be resent once a minute: a second call inside that is 429 rate_limited with a Retry-After. Pass client_submission_id (a UUID) and reuse it to retry one resend safely after a lost answer or a 503 email_not_sent; a new id is a new send.",
-        "Refusals name what is wrong, as the error code: 404 not_found; 409 paid, unpaid, cancelled, not_approved, locked or already_verified when the record has moved on (resend the receipt rather than the invoice, and so on); 422 paper, no_address, dependant or free when there is nothing that can be sent.",
+        "Each email for each record can be resent once a minute: a second call inside that is 429 rate_limited with a Retry-After. Pass client_submission_id (a UUID) and reuse it to retry one resend safely after a lost answer or a 503 email_not_sent; a new id is a new send. Reusing an id whose email already went, more than a minute later, is 409 already_sent rather than a second email.",
+        "Refusals name what is wrong, as the error code: 404 not_found; 409 paid, unpaid, cancelled, not_approved, locked or already_verified when the record has moved on, checked again at the send (resend the receipt rather than the invoice, and so on); 409 already_sent for a reused client_submission_id; 422 paper, no_address, dependant or free when there is nothing that can be sent.",
       ],
     },
     {
@@ -1114,7 +1114,7 @@ export const AGENT_MANIFEST: {
       name: "resend_email",
       method: "POST",
       summary:
-        "Send one email again to the person it went to (the guardian, for a child), rebuilt from today's records rather than replayed: an invoice carries the amount owed now and the club's current bank details, a waiver confirmation a fresh PDF link, a verification email a fresh link. Managers are not copied. Once a minute per email per record (429 rate_limited, with Retry-After). 404 not_found; 409 paid | unpaid | cancelled | not_approved | locked | already_verified when the record has moved on; 422 paper | no_address | dependant | free when nothing can be sent; 503 email_not_sent when it did not go out (retry with the same client_submission_id). Returns to and to_belongs_to: print the two together.",
+        "Send one email again to the person it went to (the guardian, for a child), rebuilt from today's records rather than replayed: an invoice carries the amount owed now and the club's current bank details, a waiver confirmation a fresh PDF link, a verification email a fresh link. Managers are not copied. Once a minute per email per record (429 rate_limited, with Retry-After). 404 not_found; 409 paid | unpaid | cancelled | not_approved | locked | already_verified when the record has moved on (checked again at the send); 409 already_sent when this client_submission_id already sent it; 422 paper | no_address | dependant | free when nothing can be sent; 503 email_not_sent when it did not go out (retry with the same client_submission_id). Returns to and to_belongs_to: print the two together.",
       params: [
         {
           name: "kind",

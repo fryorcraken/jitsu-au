@@ -22,7 +22,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Loading } from "@/components/site/Loading";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
-import { RESEND_LABELS, type ResendKind, type ResendPreview } from "@/lib/email-resend";
+import {
+  RESEND_LABELS,
+  type ResendKind,
+  type ResendPreview,
+  type ResendRefusal,
+} from "@/lib/email-resend";
 import { getResendPreview, resendClubEmail, type ResendResult } from "@/lib/email-resend.functions";
 import { describeLoadError } from "@/lib/load-error";
 
@@ -31,6 +36,20 @@ import { describeLoadError } from "@/lib/load-error";
  * under the same idempotency key and the provider drops a duplicate.
  */
 const RESEND_SUBMIT = { attempts: 2, timeoutMs: 20_000, slowAfterMs: 8_000 } as const;
+
+/**
+ * Refusals that mean the page behind the button is out of date: the record
+ * changed since it loaded (paid, cancelled, confirmed, gone). Only these call
+ * `onStale`; a send that went, or a refusal like "wait a minute", says nothing
+ * about the page.
+ */
+const STALE_REFUSALS: ReadonlySet<ResendRefusal> = new Set([
+  "not_found",
+  "paid",
+  "unpaid",
+  "cancelled",
+  "already_verified",
+]);
 
 type PreviewState =
   | { status: "idle" }
@@ -42,17 +61,17 @@ export function ResendEmailButton({
   kind,
   recordId,
   label = RESEND_LABELS[kind],
-  onSettled,
+  onStale,
 }: {
   kind: ResendKind;
   recordId: string;
   label?: string;
   /**
-   * Called once the server has answered, sent or refused. A refusal can mean
-   * the page is stale (an address confirmed, an invoice paid since it loaded),
-   * so a screen that shows that state passes its reload here.
+   * Called when the server's answer shows the page is out of date (an address
+   * confirmed, an invoice paid since it loaded), from the preview or from the
+   * send. A screen that shows that state passes its reload here.
    */
-  onSettled?: () => void;
+  onStale?: () => void;
 }) {
   const fetchPreview = useServerFn(getResendPreview);
   const resend = useServerFn(resendClubEmail);
@@ -66,6 +85,7 @@ export function ResendEmailButton({
     try {
       const p = await fetchPreview({ data: { kind, record_id: recordId } });
       setPreview({ status: "ready", preview: p });
+      if (!p.available && STALE_REFUSALS.has(p.reason)) onStale?.();
     } catch (e) {
       setPreview({
         status: "failed",
@@ -80,6 +100,10 @@ export function ResendEmailButton({
     // corrected, since the last look changes what this would send.
     if (next) {
       setResult(null);
+      // A failure from the last time it was open is about a send the manager
+      // walked away from. Left on screen, its Try again would retry that old
+      // press against whatever the preview now says.
+      send.reset();
       void loadPreview();
     }
   }
@@ -95,7 +119,7 @@ export function ResendEmailButton({
     });
     if (outcome.ok) {
       setResult(outcome.value);
-      onSettled?.();
+      if (!outcome.value.sent && STALE_REFUSALS.has(outcome.value.reason)) onStale?.();
       // The next press is a new send, so it needs a new click id. A failure
       // keeps this one, so "Try again" retries the SAME send.
       send.reset();

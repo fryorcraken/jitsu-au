@@ -64,23 +64,49 @@ export function resendMarkerKey(kind: ResendKind, recordId: string): string {
   return `email_resend:${kind}:${recordId}`;
 }
 
-/** A stored marker: when the slot was claimed, and by which click. */
-export type ResendMarker = { at: string; resendId: string };
+/**
+ * A stored marker: when the slot was claimed, by which click, and whether that
+ * click's email has gone out. `sent` is what tells a retry of a failed press
+ * (send it) from a click id reused after its email already went (refuse: the
+ * provider would drop it as a duplicate of the same key, and "sent" would be
+ * a lie). See `sameClickVerdict`.
+ */
+export type ResendMarker = { at: string; resendId: string; sent?: boolean };
 
 /**
- * `<ISO instant>|<click id>`. The instant comes first, always in the same UTC
- * `toISOString` shape, so the stored strings sort by time and the claim can be
- * a single compare-and-swap ("only if older than a minute ago") in the database.
+ * `<ISO instant>|<click id>`, plus `|sent` once that click's email has gone.
+ * The instant comes first, always in the same UTC `toISOString` shape, so the
+ * stored strings sort by time and the claim can be a single compare-and-swap
+ * ("only if older than a minute ago") in the database.
  */
 export function formatResendMarker(marker: ResendMarker): string {
-  return `${marker.at}|${marker.resendId}`;
+  return `${marker.at}|${marker.resendId}${marker.sent ? "|sent" : ""}`;
 }
 
 export function parseResendMarker(value: string | null | undefined): ResendMarker | null {
   if (!value) return null;
-  const [at, resendId] = value.split("|");
+  const [at, resendId, flag] = value.split("|");
   if (!at || !resendId || Number.isNaN(Date.parse(at))) return null;
-  return { at, resendId };
+  return flag === "sent" ? { at, resendId, sent: true } : { at, resendId };
+}
+
+/**
+ * What to do with a press whose click id already holds the slot.
+ *
+ * - Its email has not gone out: a retry of a failed or unfinished send. Let it
+ *   through, however long ago, so "Try again" never meets a refusal.
+ * - It has gone out, within the minute: a retry racing its own success (the
+ *   first attempt timed out on the client but landed). Let it through: the
+ *   provider drops the duplicate, and "sent" is true.
+ * - It has gone out, longer ago: the same id reused for what is meant as a new
+ *   send. It would go out under the same key and be dropped without a word, so
+ *   refuse, and say to send it again as a new press.
+ */
+export function sameClickVerdict(marker: ResendMarker, now: Date): "retry" | "already_sent" {
+  if (!marker.sent) return "retry";
+  return now.getTime() - Date.parse(marker.at) < RESEND_COOLDOWN_SECONDS * 1000
+    ? "retry"
+    : "already_sent";
 }
 
 /** The instant before which a marker no longer blocks a resend. */
@@ -118,7 +144,8 @@ export type ResendRefusal =
   | "not_approved"
   | "locked"
   | "already_verified"
-  | "rate_limited";
+  | "rate_limited"
+  | "already_sent";
 
 /** What the screen shows a manager under the button, before anything is sent. */
 export type ResendPreview =

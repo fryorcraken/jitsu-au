@@ -225,7 +225,9 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   today's records the same way and refused for the same reasons. `kind` and
   what `record_id` names are in the manifest. Refusals are the error code
   itself: `404 not_found`; `409 paid | unpaid | cancelled | not_approved |
-locked | already_verified` (the record has moved on); `422 paper | no_address
+locked | already_verified` (the record has moved on, checked again at the send);
+  `409 already_sent` (that `client_submission_id` already sent this email more
+  than a minute ago; mint a new one to send it again); `422 paper | no_address
 | dependant | free` (nothing can be sent); `429 rate_limited` with a
   `Retry-After` (once a minute per email per record); `503 email_not_sent`
   (retry with the same `client_submission_id`). Without a

@@ -136,8 +136,23 @@ How it behaves, and why:
   click (`useResilientSubmit`'s `client_submission_id`). Under the original key
   the provider would silently drop it as a duplicate; per click, an automatic
   retry of one press still cannot deliver two copies.
-- **Once a minute per email per record.** A second press inside the minute is
-  refused and told how long to wait; a retry of the same press is let through.
+- **The email the button names, or nothing.** The record is checked again at
+  the send: if an invoice was paid or cancelled between the panel opening and
+  Send (a bank import, another manager), "Resend invoice" sends nothing and
+  says why, rather than following the row into a receipt or a "pay this" for
+  something cancelled.
+- **A membership invoice folds in only its bundled insurance.** The same
+  rule as the original enrolment email: this person's active, unpaid,
+  charged insurance on the same reference. An undated plan's reference is per
+  person, so it also sits on their free trial and any older plan; those are
+  never added in.
+- **Once a minute per email per record** (per login, for the account email).
+  A second press inside the minute is refused and told how long to wait; a
+  retry of the same press is let through, and "Try again" after a failure is
+  let through however long ago. The one exception is a press whose email
+  already went more than a minute ago: the same click id again would go out
+  under the same key and be dropped by the provider while reporting "sent",
+  so it is refused (`already_sent`) with "press Resend again".
   The marker lives in `club_settings` under `email_resend:<kind>:<record>` (no
   migration), claimed by compare-and-swap so two presses landing together
   cannot both win. It is not given back when a send fails: "Try again" retries
@@ -148,6 +163,12 @@ How it behaves, and why:
   (resend the receipt instead), a receipt with no payment, a free membership,
   an account email for a waiver not approved or a login still locked, a
   verification for an address already confirmed or for a dependant.
+- **The account email is about the login.** It says "your account is open,
+  sign in with this address", which is true whichever approval opened it, for
+  as long as the login is open. So it is offered once per person, on their
+  current approved waiver; no record says which waiver's approval sent the
+  original, because approving a re-sign while the account is open sends
+  nothing.
 - **Logged.** `[email-resend] audit` with the kind, record, manager and whether
   it went. No address and no token in the log.
 

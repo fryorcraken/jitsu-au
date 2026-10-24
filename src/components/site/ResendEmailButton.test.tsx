@@ -109,4 +109,47 @@ describe("ResendEmailButton", () => {
       await screen.findByRole("button", { name: /try again/i }, { timeout: 5000 }),
     ).toBeVisible();
   });
+
+  // "Already confirmed" now comes back from the preview, before any send, so
+  // the reload has to hang off the preview's answer too, or the card behind it
+  // keeps saying "unverified" with a button that can never work.
+  it("tells the page it is stale when the preview says the address is already confirmed", async () => {
+    getResendPreview.mockResolvedValue({
+      available: false,
+      reason: "already_verified",
+      message: "That address is already confirmed. There is nothing to send.",
+    });
+    const onStale = vi.fn();
+    render(<ResendEmailButton kind="email_verification" recordId={RECORD} onStale={onStale} />);
+    await userEvent.click(screen.getByRole("button", { name: /resend verification/i }));
+    await screen.findByText(/already confirmed/i);
+    expect(onStale).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reload the page after a send that went", async () => {
+    const onStale = vi.fn();
+    render(<ResendEmailButton kind="item_invoice" recordId={RECORD} onStale={onStale} />);
+    await userEvent.click(screen.getByRole("button", { name: /resend invoice/i }));
+    await userEvent.click(await screen.findByRole("button", { name: "Send" }));
+    await screen.findByText("Sent to ada@example.com.");
+    expect(onStale).not.toHaveBeenCalled();
+  });
+
+  // A failure from the last time the panel was open is about a press the
+  // manager walked away from; its Try again would retry that old press.
+  it("clears an old failure when the panel is opened again", async () => {
+    resendClubEmail.mockRejectedValue(
+      new Error("We couldn't send that email just now. Try again shortly."),
+    );
+    render(<ResendEmailButton kind="item_invoice" recordId={RECORD} />);
+    const trigger = screen.getByRole("button", { name: /resend invoice/i });
+    await userEvent.click(trigger);
+    await userEvent.click(await screen.findByRole("button", { name: "Send" }));
+    await screen.findByRole("button", { name: /try again/i }, { timeout: 5000 });
+
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(trigger);
+    await screen.findByRole("button", { name: "Send" });
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
 });
