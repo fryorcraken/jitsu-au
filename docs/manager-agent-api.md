@@ -319,6 +319,42 @@ waiver_template_not_published` with a `Retry-After`, and it carries
   the insert rather than only inside `promoteWaiverTemplate`, so a refused save
   no longer leaves an unwanted draft version behind in the editor's list.
 
+- `list_blog_posts` / `get_blog_post` / `save_blog_post` / `delete_blog_post` /
+  `upload_blog_image` (`"22"`) — the blog, the agent's equivalent of
+  `/manager/blog`. Every write goes through the plain functions in
+  `src/lib/blog.functions.ts` that the editor's server functions also call
+  (`createBlogPostRow`, `updateBlogPostRow`, `deleteBlogPostRow`,
+  `storeBlogImage`), so an agent-published post and a manager's own are the same
+  row written the same way: slug and excerpt resolution, the publish-date rule
+  and the announcement are the editor's. Product rules: `docs/blog.md`. What is
+  the agent's alone, and why:
+  - **An omitted field keeps its stored value** on a change
+    (`mergeAgentBlogPostEdit` in `src/lib/manager-agent.ts`). The editor always
+    sends the whole form, so the shared writer reads a missing `status` as draft
+    and a missing cover as none; passed straight through, an agent fixing a typo
+    would unpublish the post. Publishing a draft is `{id, status: "published"}`.
+  - **Publishing is announced**, exactly as on the screen: the first time a post
+    goes live, members who opted in hear about it in their daily summary
+    (`docs/notifications.md`). The result's `announced` says whether this save
+    did it, so the agent can tell the manager.
+  - **A blank `slug` is refused** rather than re-derived. On the screen a blank
+    slug makes a new one from the title, which on a live post moves it to a new
+    address and breaks every link already shared.
+  - **Two addresses per post.** `url` is the public one and is null for a draft
+    (the public route 404s on one); `edit_url` is the manager's screen.
+  - **`upload_blog_image` takes base64 `data` or a public https `url`** the
+    server downloads. The URL route exists because an assistant over MCP cannot
+    type out a photo's bytes. Its type is read off the bytes, never declared. The
+    download is https only, to a named public host, with every redirect hop
+    checked before it is requested, a 15-second limit and the 8 MB cap enforced
+    while reading. All of that is `src/lib/blog-image.ts`. Refusals: `422
+image_rejected` (will never work) and `502 image_fetch_failed` (the address
+    could not be read just now). Storing an image changes no post; the result's
+    `path` goes in `cover_image_path` and its `markdown` in `body_md`.
+  - **`delete_blog_post` has no confirm flag**, like `delete_invoice`: it is the
+    caller's job to ask the manager first. It removes the post's comments with
+    it (`ON DELETE CASCADE`), and writes an audit line to the server log.
+
 ### `file_waiver`: the parts that have bitten us
 
 - **The two surfaces present that one check differently on purpose, and
@@ -391,7 +427,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"21"`.
+test so the bump is a deliberate edit, and the current value is `"22"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

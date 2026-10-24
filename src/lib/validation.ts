@@ -2823,6 +2823,11 @@ export const managerAgentActions = [
   "cancel_item_invoice",
   "delete_item_invoice",
   "get_club_settings",
+  "list_blog_posts",
+  "get_blog_post",
+  "save_blog_post",
+  "delete_blog_post",
+  "upload_blog_image",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -3735,6 +3740,109 @@ export const uploadBlogImageSchema = z
     path: ["data"],
   });
 export type UploadBlogImageInput = z.infer<typeof uploadBlogImageSchema>;
+
+// ---- Blog, through the manager agent API (docs/manager-agent-api.md) ----
+
+/** Agent: read one post, any status, by its id or by the slug in its address. */
+export const agentGetBlogPostSchema = z
+  .object({ id: z.string().uuid().optional(), slug: z.string().trim().min(1).max(200).optional() })
+  .strict()
+  .refine((d) => Boolean(d.id) !== Boolean(d.slug), {
+    message: "Send the post's id or its slug, not both.",
+    path: ["id"],
+  });
+export type AgentGetBlogPostInput = z.infer<typeof agentGetBlogPostSchema>;
+
+/**
+ * Agent: create a post (no `id`) or change one (`id`). Every field the post
+ * form has, with one difference that matters: on a change, an **omitted field
+ * keeps its stored value**. The form always sends every field, so it never
+ * needed that; an agent asked to fix one typo or to publish a draft would
+ * otherwise have to resend the whole post, and `status` defaulting to draft
+ * would quietly take a live post off the blog.
+ *
+ * - A new post needs `title` and `body_md`, and is a draft unless `status`
+ *   says otherwise.
+ * - `slug` cannot be blanked on a change: the composer re-derives a blank one,
+ *   which would move a live post to a new address and break every link to it.
+ * - `excerpt: ""` and `cover_image_path: ""` clear those, as on the form.
+ * - `cover_image_path` is a storage path from `upload_blog_image`, not an
+ *   address. An address stored there would render as a broken image.
+ */
+export const agentSaveBlogPostSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    title: blogPostSchema.shape.title.optional(),
+    slug: blogSlug.optional(),
+    excerpt: blogPostSchema.shape.excerpt,
+    body_md: blogPostSchema.shape.body_md.optional(),
+    cover_image_path: blogPostSchema.shape.cover_image_path.refine(
+      (v) => !v || !/^[a-z]+:\/\//i.test(v),
+      "Pass the `path` that upload_blog_image returned, not the image's web address.",
+    ),
+    status: z.enum(blogPostStatuses).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.id) {
+      if (Object.entries(value).every(([k, v]) => k === "id" || v === undefined)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["id"],
+          message: "Nothing to change: send at least one field besides id.",
+        });
+      }
+      return;
+    }
+    for (const field of ["title", "body_md"] as const) {
+      if (!value[field]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: "A new post needs a title and a body_md.",
+        });
+      }
+    }
+  });
+export type AgentSaveBlogPostInput = z.infer<typeof agentSaveBlogPostSchema>;
+
+/** Agent: delete a post outright. */
+export const agentDeleteBlogPostSchema = deleteBlogPostSchema.strict();
+
+/**
+ * Agent: put an image in the blog's bucket, from base64 `data` or from a
+ * public https `url` the server downloads (the practical route for an
+ * assistant, which cannot type out a photo's bytes). Exactly one of the two.
+ * There is no `type`: it is read from the bytes (`sniffBlogImageType`), since
+ * an agent relays files it did not make.
+ */
+export const agentUploadBlogImageSchema = z
+  .object({
+    post_id: z.string().uuid().optional(),
+    name: z.string().trim().min(1).max(255).optional(),
+    alt: z.string().trim().max(300).optional(),
+    /** Raw base64, no `data:` prefix. */
+    data: z.string().min(1).optional(),
+    url: z.string().trim().url().max(2000).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (Boolean(value.data) === Boolean(value.url)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["data"],
+        message: "Send the image as base64 `data` or as a `url` to download, not both.",
+      });
+    }
+    if (value.data && base64ByteLength(value.data) > MAX_BLOG_IMAGE_BYTES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["data"],
+        message: "That image is too large. Keep it under 8 MB.",
+      });
+    }
+  });
+export type AgentUploadBlogImageInput = z.infer<typeof agentUploadBlogImageSchema>;
 
 // ---- Blog comments ----
 //
