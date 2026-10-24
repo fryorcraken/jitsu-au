@@ -59,6 +59,14 @@ function serverSupabase() {
   });
 }
 
+/** A title with nothing in it a web address can use, and no slug given instead. */
+export class BlogSlugError extends Error {
+  constructor() {
+    super("Could not turn that title into a URL. Set a URL slug by hand.");
+    this.name = "BlogSlugError";
+  }
+}
+
 /**
  * Resolve the slug a post will be saved under: the manager's own, or one
  * derived from the title and today's date (`defaultBlogSlug`), made unique
@@ -76,7 +84,7 @@ export async function resolvePostSlug(
 ): Promise<string> {
   const base = (provided || "").trim() || defaultBlogSlug(title, now);
   if (!base) {
-    throw new Error("Could not turn that title into a URL. Set a URL slug by hand.");
+    throw new BlogSlugError();
   }
   let query = admin.from("blog_posts").select("slug").ilike("slug", `${base}%`);
   if (excludeId) query = query.neq("id", excludeId);

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentGetBlogPostSchema,
+  agentSaveBlogPostSchema,
+  agentUploadBlogImageSchema,
   CLUB_REPLY_TO_MAX,
   DEPENDANT_EMAIL_DOMAIN,
   clubReplyToSchema,
@@ -2945,4 +2948,71 @@ describe("parseClubReplyTo", () => {
       expect(parseClubReplyTo(raw)).toBeNull();
     },
   );
+});
+
+describe("the blog through the manager agent API", () => {
+  const ID = "5b0f3c1e-9a8d-4c2b-8e7f-1a2b3c4d5e6f";
+
+  it("needs a title and a body to create a post", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ title: "Hi", body_md: "Body" }).success).toBe(true);
+    const r = agentSaveBlogPostSchema.safeParse({ title: "Hi" });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join("."))).toEqual(["body_md"]);
+  });
+
+  it("changes a post from any one field", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, status: "published" }).success).toBe(true);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, excerpt: "" }).success).toBe(true);
+  });
+
+  it("refuses a change that names nothing to change", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID }).success).toBe(false);
+  });
+
+  // The composer re-derives a blank slug, which would move a live post to a
+  // new address. On the API a slug is either given or left alone.
+  it("refuses a blank slug", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, slug: "" }).success).toBe(false);
+  });
+
+  it("refuses an image address where the storage path belongs", () => {
+    const r = agentSaveBlogPostSchema.safeParse({
+      id: ID,
+      cover_image_path: "https://cdn.example.com/blog-media/drafts/a.png",
+    });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].message).toMatch(/upload_blog_image/);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, cover_image_path: "" }).success).toBe(true);
+  });
+
+  // `.strict()`: a misspelt `stauts` must not be dropped, leaving the post a
+  // draft while the caller believes it published it.
+  it("refuses an unknown field rather than dropping it", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, stauts: "published" }).success).toBe(false);
+  });
+
+  it("reads a post by id or by slug, not both and not neither", () => {
+    expect(agentGetBlogPostSchema.safeParse({ id: ID }).success).toBe(true);
+    expect(agentGetBlogPostSchema.safeParse({ slug: "2026-10-20-x" }).success).toBe(true);
+    expect(agentGetBlogPostSchema.safeParse({ id: ID, slug: "x" }).success).toBe(false);
+    expect(agentGetBlogPostSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("takes an image as data or as a url, exactly one", () => {
+    expect(agentUploadBlogImageSchema.safeParse({ data: "iVBO" }).success).toBe(true);
+    expect(
+      agentUploadBlogImageSchema.safeParse({ url: "https://a.example.com/x.png" }).success,
+    ).toBe(true);
+    expect(agentUploadBlogImageSchema.safeParse({}).success).toBe(false);
+    expect(
+      agentUploadBlogImageSchema.safeParse({ data: "iVBO", url: "https://a.example.com/x.png" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("refuses an image over 8 MB before decoding it", () => {
+    const r = agentUploadBlogImageSchema.safeParse({ data: "A".repeat(12 * 1024 * 1024) });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].message).toMatch(/8 MB/);
+  });
 });

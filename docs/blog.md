@@ -152,6 +152,22 @@ same form undoes it in one click. Leaving with unsaved edits DOES ask, since
 nothing brings typed text back, and a browser close/refresh warning covers the
 same ground, the way the waiver template editor does.
 
+### A manager's assistant writes and publishes a post
+
+The same work can be done by an AI assistant acting for a manager, through the
+manager agent API or the club's MCP server: list and read posts (drafts
+included), create or edit one, publish it, delete it, and upload pictures for
+it, from the file itself or from a link to it. It is not a second editor: every
+save goes through the same functions the composer's does, so the slug, the
+excerpt, the publish date and the announcement follow every rule above.
+
+Two things differ from the screen, both so that a short instruction does what a
+manager means by it. A field the assistant leaves out keeps what is stored, so
+"publish the grading post" changes nothing but its status. And a post's slug can
+be changed but never blanked, because on the screen a blank one is rebuilt from
+the title, which would move a live post to a new address. Comment moderation is
+not part of it. The contract is `docs/manager-agent-api.md`.
+
 ### A manager moderates
 
 `/manager/blog-comments` lists every comment across every post (visible and
@@ -221,11 +237,6 @@ which is a real 404, not a "soft 404" page a crawler could index.
   URLs aren't yet enumerated there (they're still fully indexable via their
   own canonical + on-site links from `/blog`, just not pre-declared in the
   static sitemap file).
-- **Extending the manager-agent HTTP API** (`/api/manager/agent`) with
-  `create_blog_post` / `publish_blog_post` actions, so a manager's scripted
-  tooling or AI agent could author posts the same way it already edits
-  invoices and files waivers. Not built — every write today is reachable only
-  through the ordinary web-session server functions.
 - **A "top" comment sort** — comments are shown oldest-first only.
 - **Video file uploads** — videos are embed-by-link only (YouTube renders
   inline; other providers show as a plain link), to avoid storage/bandwidth

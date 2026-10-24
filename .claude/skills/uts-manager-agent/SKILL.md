@@ -16,8 +16,9 @@ description: >-
   version of it (or roll back to an earlier one), add or edit a membership
   window's start/end dates, or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
-  and review the feedback left on them. Requires the UTS_MANAGER_API_URL and
-  UTS_MANAGER_API_KEY environment variables.
+  and review the feedback left on them, or write, edit, publish or delete a
+  blog post at /blog/<slug> and upload its pictures. Requires the
+  UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
 ---
 
 # UTS Jitsu — manager agent
@@ -937,6 +938,98 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
 > conversation, not everything anybody wrote — do not describe its output to a
 > manager as "all the feedback".
 
+### The blog
+
+Posts at `/blog/<slug>`, written in Markdown. These are the same saves the
+manager's blog editor at `/manager/blog` makes. A post is a **draft** (only
+managers can see it) or **published** (anyone on the internet can).
+
+### `list_blog_posts` — every post, drafts included
+
+```bash
+scripts/agent.sh list_blog_posts '{}'
+```
+
+Each post has `url`, its public address, which is **null for a draft**: a draft
+has no public address, so never hand a draft's slug to anybody as a link. Give a
+manager `edit_url` instead, their own screen for the post.
+
+### `get_blog_post` — read one post in full
+
+By `id`, or by the `slug` in its address:
+
+```bash
+scripts/agent.sh get_blog_post '{"slug":"2026-10-20-grading-day"}'
+```
+
+### `save_blog_post` — write, edit or publish
+
+No `id` creates a post, which is a draft unless you say otherwise:
+
+```bash
+scripts/agent.sh save_blog_post '{
+  "title": "Grading day",
+  "body_md": "Grading is on Saturday 8 November.\n\n![The mats](https://...)\n"
+}'
+```
+
+With an `id`, **every field you leave out keeps what is stored**. Publishing a
+draft as it stands:
+
+```bash
+scripts/agent.sh save_blog_post '{"id":"<id>","status":"published"}'
+```
+
+A blank `slug` is made from today's date and the title, and a blank `excerpt`
+from the opening of the body; read both back from the result. An excerpt does
+not follow a rewritten body by itself: send `"excerpt": ""` with the new body to
+have it taken afresh.
+
+> [!IMPORTANT]
+>
+> - **Publishing is public and announced.** The post is on the public blog the
+>   moment it saves, and the first time a post goes live every member who opted
+>   in to announcements hears about it in their daily summary email. Taking it
+>   back to draft hides it again but cannot take the announcement back. The
+>   result's `announced` says whether this save announced it.
+> - **`body_md` REPLACES the whole body.** Always `get_blog_post` first and edit
+>   the text you get back.
+> - **Changing the slug of a live post moves it.** Every link already shared to
+>   the old address stops working. A slug another post has gets `-2` added, so
+>   read the `slug` the result returns.
+> - A line of its own reading `[[video:<url>]]` embeds a video: a YouTube link
+>   plays inline, anything else shows as a plain link.
+
+### `upload_blog_image` — a picture for a post
+
+PNG, JPEG, WebP or GIF, up to 8 MB. Send the file as base64 `data`, or a public
+https `url` the site downloads it from (the one to use over MCP). The format is
+read from the image itself.
+
+```bash
+scripts/agent.sh upload_blog_image "$(jq -n --arg d "$(base64 -w0 mats.jpg)" \
+  '{data:$d, name:"mats.jpg", alt:"The mats laid out for grading"}')"
+scripts/agent.sh upload_blog_image '{"url":"https://images.example.com/belt.png","alt":"A brown belt"}'
+```
+
+The result has `path` (give it to `save_blog_post` as `cover_image_path` for the
+picture at the top of the post) and `markdown` (paste it into `body_md` where the
+picture belongs). Uploading changes no post: the picture appears nowhere until a
+save puts it in one. `image_rejected` (422) means this image will never work;
+`image_fetch_failed` (502) means the address could not be read just now.
+
+Write `alt` for somebody who cannot see the picture: what is in it, not
+"image".
+
+### `delete_blog_post` — remove a post for good
+
+Deletes the post and every comment on it, with no undo. To take a post off the
+blog and keep it, save it with `"status":"draft"` instead.
+
+```bash
+scripts/agent.sh delete_blog_post '{"id":"<id>"}'
+```
+
 ## Guidance
 
 - Confirm the target invoice with the manager (member name + amount) before an
@@ -954,6 +1047,10 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   that saving publishes it to everyone who signs from that moment. It is the
   club's legal document, and rolling back (`publish_waiver_template`) restores
   old wording but cannot unsign anybody.
+- Before publishing a blog post, show the manager the title and the text and
+  say plainly that it goes public and is announced to members. Drafting is
+  safe; publishing is the step to confirm. The same goes for
+  `delete_blog_post`, which cannot be undone.
 - Before a `file_waiver` batch, confirm scope with the manager: how many
   records, whether any should be flagged for review rather than filed
   automatically, and that leaving everything pending (not approved) is what
@@ -974,7 +1071,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"14"`), and its
+- The manifest's `version` tells generations apart (currently `"22"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is
