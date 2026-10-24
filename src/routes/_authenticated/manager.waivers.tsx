@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Pill } from "@/components/site/StatusPill";
 import { UserLink } from "@/components/site/UserLink";
+import { ResendEmailButton } from "@/components/site/ResendEmailButton";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
@@ -324,6 +325,15 @@ function WaiversPage() {
                             </Button>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                          {/* A paper filing never had a confirmation to resend.
+                              The account email belongs to the waiver whose
+                              approval opened the account, so only the live one. */}
+                          {!r.is_paper && (
+                            <ResendEmailButton kind="waiver_confirmation" recordId={r.id} />
+                          )}
+                          {r.status === "active" && (
+                            <ResendEmailButton kind="account_activated" recordId={r.id} />
                           )}
                           {driveFolderReady && r.pdf_path ? (
                             up?.drive_web_view_link ? (

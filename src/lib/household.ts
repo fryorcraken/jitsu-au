@@ -212,7 +212,8 @@ export async function assertMayHaveDependants(admin: AdminClient, userId: string
  *
  * The one-person, answered form of `isDependant`, for the callers that hold an
  * id rather than a row. It exists as its own export because the answer gates a
- * SEND: `resendClubUserVerification` is the only path that could mint an
+ * SEND: a manager's "Resend verification" (`email_verification` in
+ * `email-resend.functions.ts`) is the only path that could mint an
  * `email_verification_tokens` row against a dependant, and what that produced
  * was a token bound to a reserved address in a subdomain the club routes no
  * mail for, redeemable by nobody, sitting in the table looking like somebody

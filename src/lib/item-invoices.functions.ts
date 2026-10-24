@@ -280,6 +280,66 @@ export async function readItemInvoice(
   return data;
 }
 
+/** What `emailItemInvoiceRecord` did. */
+export type ItemInvoiceEmailOutcome =
+  | { sent: true; email: "invoice" | "receipt"; to: string }
+  | { sent: false; reason: "not_found" | "no_address" | "not_sent" };
+
+/**
+ * Email an item invoice, or its receipt once paid, built from the row alone.
+ *
+ * The one place either email is composed from an `item_invoices` row, so the
+ * invoice a person gets when it is raised and the one a manager resends are the
+ * same email, and so are the two receipts. Each line keeps the name and price
+ * it was raised with; the bank details are read at send time, so a resent
+ * invoice shows the club's current account.
+ *
+ * Throws when a read fails; every caller decides what a failure means to it.
+ */
+export async function emailItemInvoiceRecord(
+  admin: MembershipClient,
+  invoice: ItemInvoiceRow,
+  /** A manager's resend: sent under a key of its own. */
+  opts: { resendId?: string } = {},
+): Promise<ItemInvoiceEmailOutcome> {
+  if (!invoice.user_id) return { sent: false, reason: "not_found" };
+  // A dependant has no mailbox: this greets the guardian and names the child.
+  const recipient = await deliveryRecipientFor(admin, invoice.user_id);
+  if (!recipient.email) return { sent: false, reason: "no_address" };
+  const lines = parseItemInvoiceLines(invoice.lines);
+  const reference = invoiceReference(invoice);
+  const { sendItemInvoiceEmail, sendItemInvoicePaidEmail } =
+    await import("./membership-email.server");
+  const result = invoice.paid_at
+    ? await sendItemInvoicePaidEmail({
+        invoiceId: invoice.id,
+        memberGreetingName: recipient.greetingName,
+        memberEmail: recipient.email,
+        forName: recipient.forName,
+        reference,
+        summary: itemInvoiceSummary(lines),
+        amount: formatCents(invoice.total_cents),
+        admin,
+        resendId: opts.resendId,
+      })
+    : await sendItemInvoiceEmail({
+        invoiceId: invoice.id,
+        memberGreetingName: recipient.greetingName,
+        memberEmail: recipient.email,
+        forName: recipient.forName,
+        lines: lines.map((line) => ({
+          description: describeItemInvoiceLine(line),
+          amount: formatCents(lineTotalCents(line)),
+        })),
+        total: formatCents(invoice.total_cents),
+        reference,
+        admin,
+        resendId: opts.resendId,
+      });
+  if (!result.sent) return { sent: false, reason: "not_sent" };
+  return { sent: true, email: invoice.paid_at ? "receipt" : "invoice", to: recipient.email };
+}
+
 /**
  * Raise an invoice for somebody and email it to them.
  *
@@ -387,24 +447,7 @@ export async function createItemInvoiceForUser(
 
   let emailed = false;
   try {
-    const recipient = await deliveryRecipientFor(admin, input.user_id);
-    if (recipient.email) {
-      const { sendItemInvoiceEmail } = await import("./membership-email.server");
-      const result = await sendItemInvoiceEmail({
-        invoiceId: row.id,
-        memberGreetingName: recipient.greetingName,
-        memberEmail: recipient.email,
-        forName: recipient.forName,
-        lines: lines.map((line) => ({
-          description: describeItemInvoiceLine(line),
-          amount: formatCents(lineTotalCents(line)),
-        })),
-        total: formatCents(total_cents),
-        reference,
-        admin,
-      });
-      emailed = result.sent;
-    }
+    emailed = (await emailItemInvoiceRecord(admin, row)).sent;
   } catch (e) {
     console.error(`[item-invoices] invoice ${row.id} was raised but its email failed:`, e);
   }
@@ -448,10 +491,11 @@ export async function recordItemInvoicePayment(
       "That invoice was cancelled, so there is nothing to pay on it. Raise a new one if it is still owed.",
     );
 
+  const paidAt = paidAtFor(input.paidOn);
   const { data: claimed, error } = await admin
     .from("item_invoices")
     .update({
-      paid_at: paidAtFor(input.paidOn),
+      paid_at: paidAt,
       payment_method: input.method,
       // Only when given: the bank match has none, and its write stays as it was.
       ...(input.reference ? { paid_reference: input.reference } : {}),
@@ -467,20 +511,9 @@ export async function recordItemInvoicePayment(
   // report a recorded payment as a failure and invite a second one.
   if (invoice.user_id) {
     try {
-      const recipient = await deliveryRecipientFor(admin, invoice.user_id);
-      if (recipient.email) {
-        const { sendItemInvoicePaidEmail } = await import("./membership-email.server");
-        await sendItemInvoicePaidEmail({
-          invoiceId: invoice.id,
-          memberGreetingName: recipient.greetingName,
-          memberEmail: recipient.email,
-          forName: recipient.forName,
-          reference: invoiceReference(invoice),
-          summary: itemInvoiceSummary(parseItemInvoiceLines(invoice.lines)),
-          amount: formatCents(invoice.total_cents),
-          admin,
-        });
-      }
+      // The receipt: `paid_at` is set on the row now, so stamp it on the copy
+      // rather than reading the row back.
+      await emailItemInvoiceRecord(admin, { ...invoice, paid_at: paidAt });
     } catch (e) {
       console.error(`[item-invoices] receipt for ${invoice.id} failed:`, e);
     }

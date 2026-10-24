@@ -1117,3 +1117,68 @@ describe("manager agent route: club settings", () => {
     expect(fake.upserts).toEqual([]);
   });
 });
+
+describe("manager agent route: resend_email", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("refuses an unknown kind before reading anything", async () => {
+    currentAdmin = {};
+    const res = await post({
+      action: "resend_email",
+      params: { kind: "password_reset", record_id: "7d4b6f0e-3a39-4a77-9d8b-2a1c1f0e5b11" },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_params");
+  });
+
+  it("answers a record that is gone with 404 not_found", async () => {
+    currentAdmin = {
+      from: (table: string) => {
+        if (table !== "item_invoices") throw new Error(`unexpected table ${table}`);
+        return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(ok(null)) }) }) };
+      },
+    };
+    const res = await post({
+      action: "resend_email",
+      params: { kind: "item_invoice", record_id: "7d4b6f0e-3a39-4a77-9d8b-2a1c1f0e5b11" },
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+  });
+
+  // A paid invoice has moved on: the caller has to change the request (resend
+  // the receipt), so it is a 409 naming why, never a 5xx to retry.
+  it("answers an invoice that has been paid with 409 paid", async () => {
+    currentAdmin = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: () =>
+              Promise.resolve(
+                ok({
+                  id: "7d4b6f0e-3a39-4a77-9d8b-2a1c1f0e5b11",
+                  user_id: "22222222-2222-4222-8222-222222222222",
+                  payment_reference: "INV0007",
+                  lines: [],
+                  total_cents: 8500,
+                  paid_at: "2026-10-01T00:00:00Z",
+                  cancelled_at: null,
+                }),
+              ),
+          }),
+        }),
+      }),
+    };
+    const res = await post({
+      action: "resend_email",
+      params: { kind: "item_invoice", record_id: "7d4b6f0e-3a39-4a77-9d8b-2a1c1f0e5b11" },
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("paid");
+  });
+});

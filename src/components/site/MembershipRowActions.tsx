@@ -1,4 +1,4 @@
-// Mark as paid / Reopen / Cancel / Delete for one membership, shared by the two
+// Mark as paid / Resend / Reopen / Cancel / Delete for one membership, shared by the two
 // manager screens that show them: the club-wide invoice list
 // (/manager/memberships) and one person's page (/manager/users/<id>).
 //
@@ -78,6 +78,7 @@ import {
   paymentReceivedProblem,
   type PaymentReceived,
 } from "@/lib/payment-received";
+import { ResendEmailButton } from "@/components/site/ResendEmailButton";
 
 /** The fields both screens' membership rows carry, and all the guard needs. */
 export type MembershipActionRow = {
@@ -240,6 +241,13 @@ export function MembershipRowActions({
           >
             <Check className="mr-1 h-3 w-3" /> Mark as paid
           </Button>
+        )}
+        {/* Resend is not a confirm: it says what goes where in its own panel,
+            and sending an invoice twice harms nobody. A free membership has
+            neither an invoice nor a receipt to resend. */}
+        {owesMoney && <ResendEmailButton kind="membership_invoice" recordId={membership.id} />}
+        {membership.paid_at && membership.price_cents > 0 && (
+          <ResendEmailButton kind="membership_receipt" recordId={membership.id} />
         )}
         {isClosed && (
           <Button

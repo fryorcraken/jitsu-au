@@ -216,6 +216,13 @@ export async function sendVerificationEmail(opts: {
   userId?: string | null;
   /** Where the link lands after confirming. Allowlisted downstream. */
   next?: string;
+  /**
+   * A manager's resend. Every send already mints a fresh token, and so a fresh
+   * key, which is right for a new click and wrong for an automatic retry of
+   * one: the retry would mint again and deliver a second link. So a resend is
+   * keyed on the click instead, and a retry of it is deduplicated.
+   */
+  resendIdempotencyKey?: string;
 }): Promise<{ sent: boolean }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
@@ -246,7 +253,7 @@ export async function sendVerificationEmail(opts: {
       text,
       // Distinct per send: a resend must not be swallowed as a duplicate of
       // the one the member says never arrived.
-      idempotencyKey: `verify-${await hashToken(token)}`,
+      idempotencyKey: opts.resendIdempotencyKey ?? `verify-${await hashToken(token)}`,
       replyTo: await clubReplyTo(opts.admin),
     });
     return { sent: true };

@@ -33,6 +33,7 @@ import {
   markItemInvoicePaidSchema,
   recordIdSchema,
   saveChargeItemSchema,
+  agentResendEmailSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -118,6 +119,8 @@ import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
 import { loadClubSettings } from "@/lib/club-settings.functions";
+import { ResendNotSentError, resendEmail } from "@/lib/email-resend.functions";
+import type { ResendRefusal } from "@/lib/email-resend";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -1401,6 +1404,68 @@ async function handleGetClubSettings() {
   }
 }
 
+// ---- action: resend_email ----
+//
+// Through `resendEmail`, the function the screens' Resend buttons post to, so
+// the same email is rebuilt the same way and refused for the same reasons.
+
+/** HTTP status for each refusal: gone, a state that has moved on, or not possible. */
+const RESEND_REFUSAL_STATUS: Record<ResendRefusal, number> = {
+  not_found: 404,
+  rate_limited: 429,
+  paid: 409,
+  unpaid: 409,
+  cancelled: 409,
+  not_approved: 409,
+  locked: 409,
+  already_verified: 409,
+  already_sent: 409,
+  paper: 422,
+  no_address: 422,
+  dependant: 422,
+  free: 422,
+};
+
+async function handleResendEmail(params: unknown, actingAs: string) {
+  const input = agentResendEmailSchema.parse(params);
+  let result;
+  try {
+    result = await resendEmail(
+      await adminClient(),
+      {
+        kind: input.kind,
+        record_id: input.record_id,
+        // No click id from the caller: every call is its own send, still held
+        // to once a minute per email per record.
+        resendId: input.client_submission_id ?? crypto.randomUUID(),
+      },
+      actingAs,
+    );
+  } catch (e) {
+    if (e instanceof ResendNotSentError) {
+      // Nothing went out. Retrying with the same client_submission_id is safe.
+      throw new AgentError(503, "email_not_sent", e.message, undefined, 30);
+    }
+    throw e;
+  }
+  if (!result.sent) {
+    throw new AgentError(
+      RESEND_REFUSAL_STATUS[result.reason],
+      result.reason,
+      result.message,
+      undefined,
+      result.retryAfterSeconds,
+    );
+  }
+  return {
+    sent: true as const,
+    kind: input.kind,
+    record_id: input.record_id,
+    to: result.to,
+    to_belongs_to: result.toBelongsTo,
+  };
+}
+
 export async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
@@ -1461,5 +1526,7 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
       return handleDeleteItemInvoice(params, actingAs);
     case "get_club_settings":
       return handleGetClubSettings();
+    case "resend_email":
+      return handleResendEmail(params, actingAs);
   }
 }

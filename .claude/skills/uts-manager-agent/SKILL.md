@@ -11,6 +11,7 @@ description: >-
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), keep the club's item price
   list and charge somebody for items, see where replies to club emails go,
+  resend an invoice, receipt or waiver email,
   migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
   version of it (or roll back to an earlier one), add or edit a membership
@@ -548,6 +549,35 @@ emails point at the contact page, phone and WhatsApp instead.
 > replies and money go, so there is no action that changes either. If a manager
 > wants one changed, tell them it is on the Club settings screen
 > (`/manager/settings`). Do not try to work around this.
+
+### `resend_email` — send an email again
+
+```bash
+scripts/agent.sh resend_email '{"kind":"membership_invoice","record_id":"<membership uuid>","client_submission_id":"<new uuid>"}'
+```
+
+`kind` is one of `membership_invoice`, `membership_receipt` (record: the
+membership), `item_invoice`, `item_invoice_receipt` (the item invoice),
+`waiver_confirmation`, `account_activated` (the waiver), `email_verification`
+(the person's `user_id`). It goes to the person it went to, which is the
+guardian for a child: the result's `to` and `to_belongs_to` say exactly where,
+so **print the two together**.
+
+It is rebuilt from today's records: a resent invoice carries the amount owed
+**now** and the club's **current** bank details, not the original's. Managers
+are not copied.
+
+- **Once a minute per email per record.** A second call inside that is
+  `429 rate_limited` with a `Retry-After`. Do not loop on it.
+- **Mint a `client_submission_id` per resend and reuse it only to retry that
+  resend** (after a lost answer or `503 email_not_sent`). A new id is a new
+  email in somebody's inbox. Reusing an id whose email already went is
+  `409 already_sent`, never a second email: mint a new id if the manager
+  really wants it sent again.
+- A `409` means the record has moved on (`paid`: resend the receipt instead;
+  `already_verified`: nothing to send). A `422` means nothing can be sent
+  (`no_address`, `paper`, `dependant`, `free`). Report it; do not retry.
+- Confirm with the manager before resending to a person who did not ask for it.
 
 ### `file_waiver` — file a scanned paper waiver (migration / bulk filing)
 
