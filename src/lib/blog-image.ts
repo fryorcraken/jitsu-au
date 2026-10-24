@@ -57,17 +57,23 @@ export function sniffBlogImageType(bytes: Uint8Array): BlogImageMimeType | null 
   return null;
 }
 
-const EXTENSION: Record<BlogImageMimeType, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
+/** The extensions each format is known by. The first is the one we write. */
+const EXTENSIONS: Record<BlogImageMimeType, string[]> = {
+  "image/png": ["png"],
+  "image/jpeg": ["jpg", "jpeg"],
+  "image/gif": ["gif"],
+  "image/webp": ["webp"],
 };
+
+/** Long enough for any real name; well inside a storage key's limit. */
+const MAX_NAME_CHARS = 100;
 
 /**
  * The file name to store an image under: the caller's own, else the last part
- * of the address it came from, else "image". Given the extension of what the
- * bytes really are when it has none, so the stored key says what it holds.
+ * of the address it came from, else "image". Its extension is always one that
+ * matches what the bytes really are, replacing one that does not
+ * (`render.php`, a `logo.svg` that is really a PNG), so the stored key says
+ * what it holds.
  */
 export function blogImageFileName(
   type: BlogImageMimeType,
@@ -82,8 +88,10 @@ export function blogImageFileName(
       base = "";
     }
   }
-  base = base.trim() || "image";
-  return /\.[a-z0-9]{2,5}$/i.test(base) ? base : `${base}.${EXTENSION[type]}`;
+  const found = /\.([a-z0-9]{1,5})$/i.exec(base)?.[1];
+  if (found) base = base.slice(0, -(found.length + 1));
+  const ext = EXTENSIONS[type].find((e) => e === found?.toLowerCase()) ?? EXTENSIONS[type][0];
+  return `${base.trim().slice(0, MAX_NAME_CHARS) || "image"}.${ext}`;
 }
 
 /**
@@ -110,7 +118,9 @@ export function blogImageUrlProblem(raw: string): string | null {
   }
   if (url.protocol !== "https:") return "Only https addresses are fetched.";
   if (url.username || url.password) return "An address carrying a login is not fetched.";
-  const host = url.hostname;
+  // One trailing dot is the same host written fully qualified ("localhost."),
+  // and would otherwise slip past the suffix test below.
+  const host = url.hostname.replace(/\.$/, "");
   // An IP literal (v4 or bracketed v6) names a machine rather than a site, and
   // is how a request is pointed at something on a private network.
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[") || host.includes(":")) {
@@ -120,6 +130,20 @@ export function blogImageUrlProblem(raw: string): string | null {
     return "That address is not on the public internet.";
   }
   return null;
+}
+
+/** A failed request or read, as something the caller may retry. */
+function unreachable(e: unknown): BlogImageError {
+  // By name, not `instanceof Error`: an abort arrives as a DOMException, which
+  // not every runtime makes an Error.
+  const name = (e as { name?: unknown } | null)?.name;
+  const timedOut = name === "TimeoutError" || name === "AbortError";
+  return new BlogImageError(
+    "unreachable",
+    timedOut
+      ? "The image took too long to download. Try again, or send the file itself."
+      : "Could not download the image from that address. Check it opens in a browser, or send the file itself.",
+  );
 }
 
 const MAX_REDIRECTS = 5;
@@ -185,29 +209,38 @@ export async function fetchBlogImage(
         headers: { accept: "image/png,image/jpeg,image/webp,image/gif" },
       });
     } catch (e) {
-      const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
-      throw new BlogImageError(
-        "unreachable",
-        timedOut
-          ? "The image took too long to download. Try again, or send the file itself."
-          : "Could not download the image from that address. Check it opens in a browser, or send the file itself.",
-      );
+      throw unreachable(e);
     }
     if (res.status >= 300 && res.status < 400) {
+      // Release the connection before the next hop or the refusal.
+      await res.body?.cancel().catch(() => {});
       const location = res.headers.get("location");
-      if (!location) {
+      let next: URL | null = null;
+      try {
+        next = location ? new URL(location, current) : null;
+      } catch {
+        next = null;
+      }
+      if (!next) {
         throw new BlogImageError("unreachable", "The address redirected without saying where.");
       }
-      current = new URL(location, current).toString();
+      current = next.toString();
       continue;
     }
     if (!res.ok) {
+      await res.body?.cancel().catch(() => {});
       throw new BlogImageError(
         res.status >= 500 ? "unreachable" : "rejected",
         `The address answered ${res.status} rather than an image. Check it opens in a browser without signing in.`,
       );
     }
-    return { bytes: await readCapped(res, cap), finalUrl: current };
+    try {
+      return { bytes: await readCapped(res, cap), finalUrl: current };
+    } catch (e) {
+      // The timeout covers the body too: a host that sends its headers and
+      // then trickles is as unreachable as one that never answered.
+      throw e instanceof BlogImageError ? e : unreachable(e);
+    }
   }
   throw new BlogImageError("rejected", "The address redirected too many times.");
 }

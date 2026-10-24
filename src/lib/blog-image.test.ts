@@ -36,6 +36,18 @@ describe("sniffBlogImageType", () => {
 });
 
 describe("blogImageFileName", () => {
+  it("replaces an extension that does not match the bytes", () => {
+    expect(blogImageFileName("image/png", "logo.svg")).toBe("logo.png");
+    expect(blogImageFileName("image/jpeg", undefined, "https://x.example.com/render.php")).toBe(
+      "render.jpg",
+    );
+    expect(blogImageFileName("image/jpeg", "photo.JPEG")).toBe("photo.jpeg");
+  });
+
+  it("keeps a long name inside a storage key", () => {
+    expect(blogImageFileName("image/png", "a".repeat(400)).length).toBe(104);
+  });
+
   it("keeps a name that already has an extension", () => {
     expect(blogImageFileName("image/png", "mat.png")).toBe("mat.png");
   });
@@ -78,6 +90,8 @@ describe("blogImageUrlProblem", () => {
     ["https://169.254.169.254/latest", "IP"],
     ["https://[::1]/x.png", "IP"],
     ["https://localhost/x.png", "public"],
+    ["https://localhost./x.png", "public"],
+    ["https://metadata.internal./x.png", "public"],
     ["https://db.internal/x.png", "public"],
     ["https://printer/x.png", "public"],
     ["not a url", "web address"],
@@ -145,6 +159,32 @@ describe("fetchBlogImage", () => {
     });
     await expect(fetchBlogImage("https://a.example.com/x", missing)).rejects.toMatchObject({
       reason: "rejected",
+    });
+  });
+
+  // The timeout covers the body: headers then a stalled body is a failure to
+  // retry, not an internal error.
+  it("reports a body that fails part way as unreachable", async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.error(new DOMException("timed out", "TimeoutError"));
+      },
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(body));
+    await expect(fetchBlogImage("https://a.example.com/x", fetchImpl)).rejects.toMatchObject({
+      reason: "unreachable",
+      message: expect.stringMatching(/too long/),
+    });
+  });
+
+  it("reports a redirect to an unreadable address as unreachable", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 302, headers: { location: "https://[bad" } }),
+      );
+    await expect(fetchBlogImage("https://a.example.com/x", fetchImpl)).rejects.toMatchObject({
+      reason: "unreachable",
     });
   });
 
