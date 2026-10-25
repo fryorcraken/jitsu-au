@@ -913,12 +913,83 @@ export const waiverApprovalSchema = z.object({
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 
+// ---- Code of conduct: managers edit it, in numbered versions ----
+//
+// Shaped like the waiver template schemas above, with two differences. There
+// are no acknowledgements (the undertaking a signer gives stays in code,
+// `code-of-conduct.ts`). And saving carries `asks_reagreement`: whether this
+// version puts everybody who agreed to an older one out of date. It is off by
+// default, because the commonest save is a correction, and a correction that
+// asked the whole club to agree again would be noise people learn to ignore.
+
+/** The body's ceiling. Generous: today's document is under 5000 characters. */
+export const CODE_OF_CONDUCT_BODY_MAX = 50000;
+
+/** The editor screen's save: a whole version, written and made live. */
+export const saveCodeOfConductSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  body_md: z.string().trim().min(1).max(CODE_OF_CONDUCT_BODY_MAX),
+  asks_reagreement: z.boolean().default(false),
+  // One per press of Save, resent unchanged on a retry, so a save whose reply
+  // was lost comes back as the version it already wrote rather than a second.
+  client_submission_id: z.string().uuid().optional(),
+});
+export type SaveCodeOfConductInput = z.infer<typeof saveCodeOfConductSchema>;
+
+/** The agent API reads one version by number, or the live one. */
+export const agentGetCodeOfConductSchema = z
+  .object({ version: z.number().int().positive().optional() })
+  .strict();
+
+/**
+ * The agent API's save. Every field optional, carried over from `base_version`
+ * (default the live one), exactly as `agentSaveWaiverTemplateSchema`: `title`
+ * and `body_md` travel together, and a call that changes nothing is refused.
+ *
+ * "Changes nothing" counts `asks_reagreement: true` as a change. Somebody who
+ * published a rewrite and forgot to ask everybody to agree again needs a way to
+ * ask without inventing an edit, and a new version that asks, with the same
+ * text, is exactly that.
+ */
+export const agentSaveCodeOfConductSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    body_md: z.string().trim().min(1).max(CODE_OF_CONDUCT_BODY_MAX).optional(),
+    asks_reagreement: z.boolean().optional().default(false),
+    base_version: z.number().int().positive().optional(),
+    client_submission_id: z.string().uuid().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (Boolean(value.title) !== Boolean(value.body_md)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [value.title ? "body_md" : "title"],
+        message: "Saving new text needs both title and body_md: a version is written as a whole.",
+      });
+    }
+    if (!value.title && !value.body_md && !value.asks_reagreement) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["body_md"],
+        message:
+          "Nothing to save: send title and body_md, or asks_reagreement true to ask everybody to agree to the current text again. To make an existing version live again, use publish_code_of_conduct.",
+      });
+    }
+  });
+export type AgentSaveCodeOfConductInput = z.infer<typeof agentSaveCodeOfConductSchema>;
+
+/** Make an existing stored version the live one. */
+export const agentPublishCodeOfConductSchema = z
+  .object({ version: z.number().int().positive() })
+  .strict();
+
 // ---- Code of conduct ----
 //
 // Deliberately small next to `waiverSubmitSchema`. The signer is a person the
 // club already has on file, so nothing about them is retyped here: the name and
 // email stored on the acceptance are copied server-side from their profile and
-// login. What the form actually collects is agreement and a signature.
+// login. What the form actually collects is a signature, which is the agreement.
 //
 // `token` is the proof-of-click token from the "sign it later" email. Someone
 // who just signed a waiver is a locked applicant and cannot log in yet, so
@@ -928,10 +999,11 @@ export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 // revoked, or minted for an address the account no longer has.
 export const codeOfConductAcceptSchema = z.object({
   token: z.string().trim().max(120).optional().or(z.literal("")),
-  // Must be ticked. A code of conduct signed by someone who did not agree to it
-  // is not evidence of anything, so this is `z.literal(true)` rather than a
-  // boolean the server has to remember to check.
-  agree: z.literal(true),
+  // The agreement. There is no separate tick box: the page prints the
+  // undertaking above the signature field and says that typing a name and
+  // submitting is agreeing to it, so a signature that is not blank IS the
+  // agreement. (An `agree` field from a tab opened before the box was removed
+  // is stripped, not refused.)
   signature_name: z.string().trim().min(1).max(120),
   // Which version they actually read. The server refuses a version it does not
   // recognise rather than filing an agreement against unknown text, the same
@@ -2807,6 +2879,10 @@ export const managerAgentActions = [
   "get_waiver_template",
   "save_waiver_template",
   "publish_waiver_template",
+  "list_code_of_conduct_versions",
+  "get_code_of_conduct",
+  "save_code_of_conduct",
+  "publish_code_of_conduct",
   "list_membership_plans",
   "save_membership_plan",
   "list_kb_sections",

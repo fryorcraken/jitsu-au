@@ -10,7 +10,7 @@
 // The rules below are the ones that keep that gap from becoming an outage
 // nobody notices — never open it needlessly, and never leave it silently.
 import { describe, expect, it, vi } from "vitest";
-import { WaiverTemplateError } from "./waiver-template-editor";
+import { DocumentVersionError } from "./document-versions";
 import {
   listWaiverTemplateRows,
   loadWaiverTemplateVersion,
@@ -402,13 +402,13 @@ describe("saveWaiverTemplateVersion", () => {
 // retries. `version` separates "nothing was written" from "version N exists and
 // is simply not live", which is the difference between retrying the save and
 // finishing with a publish.
-describe("WaiverTemplateError reasons", () => {
+describe("DocumentVersionError reasons", () => {
   async function reasonOf(run: () => Promise<unknown>) {
     try {
       await run();
     } catch (e) {
-      expect(e).toBeInstanceOf(WaiverTemplateError);
-      const err = e as WaiverTemplateError;
+      expect(e).toBeInstanceOf(DocumentVersionError);
+      const err = e as DocumentVersionError;
       return { reason: err.reason, version: err.version };
     }
     throw new Error("expected a refusal");
