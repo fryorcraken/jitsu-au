@@ -146,6 +146,11 @@ partitioned and foreign tables as well as plain tables.
 python3 supabase/lint/check-client-grants.py grants.csv
 ```
 
+Client write policies on `profiles` — run **`profiles-write-policies.sql`** the
+same way. It must return no rows. A row is a policy that would let a member
+rewrite their own record the moment any write grant appears (see
+`docs/database.md`, profiles), most likely added by hand in the Lovable UI.
+
 Worth doing after a migration is applied, before a release, and any time someone
 has changed a grant or a policy by hand in the Lovable UI. That last one
 produces no commit and no signal, and is exactly the drift these catch.

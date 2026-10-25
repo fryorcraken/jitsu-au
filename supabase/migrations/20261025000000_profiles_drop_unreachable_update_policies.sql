@@ -1,0 +1,61 @@
+-- Drop the two UPDATE policies on profiles that nothing can reach.
+--
+-- `profiles` grants anon and authenticated nothing (revoked in 20260728150000),
+-- so every write to it goes through a service-role server function, which
+-- bypasses RLS. That includes a member editing their own details on /account:
+-- updateMyProfile checks who they are and which fields they may send, then
+-- writes with the service role. These two policies, from 20260723000000, are
+-- therefore never consulted:
+--
+--   "Users can update their own profile"  (auth.uid() = user_id)
+--   "Managers can update profiles"        (has_role(auth.uid(), 'manager'))
+--
+-- Unreachable is not harmless. They only wait for a grant. The day somebody
+-- gives authenticated UPDATE on profiles, by hand in the Lovable UI (which
+-- produces no commit and no CI run) or to make some feature work, the first
+-- one lets any member rewrite every column of their own row straight through
+-- PostgREST with the published key: their household link (guardian_user_id),
+-- date of birth, is_minor, medical notes, the media-consent provenance, with
+-- none of the checks updateMyProfile applies. docs/database.md ("A write grant
+-- makes 'defence in depth' policies real") records that this exact pattern has
+-- already happened here twice, with calendar RSVPs and feed tokens.
+--
+-- With both gone, profiles has no write policy for any client role, so RLS
+-- refuses every client INSERT, UPDATE and DELETE even if a write grant
+-- appears. That is about writes only: a SELECT grant would still expose rows
+-- through the two read policies kept below, and TRUNCATE is not governed by
+-- RLS at all, so the grants check (supabase/lint/client-grants.sql) still
+-- matters here. The archive columns keep their own trigger (20261023120000)
+-- on top of this.
+--
+-- Nothing changes for anybody: no code path uses these policies. The two
+-- SELECT policies stay; reading your own record is not a hazard, and they are
+-- as unreachable as these were.
+--
+-- Destructive in form, but it removes only something nothing uses, so there is
+-- no code to deploy first (docs/database-changes.md, sequencing).
+
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Managers can update profiles" ON public.profiles;
+
+-- Fail loudly rather than record a no-op as applied: DROP POLICY IF EXISTS is
+-- silent when a policy goes by another name, and Lovable has re-emitted SQL
+-- under its own names before. The same test as
+-- supabase/lint/profiles-write-policies.sql.
+DO $$
+DECLARE
+  remaining text;
+BEGIN
+  SELECT string_agg(format('%s (%s)', policyname, cmd), ', ')
+    INTO remaining
+    FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename = 'profiles'
+     AND cmd IN ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+     AND permissive = 'PERMISSIVE'
+     AND roles && ARRAY['anon', 'authenticated', 'public']::name[];
+  IF remaining IS NOT NULL THEN
+    RAISE EXCEPTION 'profiles still has client write policies: %', remaining;
+  END IF;
+END
+$$;
