@@ -7,7 +7,7 @@
 //
 // Keep AGENT_MANIFEST, managerAgentActions (validation.ts), the route dispatch,
 // and the skill (.claude/skills/uts-manager-agent/) in lockstep. See docs/manager-agent-api.md.
-import { formatCents, sameInstant } from "@/lib/validation";
+import { formatCents, isPaperWaiver, sameInstant } from "@/lib/validation";
 import type { EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import { versionLabel } from "@/lib/waiver-template-editor";
@@ -134,6 +134,9 @@ export const GET_USER_LEFT_OUT = {
    * The signer's IP address and browser context, kept on a waiver as forensic
    * evidence. No agent workflow needs them, and an agent's transcript is a far
    * less careful place to keep somebody's IP address than the database.
+   *
+   * The one thing the page reads out of `signer_meta` is whether the waiver is
+   * a scanned paper form, so that much is reported, as `is_paper`.
    */
   waiver: ["signer_ip", "signer_meta"],
 } as const;
@@ -145,16 +148,30 @@ export const GET_USER_LEFT_OUT = {
  * real read.
  */
 export function projectAgentUser<
-  W extends Record<GetUserWaiverLeftOut, unknown>,
-  R extends Record<GetUserTopLeftOut, unknown> & { waivers: W[] },
->(read: R): Omit<R, GetUserTopLeftOut | "waivers"> & { waivers: Omit<W, GetUserWaiverLeftOut>[] } {
+  R extends Record<GetUserTopLeftOut, unknown> & {
+    waivers: Record<GetUserWaiverLeftOut, unknown>[];
+  },
+>(
+  read: R,
+): Omit<R, GetUserTopLeftOut | "waivers"> & {
+  waivers: AgentUserWaiver<R["waivers"][number]>[];
+} {
   // Driven by the list rather than restating it, so a name added there is
   // withheld here: the list is the promise, and this is what keeps it.
   return {
     ...omit(read, GET_USER_LEFT_OUT.top),
-    waivers: read.waivers.map((w) => omit(w, GET_USER_LEFT_OUT.waiver)),
-  } as Omit<R, GetUserTopLeftOut | "waivers"> & { waivers: Omit<W, GetUserWaiverLeftOut>[] };
+    waivers: read.waivers.map((w) => ({
+      ...omit(w, GET_USER_LEFT_OUT.waiver),
+      // The person page's "Filing record" rather than "Signing record". An
+      // agent filing paper waivers needs it to tell what is already on file.
+      is_paper: isPaperWaiver(w.signer_meta),
+    })),
+  } as Omit<R, GetUserTopLeftOut | "waivers"> & {
+    waivers: AgentUserWaiver<R["waivers"][number]>[];
+  };
 }
+
+type AgentUserWaiver<W> = Omit<W, GetUserWaiverLeftOut> & { is_paper: boolean };
 
 type GetUserTopLeftOut = (typeof GET_USER_LEFT_OUT.top)[number];
 type GetUserWaiverLeftOut = (typeof GET_USER_LEFT_OUT.waiver)[number];
@@ -207,7 +224,7 @@ export const AGENT_MANIFEST: {
       // worked before changes.
       breaking: false,
       notes: [
-        "New action get_user { user_id }: everything the manager person page shows about one person, read by the same function the page uses. user (name, email with email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, the newest membership's kind and status), profile (contact details, date of birth, address, emergency contact, medical notes, the guardian block, kit sizes, photo consent), household, memberships, checkins (attendance, newest first), code_of_conduct, and waivers (approval status, template_version, signed_at, has_pdf, approver). A waiver's signer_ip and signer_meta are deliberately left out.",
+        "New action get_user { user_id }: everything the manager person page shows about one person, read by the same function the page uses. user (name, email with email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, the newest membership's kind and status), profile (contact details, date of birth, address, emergency contact, medical notes, the guardian block, kit sizes, photo consent), household, memberships, checkins (attendance, newest first), code_of_conduct, and waivers (approval status, template_version, signed_at, has_pdf, approver, and is_paper for a scanned paper form). A waiver's signer_ip and signer_meta are deliberately left out.",
         "get_user reports a person, not a lead: an id with no person record is 404 not_found. A read it could only half answer (the address, the code of conduct, the guardian's name, a class name or a waiver approver's name could not be read) is 500 db_error, never a null email, an `unsigned` or an unknown name it did not actually check.",
         "list_users rows carry phone, email_confirmed_at (null means the address is not verified; for a dependant it is the state of the guardian's address, like email itself) and code_of_conduct: { state: unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name }. The same object get_user and the person page report.",
       ],
@@ -500,7 +517,7 @@ export const AGENT_MANIFEST: {
       name: "get_user",
       method: "POST",
       summary:
-        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at and checkin_count; list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at and approver). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
+        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at and checkin_count; list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at, approver, and is_paper: true for a scanned paper form filed by a manager). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
       params: [
         {
           name: "user_id",

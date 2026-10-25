@@ -469,28 +469,41 @@ async function handleListUsers(params: unknown) {
   if (status) users = users.filter((u) => u.lifecycle_status === status);
   const capped = users.slice(0, limit ?? 200);
 
-  // The code-of-conduct acceptances of the people being returned, in one read
-  // after the page is cut, newest first, so each row's summary is the person
-  // page's own rule (`codeOfConductSummary`). Scoped to these ids rather than
-  // the whole table: a response row cap would otherwise drop the OLDEST
-  // acceptances and report somebody who signed long ago as unsigned.
+  // The code-of-conduct acceptances of the people being returned, read after
+  // the page is cut, so each row's summary is the person page's own rule
+  // (`codeOfConductSummary`). Scoped to these ids, and PAGED: PostgREST caps a
+  // response (1000 rows by default) without an error, and signing again is
+  // unlimited, so a capped read could drop somebody's only agreement and report
+  // them as unsigned. Ordered by id so the pages cannot overlap or skip.
   const ids = capped.map((u) => u.user_id).filter((id): id is string => Boolean(id));
-  const { data: acceptances, error: cocErr } = ids.length
-    ? await db
-        .from("code_of_conduct_acceptances")
-        .select("user_id, version, accepted_at, signature_name")
-        .in("user_id", ids)
-        .order("accepted_at", { ascending: false })
-    : { data: [], error: null };
-  // Not degraded to "unsigned" the way the person page degrades it: that page
-  // has a manager reading it and a server log behind it, and an agent has
-  // neither. `unsigned` for a person who signed is a confident wrong answer.
-  if (cocErr) throw new AgentError(500, "db_error", cocErr.message);
+  const acceptances: {
+    user_id: string;
+    version: number;
+    accepted_at: string;
+    signature_name: string;
+  }[] = [];
+  const ACCEPTANCES_PAGE = 1000;
+  for (let from = 0; ids.length; from += ACCEPTANCES_PAGE) {
+    const { data, error: cocErr } = await db
+      .from("code_of_conduct_acceptances")
+      .select("user_id, version, accepted_at, signature_name")
+      .in("user_id", ids)
+      .order("id", { ascending: true })
+      .range(from, from + ACCEPTANCES_PAGE - 1);
+    // Not degraded to "unsigned" the way the person page degrades it: that page
+    // has a manager reading it and a server log behind it, and an agent has
+    // neither. `unsigned` for a person who signed is a confident wrong answer.
+    if (cocErr) throw new AgentError(500, "db_error", cocErr.message);
+    acceptances.push(...(data ?? []));
+    if (!data || data.length < ACCEPTANCES_PAGE) break;
+  }
+  // Newest first, which is the order `codeOfConductSummary` reads them in.
+  acceptances.sort((a, b) => Date.parse(b.accepted_at) - Date.parse(a.accepted_at));
   const acceptancesByUser = new Map<
     string,
     { version: number; accepted_at: string; signature_name: string }[]
   >();
-  for (const a of acceptances ?? []) {
+  for (const a of acceptances) {
     const list = acceptancesByUser.get(a.user_id) ?? [];
     list.push(a);
     acceptancesByUser.set(a.user_id, list);

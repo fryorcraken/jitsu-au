@@ -1076,8 +1076,12 @@ describe("manager agent route: reading people", () => {
             return { data: null, count: null, error: { message: opts.fail[table] } };
           }
           const rows = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
-          return { data: head ? null : rows, count: rows.length, error: null };
+          // PostgREST's response cap, which it applies without an error: a read
+          // that does not page sees only the first 1000 rows.
+          const page = rows.slice(span[0], Math.min(span[1] + 1, span[0] + 1000));
+          return { data: head ? null : page, count: rows.length, error: null };
         };
+        let span: [number, number] = [0, Infinity];
         const b = {
           select: (_c?: string, o?: { head?: boolean }) => {
             if (o?.head) head = true;
@@ -1093,6 +1097,10 @@ describe("manager agent route: reading people", () => {
           },
           order: () => b,
           limit: () => b,
+          range: (from: number, to: number) => {
+            span = [from, to];
+            return b;
+          },
           maybeSingle: () => {
             const r = result();
             return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error });
@@ -1194,6 +1202,29 @@ describe("manager agent route: reading people", () => {
       });
     });
 
+    // Signing again is unlimited, so the people on one page can hold more
+    // acceptances than PostgREST returns in one response. Somebody whose only
+    // agreement sits past that cap must still read as signed.
+    it("reads every acceptance of the people it returns, past the response cap", async () => {
+      const t = tables();
+      const many = Array.from({ length: 1000 }, (_, i) => ({
+        user_id: GUARDIAN,
+        version: 1,
+        accepted_at: `2026-04-01T00:00:${String(i % 60).padStart(2, "0")}Z`,
+        signature_name: "Gus L",
+      }));
+      t.code_of_conduct_acceptances = [...many, ...t.code_of_conduct_acceptances];
+      currentAdmin = fakeTables(t, { emails: EMAILS });
+      const res = await post({ action: "list_users", params: {} });
+      const byId = new Map(
+        (await res.json()).result.users.map((u: { user_id: string }) => [u.user_id, u]),
+      );
+      expect(byId.get(PERSON)).toMatchObject({
+        code_of_conduct: { state: "signed", accepted_version: 1, signature_name: "Ada L" },
+      });
+      expect(byId.get(GUARDIAN)).toMatchObject({ code_of_conduct: { state: "signed" } });
+    });
+
     it("refuses with db_error rather than reporting everybody as unsigned", async () => {
       currentAdmin = fakeTables(tables(), {
         emails: EMAILS,
@@ -1223,6 +1254,7 @@ describe("manager agent route: reading people", () => {
       ]);
       expect(result.waivers[0]).not.toHaveProperty("signer_ip");
       expect(result.waivers[0]).not.toHaveProperty("signer_meta");
+      expect(result.waivers[0].is_paper).toBe(false);
       expect(result).not.toHaveProperty("degraded");
     });
 

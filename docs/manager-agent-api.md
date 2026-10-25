@@ -87,8 +87,9 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   - **What it leaves out is listed, not implied.** `GET_USER_LEFT_OUT` names
     each field of the read the API does not report, with its reason; today that
     is a waiver's `signer_ip` and `signer_meta` (forensic evidence no agent
-    workflow needs). A test fails if the read gains a field that is neither
-    reported nor listed.
+    workflow needs). The one thing the page reads out of `signer_meta`, whether
+    the waiver is a scanned paper form, is reported as `is_paper`. A test fails
+    if the read gains a field that is neither reported nor listed.
   - **It refuses a half-read.** The page shows a failed address lookup as no
     address, a failed code-of-conduct read as "not signed yet", and a failed
     guardian, class or approver lookup as an unknown name, so a manager can

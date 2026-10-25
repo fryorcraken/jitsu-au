@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { changeClubUserEmail, ClubUserNotFoundError, loadClubUser } from "./club-user.functions";
 import { GET_USER_LEFT_OUT, projectAgentUser } from "./manager-agent";
-import { managerEmailChangeSchema } from "./validation";
+import { managerEmailChangeSchema, PAPER_WAIVER_SOURCE } from "./validation";
 
 type AuthUser = { id: string; email: string | null; email_confirmed_at: string | null };
 
@@ -681,15 +681,30 @@ describe("projectAgentUser over the person page's read", () => {
     expect(projected.waivers).toHaveLength(read.waivers.length);
     const [readWaiver] = read.waivers;
     const [agentWaiver] = projected.waivers;
+    // `is_paper` is the one field derived from what is left out: the page's
+    // "Filing record" label, without the IP and browser details behind it.
     expect(Object.keys(agentWaiver).sort()).toEqual(
-      Object.keys(readWaiver)
-        .filter((k) => !leftOut.includes(k))
-        .sort(),
+      [...Object.keys(readWaiver).filter((k) => !leftOut.includes(k)), "is_paper"].sort(),
     );
     for (const k of leftOut) {
       expect(Object.keys(readWaiver)).toContain(k);
       expect(agentWaiver).not.toHaveProperty(k);
     }
+  });
+
+  it("says whether each waiver is a scanned paper form, as the page does", async () => {
+    const { projected } = await readAndProject(
+      baseTables({
+        waivers: [
+          { ...waiverRow(), id: "online", signer_meta: { ua: "x" } },
+          { ...waiverRow(), id: "paper", signer_meta: { source: PAPER_WAIVER_SOURCE } },
+        ],
+      }),
+    );
+    expect(projected.waivers.map((w) => [w.id, w.is_paper]).sort()).toEqual([
+      ["online", false],
+      ["paper", true],
+    ]);
   });
 
   it("keeps the caption on a dependant's address, so it is never reported bare", async () => {

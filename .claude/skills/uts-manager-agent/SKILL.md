@@ -188,8 +188,10 @@ scripts/agent.sh get_user '{"user_id":"<uuid>"}'
 - `code_of_conduct`: the same object `list_users` carries.
 - `waivers`: every waiver they submitted, as submitted, with `status`
   (`pending | active | superseded`), `template_version`, `signed_at`,
-  `has_pdf`, `approved_at` and the approver. The signer's IP address and
-  browser context are deliberately not reported.
+  `has_pdf`, `approved_at`, the approver, and `is_paper` (`true` for a scanned
+  paper form a manager filed; check it before `file_waiver` so you do not file
+  one twice). The signer's IP address and browser context are deliberately not
+  reported.
 
 > **This is sensitive.** Medical notes, addresses and dates of birth are here
 > because a manager needs them on the page. Read them when the question needs
