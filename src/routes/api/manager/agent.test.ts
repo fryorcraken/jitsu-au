@@ -181,6 +181,37 @@ vi.mock("@/lib/waiver.functions", () => ({
   promoteWaiverTemplate: (...args: unknown[]) => promoteWaiverTemplateMock(...args),
 }));
 
+// The code-of-conduct store's own behaviour (numbering, draft-then-promote, the
+// replayed submission id) is pinned in code-of-conduct.functions.test.ts. What
+// the route owns, and what is pinned here, is the carry-over, the re-prompt
+// count, and which status each refusal becomes. Everything not named here is
+// the real module, so list_users still measures against the real standard.
+const listCodeOfConductVersionRowsMock = vi.fn();
+const listCodeOfConductVersionFlagsMock = vi.fn();
+const listCodeOfConductVersionSummariesMock = vi.fn();
+const loadCodeOfConductVersionMock = vi.fn();
+const saveCodeOfConductVersionMock = vi.fn();
+const promoteCodeOfConductVersionMock = vi.fn();
+const highestAcceptedVersionsMock = vi.fn();
+vi.mock("@/lib/code-of-conduct.functions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/code-of-conduct.functions")>()),
+  listCodeOfConductVersionRows: (...args: unknown[]) => listCodeOfConductVersionRowsMock(...args),
+  listCodeOfConductVersionFlags: (...args: unknown[]) => listCodeOfConductVersionFlagsMock(...args),
+  listCodeOfConductVersionSummaries: (...args: unknown[]) =>
+    listCodeOfConductVersionSummariesMock(...args),
+  loadCodeOfConductVersion: (...args: unknown[]) => loadCodeOfConductVersionMock(...args),
+  saveCodeOfConductVersion: (...args: unknown[]) => saveCodeOfConductVersionMock(...args),
+  promoteCodeOfConductVersion: (...args: unknown[]) => promoteCodeOfConductVersionMock(...args),
+  highestAcceptedVersions: (...args: unknown[]) => highestAcceptedVersionsMock(...args),
+}));
+
+// Publishing a post announces it. The announcement's own fan-out is covered in
+// the notification tests; what the blog actions own is whether it is asked for.
+const notifyNewBlogPostMock = vi.fn();
+vi.mock("@/lib/notification-events.server", () => ({
+  notifyNewBlogPost: (...args: unknown[]) => notifyNewBlogPostMock(...args),
+}));
+
 // The announcement's own behaviour (who is emailed, retries, pending rows) is
 // pinned in plan-announcement.server.test.ts. What the route owns is the
 // sequencing around it: refuse before saving, save, then announce, and say the
@@ -798,8 +829,8 @@ describe("manager agent route: the waiver template", () => {
     reason: "not_found" | "invalid" | "not_published",
     version?: number,
   ) {
-    const { WaiverTemplateError } = await import("@/lib/waiver-template-editor");
-    return new WaiverTemplateError(message, reason, version);
+    const { DocumentVersionError } = await import("@/lib/document-versions");
+    return new DocumentVersionError(message, reason, version);
   }
 
   it("lists versions without their bodies, naming the live one", async () => {
@@ -1068,6 +1099,272 @@ describe("manager agent route: item invoices", () => {
   });
 });
 
+// ---- Reading people: list_users and get_user ----
+//
+// Both run their REAL reads (`loadClubUser` for get_user) against a fake over
+// in-memory tables, because the point of get_user is that it is the person
+// page's own read: mocking that away would test a route nobody runs.
+describe("manager agent route: reading people", () => {
+  const PERSON = "11111111-1111-4111-8111-111111111111";
+  const GUARDIAN = "22222222-2222-4222-8222-222222222222";
+  const CHILD = "33333333-3333-4333-8333-333333333333";
+
+  type Row = Record<string, unknown>;
+
+  /** Honours `eq` / `in` and the `count` + `head` select; order and limit are no-ops. */
+  function fakeTables(
+    tables: Record<string, Row[]>,
+    opts: {
+      emails?: { user_id: string; email: string; email_confirmed_at: string | null }[];
+      fail?: Record<string, string>;
+    } = {},
+  ) {
+    return {
+      from: (table: string) => {
+        const filters: ((r: Row) => boolean)[] = [];
+        let head = false;
+        const result = () => {
+          if (opts.fail?.[table]) {
+            return { data: null, count: null, error: { message: opts.fail[table] } };
+          }
+          const rows = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+          // PostgREST's response cap, which it applies without an error: a read
+          // that does not page sees only the first 1000 rows.
+          const page = rows.slice(span[0], Math.min(span[1] + 1, span[0] + 1000));
+          return { data: head ? null : page, count: rows.length, error: null };
+        };
+        let span: [number, number] = [0, Infinity];
+        const b = {
+          select: (_c?: string, o?: { head?: boolean }) => {
+            if (o?.head) head = true;
+            return b;
+          },
+          eq: (col: string, val: unknown) => {
+            filters.push((r) => r[col] === val);
+            return b;
+          },
+          in: (col: string, vals: unknown[]) => {
+            filters.push((r) => vals.includes(r[col]));
+            return b;
+          },
+          order: () => b,
+          limit: () => b,
+          range: (from: number, to: number) => {
+            span = [from, to];
+            return b;
+          },
+          maybeSingle: () => {
+            const r = result();
+            return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error });
+          },
+          then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+            Promise.resolve(result()).then(resolve, reject),
+        };
+        return b;
+      },
+      rpc: (name: string, args?: unknown) => {
+        if (name !== "user_emails") throw new Error(`unexpected rpc ${name}`);
+        const ids = (args as { _user_ids: string[] })._user_ids;
+        return Promise.resolve(ok((opts.emails ?? []).filter((e) => ids.includes(e.user_id))));
+      },
+    };
+  }
+
+  const profile = (user_id: string, first_name: string, over: Row = {}): Row => ({
+    user_id,
+    first_name,
+    middle_name: null,
+    last_name: "Lovelace",
+    preferred_name: null,
+    phone: "0400 000 001",
+    guardian_user_id: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    ...over,
+  });
+
+  const tables = (over: Record<string, Row[]> = {}): Record<string, Row[]> => ({
+    profiles: [
+      profile(PERSON, "Ada"),
+      profile(GUARDIAN, "Gus"),
+      profile(CHILD, "Bea", { guardian_user_id: GUARDIAN, phone: null }),
+    ],
+    memberships: [],
+    membership_plans: [],
+    waivers: [
+      {
+        id: "w1",
+        user_id: PERSON,
+        first_name: "Ada",
+        last_name: "Lovelace",
+        signed_at: "2026-02-01T00:00:00+00:00",
+        approval_status: "pending",
+        approved_by: null,
+        pdf_path: "w1.pdf",
+        template_version: 3,
+        signer_ip: "192.0.2.1",
+        signer_meta: { ua: "x" },
+      },
+    ],
+    session_checkins: [],
+    interest_registrations: [],
+    user_roles: [],
+    calendar_events: [],
+    code_of_conduct_acceptances: [
+      { user_id: PERSON, version: 1, accepted_at: "2026-03-01T00:00:00Z", signature_name: "Ada L" },
+    ],
+    code_of_conduct_versions: [
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: true },
+    ],
+    ...over,
+  });
+
+  const EMAILS = [
+    { user_id: PERSON, email: "ada@example.com", email_confirmed_at: "2026-01-02T00:00:00Z" },
+    { user_id: GUARDIAN, email: "gus@example.com", email_confirmed_at: null },
+  ];
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  describe("list_users", () => {
+    it("carries phone, verification and the code of conduct on every row", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({ action: "list_users", params: {} });
+      expect(res.status).toBe(200);
+      const byId = new Map(
+        (await res.json()).result.users.map((u: { user_id: string }) => [u.user_id, u]),
+      );
+      expect(byId.get(PERSON)).toMatchObject({
+        phone: "0400 000 001",
+        email_confirmed_at: "2026-01-02T00:00:00Z",
+        code_of_conduct: {
+          state: "signed",
+          accepted_version: 1,
+          accepted_at: "2026-03-01T00:00:00Z",
+          signature_name: "Ada L",
+        },
+      });
+      expect(byId.get(GUARDIAN)).toMatchObject({
+        email_confirmed_at: null,
+        code_of_conduct: { state: "unsigned", accepted_version: null },
+      });
+      // A child's address is the guardian's, so its verified state is too.
+      expect(byId.get(CHILD)).toMatchObject({
+        email: "gus@example.com",
+        email_belongs_to: "Gus Lovelace",
+        email_confirmed_at: null,
+      });
+    });
+
+    // Signing again is unlimited, so the people on one page can hold more
+    // acceptances than PostgREST returns in one response. Somebody whose only
+    // agreement sits past that cap must still read as signed.
+    it("reads every acceptance of the people it returns, past the response cap", async () => {
+      const t = tables();
+      const many = Array.from({ length: 1000 }, (_, i) => ({
+        user_id: GUARDIAN,
+        version: 1,
+        accepted_at: `2026-04-01T00:00:${String(i % 60).padStart(2, "0")}Z`,
+        signature_name: "Gus L",
+      }));
+      t.code_of_conduct_acceptances = [...many, ...t.code_of_conduct_acceptances];
+      currentAdmin = fakeTables(t, { emails: EMAILS });
+      const res = await post({ action: "list_users", params: {} });
+      const byId = new Map(
+        (await res.json()).result.users.map((u: { user_id: string }) => [u.user_id, u]),
+      );
+      expect(byId.get(PERSON)).toMatchObject({
+        code_of_conduct: { state: "signed", accepted_version: 1, signature_name: "Ada L" },
+      });
+      expect(byId.get(GUARDIAN)).toMatchObject({ code_of_conduct: { state: "signed" } });
+    });
+
+    it("refuses with db_error rather than reporting everybody as unsigned", async () => {
+      currentAdmin = fakeTables(tables(), {
+        emails: EMAILS,
+        fail: { code_of_conduct_acceptances: "boom" },
+      });
+      const res = await post({ action: "list_users", params: {} });
+      expect(res.status).toBe(500);
+      expect((await res.json()).error.code).toBe("db_error");
+    });
+  });
+
+  describe("get_user", () => {
+    it("returns the person page's read, less the signer's IP and browser context", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({ action: "get_user", params: { user_id: PERSON } });
+      expect(res.status).toBe(200);
+      const { result } = await res.json();
+      expect(result.user).toMatchObject({
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        email_belongs_to: null,
+        email_confirmed_at: "2026-01-02T00:00:00Z",
+      });
+      expect(result.code_of_conduct).toMatchObject({ state: "signed", accepted_version: 1 });
+      expect(result.waivers).toEqual([
+        expect.objectContaining({ id: "w1", template_version: 3, has_pdf: true }),
+      ]);
+      expect(result.waivers[0]).not.toHaveProperty("signer_ip");
+      expect(result.waivers[0]).not.toHaveProperty("signer_meta");
+      expect(result.waivers[0].is_paper).toBe(false);
+      expect(result).not.toHaveProperty("degraded");
+    });
+
+    it("captions a dependant's address as their guardian's", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({ action: "get_user", params: { user_id: CHILD } });
+      const { result } = await res.json();
+      expect(result.user).toMatchObject({
+        email: "gus@example.com",
+        email_belongs_to: "Gus Lovelace",
+      });
+      expect(result.household.guardian).toEqual({ user_id: GUARDIAN, name: "Gus Lovelace" });
+    });
+
+    it("404s an id with no person record", async () => {
+      currentAdmin = fakeTables(tables(), { emails: EMAILS });
+      const res = await post({
+        action: "get_user",
+        params: { user_id: "99999999-9999-4999-8999-999999999999" },
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe("not_found");
+    });
+
+    it.each(["memberships", "session_checkins", "waivers"])(
+      "is a db_error, not an empty section, when the %s read fails",
+      async (table) => {
+        currentAdmin = fakeTables(tables(), { emails: EMAILS, fail: { [table]: "boom" } });
+        const res = await post({ action: "get_user", params: { user_id: PERSON } });
+        expect(res.status).toBe(500);
+        expect((await res.json()).error.code).toBe("db_error");
+      },
+    );
+
+    // The page shows these as "not signed yet" so a manager can still approve
+    // somebody. An agent would act on that guess, so it gets the failure.
+    it("is a db_error when the code of conduct could not be read", async () => {
+      currentAdmin = fakeTables(tables(), {
+        emails: EMAILS,
+        fail: { code_of_conduct_acceptances: "boom" },
+      });
+      const res = await post({ action: "get_user", params: { user_id: PERSON } });
+      expect(res.status).toBe(500);
+      expect((await res.json()).error.code).toBe("db_error");
+    });
+
+    it("refuses a call naming the person as id rather than user_id", async () => {
+      currentAdmin = {};
+      const res = await post({ action: "get_user", params: { id: PERSON } });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_params");
+    });
+  });
+});
+
 describe("manager agent route: club settings", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -1201,6 +1498,630 @@ describe("manager agent route: resend_email", () => {
     });
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("paid");
+  });
+});
+
+describe("manager agent route: the code of conduct", () => {
+  const v = (version: number, over: Record<string, unknown> = {}) => ({
+    id: `id-${version}`,
+    version,
+    title: "UTS Jitsu Code of Conduct",
+    body_md: `# Version ${version}`,
+    asks_reagreement: false,
+    required_version: 1,
+    is_current: false,
+    first_published_at: "2026-10-01T00:00:00.000Z",
+    created_at: "2026-10-01T00:00:00.000Z",
+    ...over,
+  });
+  const LIVE = v(2, { is_current: true });
+
+  beforeEach(() => {
+    vi.resetModules();
+    currentAdmin = {};
+    for (const m of [
+      listCodeOfConductVersionRowsMock,
+      listCodeOfConductVersionFlagsMock,
+      listCodeOfConductVersionSummariesMock,
+      loadCodeOfConductVersionMock,
+      saveCodeOfConductVersionMock,
+      promoteCodeOfConductVersionMock,
+      highestAcceptedVersionsMock,
+    ])
+      m.mockReset();
+  });
+
+  async function refusal(
+    message: string,
+    reason: "not_found" | "invalid" | "not_published",
+    version?: number,
+  ) {
+    const { DocumentVersionError } = await import("@/lib/document-versions");
+    return new DocumentVersionError(message, reason, version);
+  }
+
+  it("lists versions without their text, with what the club asks of people", async () => {
+    // Version 3 was rolled away from: newer than the live one, but it was live.
+    listCodeOfConductVersionSummariesMock.mockResolvedValue([
+      v(3, { asks_reagreement: true, required_version: 3 }),
+      LIVE,
+      v(1, { asks_reagreement: true }),
+    ]);
+    const res = await post({ action: "list_code_of_conduct_versions", params: {} });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({ count: 3, live_version: 2, required_version: 1 });
+    expect(result.versions[0]).toMatchObject({ version: 3, status: "Previous" });
+    expect(result.versions[1]).toMatchObject({
+      version: 2,
+      status: "Live",
+      asks_reagreement: false,
+    });
+    expect(result.versions[2]).toMatchObject({ status: "Previous", asks_reagreement: true });
+    expect(result.versions[1]).not.toHaveProperty("body_md");
+    // The listing never reads any version's text.
+    expect(listCodeOfConductVersionRowsMock).not.toHaveBeenCalled();
+  });
+
+  it("says nobody can read it when nothing is live", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(null);
+    const res = await post({ action: "get_code_of_conduct", params: {} });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.message).toMatch(/nobody can read it/);
+  });
+
+  it("carries the text over when only asking everybody to agree again", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
+    // Two people up to date on 1 and 2, one already behind (nothing below 1).
+    highestAcceptedVersionsMock.mockResolvedValue([1, 2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: false,
+    });
+    const res = await post({ action: "save_code_of_conduct", params: { asks_reagreement: true } });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({
+      version: 3,
+      based_on: 2,
+      asks_reagreement: true,
+      reprompted: 2,
+    });
+    expect(saveCodeOfConductVersionMock.mock.calls[0][1]).toMatchObject({
+      title: LIVE.title,
+      body_md: LIVE.body_md,
+      asks_reagreement: true,
+    });
+    // The save works from the flags this count read, not a second read.
+    expect(saveCodeOfConductVersionMock.mock.calls[0][3]).toEqual([
+      LIVE,
+      v(1, { asks_reagreement: true }),
+    ]);
+  });
+
+  // A correction must not ask anybody anything, and must not spend a read on
+  // counting people it cannot affect.
+  it("re-prompts nobody for a correction", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(1, { asks_reagreement: true })]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: false,
+    });
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: { title: "Code", body_md: "# Fixed" },
+    });
+    const { result } = await res.json();
+    expect(result).toMatchObject({ asks_reagreement: false, reprompted: 0, based_on: null });
+  });
+
+  // With nothing live, a correction inherits the newest version's requirement,
+  // which can put people out of date without anybody asking. The reply has to
+  // say so rather than report the 0 a correction normally means.
+  it("counts who a correction re-prompts when nothing was live", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([
+      v(2, { asks_reagreement: true, required_version: 2 }),
+      v(1, { asks_reagreement: true }),
+    ]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 1, 2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: false,
+    });
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: { title: "Code", body_md: "# Fixed" },
+    });
+    expect((await res.json()).result).toMatchObject({ asks_reagreement: false, reprompted: 2 });
+  });
+
+  it("refuses a save that changes nothing", async () => {
+    const res = await post({ action: "save_code_of_conduct", params: {} });
+    expect(res.status).toBe(400);
+    expect(saveCodeOfConductVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a replayed save as already saved, re-prompting nobody new", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE]);
+    highestAcceptedVersionsMock.mockResolvedValue([2]);
+    saveCodeOfConductVersionMock.mockResolvedValue({
+      id: "id-3",
+      version: 3,
+      is_current: true,
+      already_saved: true,
+    });
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: {
+        asks_reagreement: true,
+        client_submission_id: "11111111-1111-4111-8111-111111111111",
+      },
+    });
+    expect((await res.json()).result).toMatchObject({ already_saved: true, reprompted: 0 });
+  });
+
+  it("reports a version written but not made live as a retryable 503", async () => {
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE]);
+    highestAcceptedVersionsMock.mockResolvedValue([]);
+    saveCodeOfConductVersionMock.mockRejectedValue(
+      await refusal("Someone else changed it.", "not_published", 3),
+    );
+    const res = await post({
+      action: "save_code_of_conduct",
+      params: { title: "Code", body_md: "# Fixed" },
+    });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("5");
+    const body = await res.json();
+    expect(body.error.code).toBe("code_of_conduct_not_published");
+    expect(body.error.details).toEqual({ version: 3, published: false });
+  });
+
+  it("rolls back, saying who is out of date afterwards", async () => {
+    // Version 2 did not ask, so it requires what version 1 did. Rolling back
+    // from version 3, which asked, puts nobody out of date.
+    loadCodeOfConductVersionMock.mockResolvedValue(v(2, { required_version: 1 }));
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([
+      v(1, { asks_reagreement: true }),
+      v(2, { required_version: 1 }),
+      v(3, { asks_reagreement: true, required_version: 3, is_current: true }),
+    ]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 3]);
+    promoteCodeOfConductVersionMock.mockResolvedValue({ version: 2 });
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 2 } });
+    expect((await res.json()).result).toEqual({
+      version: 2,
+      published: true,
+      required_version: 1,
+      reprompted: 0,
+    });
+  });
+
+  // The editor tells a manager how many people a publish re-prompts before the
+  // click; the API reports the same number, so an agent can say it too.
+  it("says how many people a publish asks to agree again", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(
+      v(3, { asks_reagreement: true, required_version: 3 }),
+    );
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([
+      v(1, { asks_reagreement: true }),
+      LIVE,
+      v(3, { asks_reagreement: true, required_version: 3 }),
+    ]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 2, 3]);
+    promoteCodeOfConductVersionMock.mockResolvedValue({ version: 3 });
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 3 } });
+    expect((await res.json()).result).toMatchObject({ published: true, reprompted: 2 });
+  });
+
+  it("publishes nothing when it cannot count who the publish re-prompts", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(v(3));
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(3)]);
+    highestAcceptedVersionsMock.mockRejectedValue(new Error("connection reset"));
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 3 } });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error.code).toBe("db_error");
+    expect(promoteCodeOfConductVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing, and says so, for the version already live", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(LIVE);
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 2 } });
+    expect((await res.json()).result).toEqual({ version: 2, published: false });
+    expect(promoteCodeOfConductVersionMock).not.toHaveBeenCalled();
+  });
+
+  it("404s a version that does not exist", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(null);
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 9 } });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("manager agent route: the blog", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    notifyNewBlogPostMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const DRAFT_ID = "5b0f3c1e-9a8d-4c2b-8e7f-1a2b3c4d5e6f";
+  const LIVE_ID = "6c1a4d2f-0b9e-4d3c-9f80-2b3c4d5e6f70";
+
+  type Row = Record<string, unknown>;
+
+  /**
+   * An in-memory `blog_posts` table and `blog-media` bucket, evaluating the
+   * filters each chain applies rather than ignoring them, so a save that wrote
+   * the wrong row or a slug check that matched nothing would show.
+   */
+  function fakeBlog(seed: Row[], opts: { afterFirstRead?: (rows: Row[]) => void } = {}) {
+    const rows = seed.map((r) => ({ ...r }));
+    let reads = 0;
+    const uploads: { path: string; type: string; size: number }[] = [];
+    const removed: string[] = [];
+    const query = (op: "select" | "update" | "delete", patch?: Row) => {
+      const filters: ((r: Row) => boolean)[] = [];
+      const matching = () => rows.filter((r) => filters.every((f) => f(r)));
+      const run = () => {
+        const hit = matching();
+        if (op === "update") for (const r of hit) Object.assign(r, patch);
+        if (op === "delete") for (const r of hit) rows.splice(rows.indexOf(r), 1);
+        return hit.map((r) => ({ ...r }));
+      };
+      const c: Record<string, unknown> = {
+        eq: (col: string, val: unknown) => (filters.push((r) => r[col] === val), c),
+        neq: (col: string, val: unknown) => (filters.push((r) => r[col] !== val), c),
+        ilike: (col: string, pattern: string) => {
+          const re = new RegExp(
+            `^${pattern
+              .split("%")
+              .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+              .join(".*")}$`,
+            "i",
+          );
+          filters.push((r) => re.test(String(r[col])));
+          return c;
+        },
+        order: () => c,
+        limit: () => c,
+        select: () => c,
+        maybeSingle: () => {
+          const hit = run()[0] ?? null;
+          if (reads++ === 0) opts.afterFirstRead?.(rows);
+          return Promise.resolve(ok(hit));
+        },
+        then: (resolve: (r: unknown) => void) => resolve(ok(run())),
+      };
+      return c;
+    };
+    return {
+      rows,
+      uploads,
+      removed,
+      db: {
+        from: (table: string) => {
+          if (table !== "blog_posts") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => query("select"),
+            update: (patch: Row) => query("update", patch),
+            delete: () => query("delete"),
+            insert: (row: Row) => ({
+              select: () => ({
+                single: () => {
+                  const id = "7d2b5e30-1caf-4e4d-a091-3c4d5e6f7081";
+                  rows.push({ id, created_at: "2026-10-24T00:00:00Z", updated_at: "now", ...row });
+                  return Promise.resolve(ok({ id, slug: row.slug }));
+                },
+              }),
+            }),
+          };
+        },
+        storage: {
+          from: (bucket: string) => {
+            if (bucket !== "blog-media") throw new Error(`unexpected bucket ${bucket}`);
+            return {
+              upload: (path: string, bytes: Uint8Array, opts: { contentType: string }) => {
+                uploads.push({ path, type: opts.contentType, size: bytes.byteLength });
+                return Promise.resolve({ error: null });
+              },
+              getPublicUrl: (path: string) => ({
+                data: { publicUrl: `https://cdn.example.com/blog-media/${path}` },
+              }),
+              remove: (paths: string[]) => {
+                removed.push(...paths);
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        },
+      },
+    };
+  }
+
+  const DRAFT = {
+    id: DRAFT_ID,
+    slug: "2026-10-20-grading-day",
+    title: "Grading day",
+    excerpt: "Who is grading, and when.",
+    body_md: "Grading is on Saturday.",
+    cover_image_path: "drafts/cover.jpg",
+    status: "draft",
+    published_at: null,
+    created_at: "2026-10-20T00:00:00Z",
+    updated_at: "2026-10-20T00:00:00Z",
+  };
+  const LIVE = {
+    ...DRAFT,
+    id: LIVE_ID,
+    slug: "2026-09-01-welcome",
+    title: "Welcome",
+    status: "published",
+    published_at: "2026-09-01T00:00:00Z",
+  };
+
+  // The reason the action carries omitted fields over: publishing a draft is
+  // one field, and it must not wipe the cover or the excerpt it was written with.
+  it("publishes a draft from status alone, keeping everything else, and announces it once", async () => {
+    const fake = fakeBlog([DRAFT]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { id: DRAFT_ID, status: "published" },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({
+      created: false,
+      announced: true,
+      post: {
+        status: "published",
+        title: "Grading day",
+        excerpt: "Who is grading, and when.",
+        cover_image_path: "drafts/cover.jpg",
+        url: "https://utsjitsu.com.au/blog/2026-10-20-grading-day",
+        edit_url: `https://utsjitsu.com.au/manager/blog/${DRAFT_ID}`,
+      },
+    });
+    expect(fake.rows[0].body_md).toBe("Grading is on Saturday.");
+    expect(fake.rows[0].published_at).toEqual(expect.any(String));
+    expect(notifyNewBlogPostMock).toHaveBeenCalledTimes(1);
+    expect(notifyNewBlogPostMock.mock.calls[0][1]).toMatchObject({
+      postId: DRAFT_ID,
+      actorId: TOKEN_OWNER,
+    });
+  });
+
+  // The failure this guards: the shared writer reads an absent status as
+  // draft, so a typo fix sent straight through would take the post down.
+  it("edits a live post's body without unpublishing it or announcing it again", async () => {
+    const fake = fakeBlog([LIVE]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { id: LIVE_ID, body_md: "Welcome to the club." },
+    });
+    expect(res.status).toBe(200);
+    expect(fake.rows[0]).toMatchObject({
+      status: "published",
+      published_at: "2026-09-01T00:00:00Z",
+      body_md: "Welcome to the club.",
+      cover_image_path: "drafts/cover.jpg",
+      slug: "2026-09-01-welcome",
+    });
+    expect((await res.json()).result.announced).toBe(false);
+    expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // Members were told the first time. Republishing calls the announcement
+  // again, but the unique index swallows it, so it must not be reported as one.
+  it("does not report a republish as announcing the post again", async () => {
+    const fake = fakeBlog([{ ...LIVE, status: "draft" }]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { id: LIVE_ID, status: "published" },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toMatchObject({
+      announced: false,
+      post: { status: "published", published_at: "2026-09-01T00:00:00Z" },
+    });
+  });
+
+  it("creates a new post as a draft with no public address unless told otherwise", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { title: "Summer timetable", body_md: "Classes run all summer." },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({
+      created: true,
+      announced: false,
+      post: { status: "draft", url: null },
+    });
+    expect(result.post.slug).toMatch(/^\d{4}-\d{2}-\d{2}-summer-timetable$/);
+    expect(result.post.excerpt).toBe("Classes run all summer.");
+    expect(fake.rows[0].author_id).toBe(TOKEN_OWNER);
+    expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // A create the agent never heard back from gets retried. Suffixing the
+  // address the way the editor does would file the post twice and announce it
+  // twice; refusing names the post the first attempt made.
+  it("refuses a create whose address is taken, naming the post that has it", async () => {
+    const fake = fakeBlog([DRAFT]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { title: "Grading day", body_md: "Again.", slug: DRAFT.slug, status: "published" },
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatchObject({
+      code: "slug_taken",
+      details: { id: DRAFT_ID, slug: DRAFT.slug },
+    });
+    expect(fake.rows).toHaveLength(1);
+    expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // The agent writes back the fields it did not send, from what it read. A
+  // manager's save landing in between must not be quietly undone.
+  it("refuses an edit when the post was saved after it was read, writing nothing", async () => {
+    const fake = fakeBlog([LIVE], {
+      afterFirstRead: (rows) => {
+        rows[0].body_md = "The manager's new body.";
+        rows[0].updated_at = "2026-10-24T09:00:00Z";
+      },
+    });
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_blog_post", params: { id: LIVE_ID, title: "Hello" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("post_changed");
+    expect(fake.rows[0]).toMatchObject({ title: "Welcome", body_md: "The manager's new body." });
+  });
+
+  it("refuses a new post with no body, writing nothing", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_blog_post", params: { title: "Half a post" } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_params");
+    expect(fake.rows).toEqual([]);
+  });
+
+  it("reports a change to a post that is not there as not_found", async () => {
+    currentAdmin = fakeBlog([]).db;
+    const res = await post({ action: "save_blog_post", params: { id: DRAFT_ID, title: "x" } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+  });
+
+  it("reads a draft by its slug, body included", async () => {
+    currentAdmin = fakeBlog([DRAFT, LIVE]).db;
+    const res = await post({ action: "get_blog_post", params: { slug: DRAFT.slug } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result.post).toMatchObject({
+      id: DRAFT_ID,
+      body_md: "Grading is on Saturday.",
+      cover_image_url: "https://cdn.example.com/blog-media/drafts/cover.jpg",
+      url: null,
+    });
+  });
+
+  it("lists drafts and live posts alike, with the public address only on the live one", async () => {
+    currentAdmin = fakeBlog([DRAFT, LIVE]).db;
+    const res = await post({ action: "list_blog_posts", params: {} });
+    const { result } = await res.json();
+    expect(result.count).toBe(2);
+    expect(result.posts.map((p: { url: string | null }) => p.url)).toEqual([
+      null,
+      "https://utsjitsu.com.au/blog/2026-09-01-welcome",
+    ]);
+    expect(result.posts[0]).not.toHaveProperty("body_md");
+  });
+
+  it("deletes a post and its cover, and reports one that is not there as not_found", async () => {
+    const fake = fakeBlog([DRAFT]);
+    currentAdmin = fake.db;
+    const res = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
+    expect(res.status).toBe(200);
+    expect(fake.rows).toEqual([]);
+    expect(fake.removed).toEqual(["drafts/cover.jpg"]);
+
+    const again = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
+    expect(again.status).toBe(404);
+  });
+
+  // The agent can give two posts the same stored picture. Deleting one must
+  // not take the picture away from the other.
+  it("keeps a cover another post still shows", async () => {
+    const fake = fakeBlog([
+      DRAFT,
+      { ...LIVE, cover_image_path: null, body_md: "![x](https://cdn/blog-media/drafts/cover.jpg)" },
+    ]);
+    currentAdmin = fake.db;
+    const res = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
+    expect(res.status).toBe(200);
+    expect(fake.rows.map((r) => r.id)).toEqual([LIVE_ID]);
+    expect(fake.removed).toEqual([]);
+  });
+
+  // A one-pixel PNG: the smallest real image there is.
+  const PNG_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  it("stores a base64 image under the type its bytes say, with markdown to paste", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "upload_blog_image",
+      params: { data: PNG_BASE64, name: "mat", alt: "The mats laid out" },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(fake.uploads).toEqual([
+      { path: expect.stringMatching(/^drafts\/.+-mat\.png$/), type: "image/png", size: 70 },
+    ]);
+    expect(result).toMatchObject({ type: "image/png", path: fake.uploads[0].path });
+    expect(result.markdown).toBe(`![The mats laid out](${result.url})`);
+  });
+
+  it("refuses bytes that are not an image, storing nothing", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "upload_blog_image",
+      params: { data: btoa("<html>not a picture</html>"), name: "photo.png" },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("image_rejected");
+    expect(fake.uploads).toEqual([]);
+  });
+
+  it("downloads an image from a public https address", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const png = Uint8Array.from(atob(PNG_BASE64), (ch) => ch.charCodeAt(0));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(png, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({
+      action: "upload_blog_image",
+      params: { url: "https://images.example.com/photos/belt.png" },
+    });
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fake.uploads[0].path).toMatch(/-belt\.png$/);
+  });
+
+  it("will not fetch an address that is not public https", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({
+      action: "upload_blog_image",
+      params: { url: "http://169.254.169.254/latest/meta-data" },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("image_rejected");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fake.uploads).toEqual([]);
   });
 });
 

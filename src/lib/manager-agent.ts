@@ -7,10 +7,11 @@
 //
 // Keep AGENT_MANIFEST, managerAgentActions (validation.ts), the route dispatch,
 // and the skill (.claude/skills/uts-manager-agent/) in lockstep. See docs/manager-agent-api.md.
-import { formatCents, sameInstant } from "@/lib/validation";
-import type { EditInvoiceInput } from "@/lib/validation";
+import { formatCents, isPaperWaiver, sameInstant } from "@/lib/validation";
+import type { AgentSaveBlogPostInput, BlogPostInput, EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
-import { versionLabel } from "@/lib/waiver-template-editor";
+import { versionLabel } from "@/lib/document-versions";
+import { SITE_ORIGIN, canonicalUrl } from "@/lib/seo";
 
 /** The columns `list_kb_articles` projects from. */
 export type AgentKbArticle = {
@@ -118,6 +119,172 @@ export function projectAgentWaiverTemplate(
   };
 }
 
+/**
+ * What the person page reads that `get_user` does NOT report, each with why.
+ *
+ * Everything else passes through. That is the point of the shape: `get_user`
+ * is the person page's own read (`loadClubUser`), so a field added to that page
+ * reaches the API in the same change without anybody remembering to project it,
+ * and leaving one out has to be written down here, where a test checks the list
+ * against the read.
+ */
+export const GET_USER_LEFT_OUT = {
+  /** The read's own bookkeeping: the endpoint turns a non-empty list into a 500. */
+  top: ["degraded"],
+  /**
+   * The signer's IP address and browser context, kept on a waiver as forensic
+   * evidence. No agent workflow needs them, and an agent's transcript is a far
+   * less careful place to keep somebody's IP address than the database.
+   *
+   * The one thing the page reads out of `signer_meta` is whether the waiver is
+   * a scanned paper form, so that much is reported, as `is_paper`.
+   */
+  waiver: ["signer_ip", "signer_meta"],
+} as const;
+
+/**
+ * `get_user`'s result: the person page's read, less what `GET_USER_LEFT_OUT`
+ * names. Generic rather than typed against `loadClubUser`, because this module
+ * is pure and server-import-free (see the header); the test pins it against the
+ * real read.
+ */
+export function projectAgentUser<
+  R extends Record<GetUserTopLeftOut, unknown> & {
+    waivers: Record<GetUserWaiverLeftOut, unknown>[];
+  },
+>(
+  read: R,
+): Omit<R, GetUserTopLeftOut | "waivers"> & {
+  waivers: AgentUserWaiver<R["waivers"][number]>[];
+} {
+  // Driven by the list rather than restating it, so a name added there is
+  // withheld here: the list is the promise, and this is what keeps it.
+  return {
+    ...omit(read, GET_USER_LEFT_OUT.top),
+    waivers: read.waivers.map((w) => ({
+      ...omit(w, GET_USER_LEFT_OUT.waiver),
+      // The person page's "Filing record" rather than "Signing record". An
+      // agent filing paper waivers needs it to tell what is already on file.
+      is_paper: isPaperWaiver(w.signer_meta),
+    })),
+  } as Omit<R, GetUserTopLeftOut | "waivers"> & {
+    waivers: AgentUserWaiver<R["waivers"][number]>[];
+  };
+}
+
+type AgentUserWaiver<W> = Omit<W, GetUserWaiverLeftOut> & { is_paper: boolean };
+
+type GetUserTopLeftOut = (typeof GET_USER_LEFT_OUT.top)[number];
+type GetUserWaiverLeftOut = (typeof GET_USER_LEFT_OUT.waiver)[number];
+
+function omit<T extends object, K extends string>(value: T, keys: readonly K[]): Omit<T, K> {
+  const copy = { ...value } as Record<string, unknown>;
+  for (const k of keys) delete copy[k];
+  return copy as Omit<T, K>;
+}
+
+/**
+ * One stored code-of-conduct version as `list_code_of_conduct_versions` reports
+ * it: no text (one call away on `get_code_of_conduct`, and not read at all for
+ * the listing), the same Live/Previous/Draft word the editor screen shows, and
+ * whether publishing it asked everybody to agree again. Structural, like
+ * `AgentWaiverTemplate`, so this module stays server-import-free.
+ *
+ * The label uses `first_published_at`, so a version rolled away from still
+ * reads "Previous" rather than "Draft".
+ */
+export function projectAgentCodeOfConductVersion(
+  version: {
+    version: number;
+    title: string;
+    asks_reagreement: boolean;
+    required_version: number;
+    is_current: boolean;
+    first_published_at: string | null;
+    created_at: string;
+  },
+  liveVersion: number | null,
+) {
+  return {
+    version: version.version,
+    title: version.title,
+    is_current: version.is_current,
+    status: versionLabel(version, liveVersion, version.first_published_at !== null),
+    asks_reagreement: version.asks_reagreement,
+    required_version: version.required_version,
+    first_published_at: version.first_published_at,
+    created_at: version.created_at,
+  };
+}
+
+/** The `blog_posts` columns the blog actions project from. */
+export type AgentBlogPost = {
+  id: string;
+  slug: string;
+  title: string;
+  status: string;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * A post as the blog actions report it. Two addresses, because they answer
+ * different questions: `url` is where the public reads it, and is null for a
+ * draft, which has no public address (the public route 404s on one, so a link
+ * to it handed to anybody is a dead link); `edit_url` is the manager's own
+ * screen for it, which works whatever its status and is the link to give a
+ * manager who wants to look before it goes live.
+ */
+export function projectAgentBlogPost(post: AgentBlogPost) {
+  return {
+    id: post.id,
+    slug: post.slug,
+    title: post.title,
+    status: post.status,
+    published_at: post.published_at,
+    created_at: post.created_at,
+    updated_at: post.updated_at,
+    url: post.status === "published" ? canonicalUrl(`/blog/${post.slug}`) : null,
+    edit_url: `${SITE_ORIGIN}/manager/blog/${post.id}`,
+  };
+}
+
+/** The stored post a `save_blog_post` change starts from. */
+export type AgentBlogPostStored = {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  body_md: string;
+  cover_image_path: string | null;
+  status: string;
+};
+
+/**
+ * The whole post a `save_blog_post` change writes: what the agent sent, and
+ * the stored value of everything it left out.
+ *
+ * This is the function the action's safety rests on. The post form always
+ * sends every field, so the shared writer treats an absent `status` as draft
+ * and an absent `cover_image_path` as none. Sent straight through, "fix the
+ * typo in the second paragraph" would unpublish the post and drop its cover.
+ */
+export function mergeAgentBlogPostEdit(
+  stored: AgentBlogPostStored,
+  input: AgentSaveBlogPostInput,
+): BlogPostInput & { id: string } {
+  return {
+    id: stored.id,
+    title: input.title ?? stored.title,
+    slug: input.slug ?? stored.slug,
+    excerpt: input.excerpt ?? stored.excerpt ?? "",
+    body_md: input.body_md ?? stored.body_md,
+    cover_image_path: input.cover_image_path ?? stored.cover_image_path ?? "",
+    status: input.status ?? (stored.status === "published" ? "published" : "draft"),
+  };
+}
+
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
 export type AgentActionSpec = {
   name: string;
@@ -141,7 +308,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "23",
+  version: "26",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -155,7 +322,7 @@ export const AGENT_MANIFEST: {
   // new response field — which is what these notes name.
   changes: [
     {
-      version: "23",
+      version: "26",
       // A new optional param and two new response fields. Nothing that worked
       // before changes: without `announce`, save_membership_plan does exactly
       // what it did, with `announcement: null` added to its response.
@@ -163,6 +330,39 @@ export const AGENT_MANIFEST: {
       notes: [
         "save_membership_plan takes `announce: true` plus an `announcement_id` (a UUID you mint) to email every member about the plan once it is saved, the same as the manager screen's \"Email all members about this plan\" box. It is sent straight away, one email per family, and nobody can switch it off. The response gains `announcement`: { announcement_id, recipients, emailed, pending, announced_at }, null when not announcing. Reuse the same announcement_id to retry or to finish a send that left `pending` above zero: nobody is emailed twice. A new id announces the plan again, on purpose. `announce: true` without an id is 400 `invalid_params` before anything is saved; an id already used for another plan is 409 `submission_conflict`; a saved plan whose email failed is 502 `announcement_failed` with the plan's id in `error.details` (retry with that id, so a plan you just created is not created again); an `id` that matches no plan is 404 `not_found`.",
         "list_membership_plans adds `last_announcement` to each plan: its most recent announcement ({ announcement_id, announced_at, recipients, emailed, times }), or null if it was never announced.",
+      ],
+    },
+    {
+      version: "25",
+      // Purely additive: five new actions. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "New actions for the blog, the same writes the manager's blog editor makes: list_blog_posts and get_blog_post read posts, drafts included; save_blog_post creates a post or changes one, and publishes it when status is published; delete_blog_post deletes one for good; upload_blog_image stores a picture for a post, from base64 data or a public https url, and returns the path for cover_image_path and the markdown for body_md.",
+        "A new post never takes an address another post already has: save_blog_post refuses with 409 slug_taken and names the post that has it, so a retried create cannot file the post twice or announce it twice. An edit refuses with 409 post_changed when the post was saved by somebody else after the edit read it, rather than writing back what it read over their change.",
+        "Publishing is public and announced. The first time a post goes live, every member who opted in to announcements hears about it in their daily summary email, and taking the post back to draft does not take that back. On a change, save_blog_post keeps every field you leave out, so sending only status publishes a draft as it stands.",
+      ],
+    },
+    {
+      version: "24",
+      // Four new actions and one new field. Nothing that worked before changes,
+      // though what "outdated" means did move, which a caller acting on it
+      // should read.
+      breaking: false,
+      notes: [
+        "The code of conduct is now a document managers edit, in numbered versions with one live, like the waiver. New actions: list_code_of_conduct_versions, get_code_of_conduct, save_code_of_conduct and publish_code_of_conduct, with the same contract as the four waiver template actions: keyed on the version number, saving publishes, an omitted title/body is carried over from base_version (default the live one) and based_on names it, refusals are 404 not_found, 422 save_code_of_conduct_failed / publish_code_of_conduct_failed, and 503 code_of_conduct_not_published with Retry-After.",
+        "save_code_of_conduct takes asks_reagreement (default false): whether this version asks everybody who agreed to an older one to agree again. Leave it off for a correction. The reply's reprompted says how many people it put out of date, and publish_code_of_conduct's reply carries the same count. It also takes client_submission_id: resend the same one on a retry and you get already_saved true and no second version. If that version is not live (it lost the publish, or the live version changed since), the retry is 503 code_of_conduct_not_published with details.version and nothing is made live: publish it yourself only if it should replace what is live now.",
+        "code_of_conduct on list_users rows and in get_user carries required_version: the version people must have agreed to while the live one is live (the last version that asked everybody to agree again, unless a rollback undid that ask). state is now outdated only when accepted_version is below required_version, not below current_version, so a typo-fix version no longer puts anybody out of date. current_version is null if nothing is live.",
+      ],
+    },
+    {
+      version: "23",
+      // A new read-only action and three new list_users fields. Nothing that
+      // worked before changes.
+      breaking: false,
+      notes: [
+        "New action get_user { user_id }: everything the manager person page shows about one person, read by the same function the page uses. user (name, email with email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, the newest membership's kind and status), profile (contact details, date of birth, address, emergency contact, medical notes, the guardian block, kit sizes, photo consent), household, memberships, checkins (attendance, newest first), code_of_conduct, and waivers (approval status, template_version, signed_at, has_pdf, approver, and is_paper for a scanned paper form). A waiver's signer_ip and signer_meta are deliberately left out.",
+        "get_user reports a person, not a lead: an id with no person record is 404 not_found. A read it could only half answer (the address, the code of conduct, the guardian's name, a class name or a waiver approver's name could not be read) is 500 db_error, never a null email, an `unsigned` or an unknown name it did not actually check.",
+        "list_users rows carry phone, email_confirmed_at (null means the address is not verified; for a dependant it is the state of the guardian's address, like email itself) and code_of_conduct: { state: unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name }. The same object get_user and the person page report.",
       ],
     },
     {
@@ -435,7 +635,7 @@ export const AGENT_MANIFEST: {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining.",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining. Each row also carries phone, email_confirmed_at (null = not verified) and code_of_conduct (the same object get_user reports). For anything more about one person (profile, waivers, attendance), call get_user.",
       params: [
         {
           name: "status",
@@ -446,6 +646,19 @@ export const AGENT_MANIFEST: {
           name: "limit",
           required: false,
           description: "Max users to return (1-500, default 200).",
+        },
+      ],
+    },
+    {
+      name: "get_user",
+      method: "POST",
+      summary:
+        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at and checkin_count; list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at, approver, and is_paper: true for a scanned paper form filed by a manager). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
+      params: [
+        {
+          name: "user_id",
+          required: true,
+          description: "The person's user UUID, from list_users.",
         },
       ],
     },
@@ -771,6 +984,71 @@ export const AGENT_MANIFEST: {
           required: true,
           description: "The version number to make live, as reported by list_waiver_templates.",
         },
+      ],
+    },
+    {
+      name: "list_code_of_conduct_versions",
+      method: "POST",
+      summary:
+        "Every stored version of the club's code of conduct, newest first, without the text: version, title, is_current, status (Live | Previous | Draft, the editor's own word; Previous means it has been live, so a version rolled away from is still Previous), asks_reagreement (whether publishing it asked everybody to agree again), required_version (the version people must have agreed to while it is live) and first_published_at. Also live_version (null means nobody can read or agree to it right now) and required_version (anybody whose highest agreement is below it is out of date).",
+      params: [],
+    },
+    {
+      name: "get_code_of_conduct",
+      method: "POST",
+      summary:
+        "One version's full text: title, body_md (a small markdown subset: # Heading, ## Section, - bullet, **bold**, bare https:// links, blank line between paragraphs), asks_reagreement, is_current. The live one when no version is named, which is the is_current row, not the newest: they differ after a rollback.",
+      params: [
+        {
+          name: "version",
+          required: false,
+          description: "The version number. Defaults to the live one.",
+        },
+      ],
+    },
+    {
+      name: "save_code_of_conduct",
+      method: "POST",
+      summary:
+        "Write a new version of the code of conduct and make it live on /code-of-conduct straight away (saving publishes; there is no draft). An omitted title/body_md is carried over from base_version, default the live one; title and body_md travel together. asks_reagreement (default false) decides whether everybody who agreed to an older version is now out of date: leave it off for a correction, turn it on when the rules change. The reply carries reprompted, how many people it put out of date (normally 0 when asks_reagreement is false; it can be more if nothing was live, because the new version then inherits the newest version's requirement). A call with no new text and asks_reagreement false is refused: there is nothing to save. Nobody is emailed either way, and being out of date never blocks anything.",
+      params: [
+        {
+          name: "title",
+          required: false,
+          description: "The new title. Send with body_md, or neither.",
+        },
+        {
+          name: "body_md",
+          required: false,
+          description:
+            "The new text, in the markdown subset get_code_of_conduct describes. Send with title, or neither.",
+        },
+        {
+          name: "asks_reagreement",
+          required: false,
+          description:
+            "true to ask everybody who agreed to an earlier version to agree again. Default false.",
+        },
+        {
+          name: "base_version",
+          required: false,
+          description: "Which version an omitted field is carried over from. Default the live one.",
+        },
+        {
+          name: "client_submission_id",
+          required: false,
+          description:
+            "A UUID you choose. Resend the same one on a retry: a save that already landed comes back with already_saved true instead of writing a second version.",
+        },
+      ],
+    },
+    {
+      name: "publish_code_of_conduct",
+      method: "POST",
+      summary:
+        "Make an existing version the live one, e.g. to roll back. published false means it was already live and nothing changed. The reply's required_version says who is out of date afterwards: rolling back below a version that asked everybody to agree again undoes that ask. Its reprompted is how many people the publish put out of date, counted before it (a failed count is 500 db_error and publishes nothing).",
+      params: [
+        { name: "version", required: true, description: "The version number to make live." },
       ],
     },
     {
@@ -1156,6 +1434,118 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "A UUID for this resend. Reuse it to retry the same resend safely; omit it and every call is a new send.",
+        },
+      ],
+    },
+    {
+      name: "list_blog_posts",
+      method: "POST",
+      summary:
+        "List every blog post, drafts included, newest first: id, slug, title, status (draft | published), published_at, and two addresses. url is where the public reads it, and is null for a draft, which has no public address. edit_url is the manager's own screen for the post, which works whatever its status. No bodies: get_blog_post reads one.",
+      params: [],
+    },
+    {
+      name: "get_blog_post",
+      method: "POST",
+      summary:
+        "Read one post, any status, in full: everything list_blog_posts reports plus excerpt, body_md (Markdown), cover_image_path and cover_image_url. Pass id, or the slug from the post's address (/blog/<slug>). 404 not_found when there is no such post.",
+      params: [
+        { name: "id", required: false, description: "The post's id. Send this or slug." },
+        {
+          name: "slug",
+          required: false,
+          description: "The last part of the post's address, /blog/<slug>. Send this or id.",
+        },
+      ],
+    },
+    {
+      name: "save_blog_post",
+      method: "POST",
+      summary:
+        "Create a post (no id) or change one (id). The same save as the manager's blog editor: a blank slug is made from the title and today's date, a blank excerpt is taken from the opening of the body, and published_at is set the first time a post goes live and never moves after that. On a change, every field you leave out keeps its stored value, so publishing a draft is {id, status: \"published\"} and fixing a typo is {id, body_md}. PUBLISHING IS PUBLIC AND ANNOUNCED: the first time a post goes live it is on the public blog at once, and every member who has opted in to announcements hears about it in their daily summary email. Taking it back to draft hides it again but cannot take the announcement back. Saving a post that is already live announces nothing. The result says whether this save announced it (announced), with the post's url and edit_url. 404 not_found for an id with no post. 409 slug_taken when a new post's address (the slug you sent, or the one made from today's date and the title) already belongs to a post, whose id and slug are in error.details: after a create you never heard back from, that is the post you made, so read it rather than creating again; for a genuinely different post, send a slug of your own. 409 post_changed when somebody saved the post after this change was read: nothing was written, so read it again and redo the change.",
+      params: [
+        {
+          name: "id",
+          required: false,
+          description: "The post to change, from list_blog_posts. Omit to create a new post.",
+        },
+        {
+          name: "title",
+          required: false,
+          description: "Up to 200 characters. Required for a new post.",
+        },
+        {
+          name: "body_md",
+          required: false,
+          description:
+            "The whole post as Markdown, up to 50000 characters. Required for a new post. It REPLACES the stored body, so read the post with get_blog_post first and edit what you get back. Images are ordinary Markdown images; put one in with the markdown that upload_blog_image returns. A line of its own reading [[video:<url>]] embeds a video: a YouTube link plays inline, any other link shows as a plain link.",
+        },
+        {
+          name: "status",
+          required: false,
+          description:
+            "draft | published. A new post is a draft unless you say otherwise. Omit on a change to leave it as it is. See the summary for what publishing does.",
+        },
+        {
+          name: "slug",
+          required: false,
+          description:
+            "The post's address, /blog/<slug>: lowercase letters, numbers and single hyphens. Omit on a new post to have one made from the date and title. Changing it on a live post moves the post to a new address and every link already shared to the old one stops working. A slug another post already has gets -2, -3 added rather than failing, so read the slug the result returns.",
+        },
+        {
+          name: "excerpt",
+          required: false,
+          description:
+            "The line under the title on the blog list, and the description search engines show. Up to 500 characters. An empty string takes it from the opening of the body. Omit on a change to keep the stored one, which does not follow a rewritten body by itself: send an empty string with the new body to have it taken afresh.",
+        },
+        {
+          name: "cover_image_path",
+          required: false,
+          description:
+            "The picture at the top of the post and on the blog list: the path that upload_blog_image returned, not its url. An empty string removes it.",
+        },
+      ],
+    },
+    {
+      name: "delete_blog_post",
+      method: "POST",
+      summary:
+        "Delete a post for good, with every comment on it. There is no undo and nothing keeps a copy. To take a post off the public blog and keep it, use save_blog_post with status draft instead. 404 not_found when there is no such post.",
+      params: [{ name: "id", required: true, description: "The post's id, from list_blog_posts." }],
+    },
+    {
+      name: "upload_blog_image",
+      method: "POST",
+      summary:
+        "Store an image for a blog post: PNG, JPEG, WebP or GIF, up to 8 MB. Send the image as base64 data, or a public https url for the server to download (the practical route over MCP, where the bytes would have to be typed out). The format is read from the image itself, so a file that is not one of the four is refused whatever it is called. Returns path (give it to save_blog_post as cover_image_path), url (where it is served from) and markdown (paste it into body_md where the image belongs). Storing an image changes no post: it shows nowhere until a save puts it in one. 422 image_rejected when the image can never be used (not an image, too large, an address that is not public https, or one that answers not found or forbidden); 502 image_fetch_failed when the address could not be read just now (no answer, too slow, busy, or a server error), which may work on a later try.",
+      params: [
+        {
+          name: "data",
+          required: false,
+          description: "The image as raw base64, no data: prefix. Send this or url.",
+        },
+        {
+          name: "url",
+          required: false,
+          description:
+            "A public https address to download it from: one that opens in a browser without signing in. Up to five redirects are followed. Send this or data.",
+        },
+        {
+          name: "alt",
+          required: false,
+          description:
+            "Words describing the image for somebody who cannot see it, used in the returned markdown. Defaults to the file name.",
+        },
+        {
+          name: "name",
+          required: false,
+          description: "A file name to store it under. Defaults to the one in url, else image.",
+        },
+        {
+          name: "post_id",
+          required: false,
+          description:
+            "The post it is for, which only decides the folder it is filed in. Omit for a post not saved yet.",
         },
       ],
     },

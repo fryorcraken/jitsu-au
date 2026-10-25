@@ -1,8 +1,15 @@
-// Server functions for the code of conduct: who is signing, and recording it.
+// Server functions for the code of conduct: the document's versions, who is
+// signing, and recording it.
 //
-// The document itself and every pure rule live in `code-of-conduct.ts`; this
-// file is the plumbing. Two things here are worth reading before changing
-// anything:
+// The document lives in `code_of_conduct_versions`, one row per saved version,
+// one live; every pure rule lives in `code-of-conduct.ts`. This file is the
+// plumbing. Three things here are worth reading before changing anything:
+//
+//   * **An acceptance names the version whose text was SHOWN.** The page sends
+//     the number it rendered, and signing refuses one that is no longer live,
+//     rather than recording "whatever is live at submit". A manager publishing
+//     while somebody reads would otherwise file their agreement against words
+//     they never saw.
 //
 //   * **Nobody types who they are.** The name and email stored on an acceptance
 //     are read from the person's profile and login by the server. The form
@@ -27,8 +34,24 @@ import {
 } from "@/lib/validation";
 import type { SignerMeta } from "@/lib/validation";
 import { householdTargetUserId, resolveSubject } from "@/lib/household";
-import { CODE_OF_CONDUCT_VERSION, codeOfConductState } from "@/lib/code-of-conduct";
-import type { CodeOfConductState } from "@/lib/code-of-conduct";
+import {
+  codeOfConductStandard,
+  codeOfConductSummary,
+  isSignableVersion,
+  requiredVersionForSave,
+  type CodeOfConductStandard,
+  type CodeOfConductVersionFlags,
+  type CodeOfConductState,
+} from "@/lib/code-of-conduct";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireManager } from "@/lib/require-manager";
+import {
+  saveCodeOfConductSchema,
+  setCurrentTemplateSchema,
+  type SaveCodeOfConductInput,
+} from "@/lib/validation";
+import { DocumentVersionError } from "@/lib/document-versions";
+import { promoteDocumentVersion, type VersionedDocument } from "@/lib/document-version-store";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -188,6 +211,35 @@ async function listAcceptances(
 }
 
 /**
+ * What the club currently asks of everybody: the live version, and the version
+ * it requires people to have agreed to (`codeOfConductStandard`).
+ *
+ * Exported because every surface that reports where somebody stands measures
+ * against it: the member's screens through `codeOfConductStatusFor`, the
+ * manager person page, and the manager agent API.
+ */
+export async function loadCodeOfConductStandard(
+  admin: AdminClient,
+): Promise<CodeOfConductStandard> {
+  return codeOfConductStandard(await listCodeOfConductVersionFlags(admin));
+}
+
+/**
+ * The facts of every stored version that decide who is out of date, without
+ * the text: what counting the effect of a save or a rollback needs, at a
+ * fraction of the size of every version's body.
+ */
+export async function listCodeOfConductVersionFlags(
+  admin: AdminClient,
+): Promise<CodeOfConductVersionFlags[]> {
+  const { data, error } = await admin
+    .from("code_of_conduct_versions")
+    .select("version, asks_reagreement, required_version, is_current");
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/**
  * The highest version a person has agreed to, and the state that follows from
  * it. Exported because both the member's account page and the manager's person
  * page need the same answer and must not derive it two different ways.
@@ -197,24 +249,21 @@ export async function codeOfConductStatusFor(
   userId: string,
 ): Promise<{
   state: CodeOfConductState;
-  version: number;
+  version: number | null;
   accepted_version: number | null;
   accepted_at: string | null;
   acceptances: CodeOfConductAcceptanceView[];
 }> {
-  const acceptances = await listAcceptances(admin, userId);
-  // Newest FIRST by date, but the state is about the highest VERSION agreed to:
-  // re-signing an old version after a new one would otherwise read as a
-  // downgrade, and the club has no reason to treat it as one.
-  const best = acceptances.reduce<CodeOfConductAcceptanceView | null>(
-    (top, a) => (!top || a.version > top.version ? a : top),
-    null,
-  );
+  const [acceptances, standard] = await Promise.all([
+    listAcceptances(admin, userId),
+    loadCodeOfConductStandard(admin),
+  ]);
+  const summary = codeOfConductSummary(acceptances, standard);
   return {
-    state: codeOfConductState(best?.version ?? null),
-    version: CODE_OF_CONDUCT_VERSION,
-    accepted_version: best?.version ?? null,
-    accepted_at: best?.accepted_at ?? null,
+    state: summary.state,
+    version: standard.current_version,
+    accepted_version: summary.accepted_version,
+    accepted_at: summary.accepted_at,
     acceptances,
   };
 }
@@ -277,7 +326,7 @@ export const getCodeOfConductSigner = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const signer = await resolveSigner(supabaseAdmin, data.token);
     if (!signer) {
-      return { signer: null, version: CODE_OF_CONDUCT_VERSION, status: null };
+      return { signer: null, status: null };
     }
     const subjectId = await codeOfConductSubject(supabaseAdmin, signer, data.userId);
     const status = await codeOfConductStatusFor(supabaseAdmin, subjectId);
@@ -299,7 +348,6 @@ export const getCodeOfConductSigner = createServerFn({ method: "POST" })
         signed_in: signer.signedIn,
       },
       subject,
-      version: CODE_OF_CONDUCT_VERSION,
       status,
     };
   });
@@ -343,17 +391,18 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, accepted_at: null };
 
-    // Refuse to file an agreement against text we cannot identify. The page
-    // holds its version for the life of the tab, so a deploy that changes the
-    // document mid-read would otherwise record agreement to wording the person
-    // never saw. Same rule the waiver applies to its template version.
-    if (data.version !== CODE_OF_CONDUCT_VERSION) {
+    const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
+
+    // Refuse to file an agreement against text the person did not see. The page
+    // sends the version it rendered and holds it for the life of the tab, so a
+    // manager publishing mid-read would otherwise record agreement to wording
+    // the person never saw. Same rule the waiver applies to its template version.
+    if (!isSignableVersion(data.version, await loadCodeOfConductStandard(admin))) {
       throw new Error(
         "The code of conduct was updated while you had this page open. Please reload and read the current version before signing.",
       );
     }
 
-    const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
     const signer = await resolveSigner(admin, data.token);
     if (!signer) {
       throw new Error(
@@ -410,4 +459,319 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
     // button, which only ever exists inside that email, and that one does.
 
     return { ok: true as const, accepted_at };
+  });
+
+// ---- The document's versions ----
+
+/** The code of conduct, as the shared version store talks about it. */
+const CODE_OF_CONDUCT_DOCUMENT: VersionedDocument = {
+  table: "code_of_conduct_versions",
+  noun: "code of conduct",
+  withoutOne: "nobody can read it or agree to it",
+  columns: "id, version, is_current, first_published_at",
+  // Stamps `first_published_at` the first time a version goes live, in the
+  // same statement that makes it live, which is what lets the version list keep
+  // calling a rolled-back version "Previous". A second write could fail after
+  // the first succeeded and leave a version that was live reading "Draft".
+  setLive: (admin, row) =>
+    admin
+      .from("code_of_conduct_versions")
+      .update(
+        row.first_published_at
+          ? { is_current: true }
+          : { is_current: true, first_published_at: new Date().toISOString() },
+      )
+      .eq("id", row.id),
+};
+
+/**
+ * One stored version, as every manager surface reads it. The editor screen and
+ * the manager agent API project the same row through the same functions, so a
+ * version an agent reads back is the version a manager sees on screen.
+ */
+export type CodeOfConductVersion = {
+  id: string;
+  version: number;
+  title: string;
+  body_md: string;
+  asks_reagreement: boolean;
+  required_version: number;
+  is_current: boolean;
+  /** When it first went live; null for a version that never has been. */
+  first_published_at: string | null;
+  created_at: string;
+};
+
+/** A version without its text, for listings that only need to name it. */
+export type CodeOfConductVersionSummary = Omit<CodeOfConductVersion, "body_md">;
+
+const SUMMARY_COLUMNS =
+  "id, version, title, asks_reagreement, required_version, is_current, first_published_at, created_at";
+const VERSION_COLUMNS = `${SUMMARY_COLUMNS}, body_md`;
+
+/** Every stored version, newest first. */
+export async function listCodeOfConductVersionRows(
+  admin: AdminClient,
+): Promise<CodeOfConductVersion[]> {
+  const { data, error } = await admin
+    .from("code_of_conduct_versions")
+    .select(VERSION_COLUMNS)
+    .order("version", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/**
+ * Every stored version without its text, newest first: what a listing needs,
+ * without moving every version's body (up to 50000 characters each, and one
+ * more per save) to answer "which ones are there".
+ */
+export async function listCodeOfConductVersionSummaries(
+  admin: AdminClient,
+): Promise<CodeOfConductVersionSummary[]> {
+  const { data, error } = await admin
+    .from("code_of_conduct_versions")
+    .select(SUMMARY_COLUMNS)
+    .order("version", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/**
+ * One stored version, or the live one when no version is named. "The live one"
+ * is the row flagged `is_current`, never the highest-numbered: those differ the
+ * moment a manager rolls back, and answering with the newest would have a
+ * caller edit and republish over the version the club deliberately went back to.
+ */
+export async function loadCodeOfConductVersion(
+  admin: AdminClient,
+  version?: number,
+): Promise<CodeOfConductVersion | null> {
+  const query = admin.from("code_of_conduct_versions").select(VERSION_COLUMNS);
+  const { data, error } = await (
+    version === undefined ? query.eq("is_current", true) : query.eq("version", version)
+  ).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+/**
+ * Each person's highest agreed version, one number per person: what the editor
+ * needs to say how many people a publish would ask to agree again. Numbers only,
+ * no ids, because that count is all it is for.
+ *
+ * Paged, because PostgREST caps a single response (1000 rows by default) without
+ * an error, and a capped read here would quietly undercount.
+ */
+export async function highestAcceptedVersions(admin: AdminClient): Promise<number[]> {
+  const PAGE = 1000;
+  const highest = new Map<string, number>();
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await admin
+      .from("code_of_conduct_acceptances")
+      .select("user_id, version")
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    for (const a of data ?? [])
+      highest.set(a.user_id, Math.max(highest.get(a.user_id) ?? 0, a.version));
+    if (!data || data.length < PAGE) break;
+  }
+  return [...highest.values()];
+}
+
+/**
+ * Make one stored version the live one. There is no content rule to check, and
+ * the first-went-live stamp travels in the same write (`setLive` above).
+ */
+export async function promoteCodeOfConductVersion(
+  admin: AdminClient,
+  id: string,
+): Promise<{ version: number }> {
+  return promoteDocumentVersion(admin, CODE_OF_CONDUCT_DOCUMENT, id);
+}
+
+/**
+ * How long after it was written an unpublished version can still be its own
+ * save, mid-flight. The editor gives up on a reply after 20 seconds and retries
+ * with the same `client_submission_id`, while the first attempt may still be
+ * between writing the version and making it live.
+ */
+const SAVE_IN_FLIGHT_MS = 2 * 60_000;
+
+/**
+ * Write a new version and make it the live one: the whole of "save", as the
+ * editor screen and the manager agent API both mean it.
+ *
+ * Every save gets its own number, including a typo fix, so an acceptance's
+ * number always names the exact text that person read. Whether the save asks
+ * everybody to agree again is `asks_reagreement`, recorded on the row.
+ *
+ * Written as a draft and THEN promoted, for the reason `saveWaiverTemplateVersion`
+ * gives: a failed insert changes nothing, and a failed promotion leaves the
+ * previous version live rather than leaving the club with none.
+ *
+ * `client_submission_id` makes a retry safe: the same id comes back as the
+ * version it already wrote (`already_saved`), never as a second one.
+ */
+export async function saveCodeOfConductVersion(
+  admin: AdminClient,
+  input: SaveCodeOfConductInput,
+  createdBy: string | null,
+  // The version flags, when the caller has just read them to count who the
+  // save re-prompts: the save then works from that same snapshot rather than
+  // reading the table again.
+  flags?: CodeOfConductVersionFlags[],
+): Promise<{ id: string; version: number; is_current: boolean; already_saved: boolean }> {
+  // What an earlier attempt of this same save already wrote, if anything.
+  //
+  // Refused when the id comes back with different words: reusing an id for a
+  // different save would otherwise drop the new text and report success.
+  //
+  // And NOT promoted when it is not live. The first attempt wrote the version
+  // and then lost the promotion, or it went live and has since been replaced,
+  // and from here the two look alike. The commonest cause of the first is
+  // another manager publishing at the same moment, so making the replayed
+  // version live now would silently replace their version, or undo a rollback
+  // somebody chose on purpose. Say instead that it was written and is not live,
+  // with its number, which is the `not_published` contract: publishing that
+  // version finishes the job, if that is still what is wanted.
+  const replay = async () => {
+    if (!input.client_submission_id) return null;
+    const { data, error } = await admin
+      .from("code_of_conduct_versions")
+      .select(
+        "id, version, title, body_md, asks_reagreement, is_current, first_published_at, created_at",
+      )
+      .eq("client_submission_id", input.client_submission_id)
+      .maybeSingle();
+    if (error) throw new DocumentVersionError(error.message, "not_published");
+    if (!data) return null;
+    if (
+      data.title !== input.title ||
+      data.body_md !== input.body_md ||
+      data.asks_reagreement !== input.asks_reagreement
+    ) {
+      throw new DocumentVersionError(
+        `That client_submission_id already saved version ${data.version} with different text. Use a new id for a new save.`,
+        "invalid",
+        data.version,
+      );
+    }
+    if (!data.is_current && !data.first_published_at) {
+      // Never live, and written moments ago: most likely the first attempt of
+      // this very save, still finishing. Not a refusal of the manager's work,
+      // so say what to check rather than blaming another manager.
+      if (Date.now() - Date.parse(data.created_at) < SAVE_IN_FLIGHT_MS) {
+        throw new DocumentVersionError(
+          `Version ${data.version} was saved and is not live yet: it may still be finishing. Reload the version list in a moment, and make version ${data.version} live from there if it is still not live.`,
+          "not_published",
+          data.version,
+        );
+      }
+    }
+    if (!data.is_current) {
+      throw new DocumentVersionError(
+        `Version ${data.version} was saved, but it is not the live code of conduct: someone may have changed the live version since. If it should be live, make version ${data.version} live from the version list.`,
+        "not_published",
+        data.version,
+      );
+    }
+    return { id: data.id, version: data.version, is_current: true, already_saved: true };
+  };
+  const earlier = await replay();
+  if (earlier) return earlier;
+
+  // What the new version will require is fixed now, from what the live one
+  // requires: an ask that a rollback undid must stay undone.
+  let now: CodeOfConductVersionFlags[];
+  try {
+    now = flags ?? (await listCodeOfConductVersionFlags(admin));
+  } catch (e) {
+    throw new DocumentVersionError(e instanceof Error ? e.message : String(e), "not_published");
+  }
+  // Numbered from the same snapshot, which lists every version. A concurrent
+  // save taking the same number fails the insert on the unique version index,
+  // exactly as a separate max() read would have let it.
+  const version = now.reduce((n, v) => Math.max(n, v.version), 0) + 1;
+  const { data: created, error } = await admin
+    .from("code_of_conduct_versions")
+    .insert({
+      version,
+      title: input.title,
+      body_md: input.body_md,
+      asks_reagreement: input.asks_reagreement,
+      required_version: requiredVersionForSave(version, input.asks_reagreement, now),
+      is_current: false,
+      client_submission_id: input.client_submission_id ?? null,
+      created_by: createdBy,
+    })
+    .select("id, version")
+    .single();
+  if (error) {
+    // Two attempts of one save racing: the other one won, and it is ours.
+    const raced = await replay();
+    if (raced) return raced;
+    throw new DocumentVersionError(error.message, "not_published");
+  }
+
+  // The version now exists. Whatever the promotion does from here, the caller
+  // has to hear about THAT rather than about a save it should repeat.
+  await promoteCodeOfConductVersion(admin, created.id);
+  return { id: created.id, version: created.version, is_current: true, already_saved: false };
+}
+
+// ---- The public page ----
+
+/**
+ * The live version, for `/code-of-conduct`. Public, and read on the
+ * service-role client like the signer lookup above: the table holds no grant
+ * for the client roles at all, so nothing about it is reachable with the
+ * published anon key, and this returns only what the page prints.
+ *
+ * Null when nothing is live, which the page says out loud rather than
+ * rendering an empty document.
+ */
+export const getPublishedCodeOfConduct = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const live = await loadCodeOfConductVersion(supabaseAdmin);
+  return live ? { version: live.version, title: live.title, body_md: live.body_md } : null;
+});
+
+// ---- Manager: the editor ----
+
+/**
+ * Every version, plus what the editor needs to say before a publish how many
+ * people it will ask to agree again (each person's highest agreed version).
+ */
+export const listCodeOfConductVersions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const [versions, highestAccepted] = await Promise.all([
+      listCodeOfConductVersionRows(supabaseAdmin),
+      highestAcceptedVersions(supabaseAdmin),
+    ]);
+    return { versions, highest_accepted: highestAccepted };
+  });
+
+export const saveCodeOfConduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => saveCodeOfConductSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const saved = await saveCodeOfConductVersion(supabaseAdmin, data, context.userId);
+    return { ok: true as const, ...saved };
+  });
+
+export const setCurrentCodeOfConduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => setCurrentTemplateSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { version } = await promoteCodeOfConductVersion(supabaseAdmin, data.id);
+    return { ok: true as const, version };
   });

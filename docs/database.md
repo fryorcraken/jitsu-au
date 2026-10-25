@@ -319,11 +319,47 @@ person's own.
 | `media_consent`                  | `boolean`     | yes  | Media/promotional-photo consent, live. Three-state: NULL = never asked, and NOT the same as `false`.                                                                            |
 | `media_consent_updated_at`       | `timestamptz` | yes  | When `media_consent` was last set by hand, by the member or a manager. NULL when it came from an approved waiver.                                                               |
 | `media_consent_updated_by`       | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who set it. Equal to `user_id` when the member did it themselves, else a manager; NULL from a waiver.                           |
+| `archived_at`                    | `timestamptz` | yes  | When a manager marked this person as having left the club. NULL = not archived. Reversible, deletes nothing, blocks nothing; see "Archiving" below.                             |
+| `archived_by`                    | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The manager who archived them. Only set while `archived_at` is (`profiles_archived_by_needs_archived_at`).                      |
 | `created_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                |
 | `updated_at`                     | `timestamptz` | no   | Default `now()`.                                                                                                                                                                |
 
 **Not stored here:** any email (lives on `auth.users`), any signature (lives
 inside the waiver PDF), and no `full_name`.
+
+**Archiving.** `archived_at` is a fact beside the funnel phase, never a sixth
+phase: `deriveLifecycleStatus` does not read it, so nothing that filters on phase
+changes meaning. The constraint holds one direction only, because an archive
+date whose archiver has since been deleted is exactly what `SET NULL` produces.
+No client role can write either column, and two locks say so. The grants:
+`profiles` holds no privilege for `anon` or `authenticated`, and the grants
+check (`supabase/lint/client-grants.sql`, whose live-run record is in
+`supabase/lint/README.md`) reads column, `PUBLIC` and inherited grants as well
+as table ones, so a later `GRANT UPDATE (archived_at)` fails CI. And the
+`profiles_guard_archive` trigger, which refuses any change to either column made
+for `anon` or `authenticated` (as the session role, or as the role in the
+request's JWT, which still names the caller inside a `SECURITY DEFINER`
+function) whatever the grants say, for the grant made by hand
+in the Lovable UI that no pull request ever shows
+(`20261023120000_profile_archive.sql`). Why archiving is not erasure:
+`docs/erasing-personal-data.md`.
+
+**No client can write this table, and no rule says otherwise.** `profiles` has
+two read policies (a person reads their own row, a manager reads all) and no
+write policy at all. Every write, including a member editing their own details
+on `/account`, goes through a service-role server function that checks who is
+asking and which fields they may send (`updateMyProfile`). There used to be two
+UPDATE policies as well, "Users can update their own profile" and "Managers can
+update profiles", from the table's first migration. Nothing used them, and they
+would have come alive the moment anybody granted a client role `UPDATE`,
+letting a member rewrite every column of their own row, the household link
+included, past every server check (the trap described under "Client grants"
+above). `20261025000000_profiles_drop_unreachable_update_policies.sql` dropped
+them, and `supabase/lint/profiles-write-policies.sql` must return no rows: CI
+runs it on every `supabase/**` pull request, and `supabase/lint/README.md` has
+it run by hand against the live database. A write grant on its own now opens no
+write; a `SELECT` grant would still expose rows through the two read policies,
+which is why `profiles` stays in the grants check too.
 
 **Households.** `guardian_user_id` is the ONLY thing that marks a dependant, and
 it is a real person record in this table — unlike `guardian_name` /
@@ -443,8 +479,9 @@ which is what "who are this person's dependants" reads.
   The trigger only fires on INSERT, so auth users predating it had no row at
   all until `20260802093000` backfilled them.
 
-**RLS:** owner reads/updates own row (`auth.uid() = user_id`); managers
-read/update all; no public insert path.
+**RLS:** owner reads own row (`auth.uid() = user_id`); managers read all. No
+write policy of any kind for a client role: every insert and update is a
+service-role server function (see "No client can write this table" above).
 
 ### Service-role auth lookups
 
@@ -1190,15 +1227,16 @@ run through the service role.
 
 The product spec is `docs/code-of-conduct.md`. Three things about the shape:
 
-- **There is no template table.** The document lives in the repo
-  (`src/lib/code-of-conduct.ts`) and `CODE_OF_CONDUCT_VERSION` is bumped by hand.
-  House rules change by committee decision, and a git diff says more about what
-  changed than a row would. An acceptance older than the current version reads as
-  out of date, which is a prompt to re-read and never a block.
+- **`version` names a row of `code_of_conduct_versions`**, below: the exact
+  text the person was shown. Signing refuses any version but the live one, so a
+  manager publishing mid-read cannot have somebody's agreement filed against
+  words they never saw. An acceptance below the club's `required_version` reads
+  as out of date, which is a prompt to re-read and never a block.
 - **There is no PDF and no approval.** Nothing here gates anything: signing the
   code of conduct is not required before training, so there is no pending state
-  and no manager decision to record. The text of each version is in git, so
-  freezing a copy per acceptance would only duplicate it.
+  and no manager decision to record. Every version's text is kept in
+  `code_of_conduct_versions` and never edited in place, so freezing a copy per
+  acceptance would only duplicate it.
 - **`user_id` is NOT NULL**, unlike `email_verification_tokens.user_id`. A
   verification token can exist before its person does; the code of conduct is
   only ever signed by somebody the club already holds, and signing it never
@@ -1210,6 +1248,42 @@ somebody agreed to and when stays intact.
 **RLS:** enabled. Read policies for the owner and for managers as defence in
 depth; no client grants (`REVOKE ALL` from anon/authenticated), so every read and
 the insert run through the service role.
+
+### `code_of_conduct_versions` — the code of conduct itself, one row per version
+
+`id` PK, `version` (unique, > 0), `title`, `body_md` (a small markdown subset,
+`CODE_OF_CONDUCT_SYNTAX`), `asks_reagreement` (boolean, default false),
+`required_version`, `is_current`, `first_published_at` (stamped on a version's
+first promotion and never cleared, so a list can call a rolled-back version
+"Previous" rather than "Draft"), `client_submission_id` (partial unique, for
+retry-safe saves),
+`created_by → auth.users(id) ON DELETE SET NULL`, `created_at`. A partial
+unique index on `is_current` allows exactly one live version, as on
+`waiver_templates`. Title and body carry the same length CHECKs as the editor
+and the agent API.
+
+Managers write it at `/manager/code-of-conduct` or through the manager agent
+API; both save through `saveCodeOfConductVersion`, which writes the next
+version as a draft and then promotes it (`promoteDocumentVersion`, shared with
+the waiver). A version is never edited in place: every save is a new number,
+so an acceptance's `version` always names the text that person read.
+
+`asks_reagreement` is what keeps a typo fix from re-prompting the club.
+`required_version` (NOT NULL, between 1 and `version`, and equal to `version`
+whenever `asks_reagreement`) is fixed when the version is written: itself if it
+asked, otherwise what the live version required at the time, or with nothing
+live the newest version's requirement (`requiredVersionForSave`). Only an acceptance below the LIVE version's
+`required_version` is out of date (`codeOfConductStandard`). Stored rather than
+derived from the history so that a rollback below an ask stays undone when a
+correction is saved afterwards. Version 1 is seeded by its migration with the
+text members agreed to before the document moved here, byte for byte, asking
+and so requiring itself.
+
+**RLS:** enabled, one manager-only policy as defence in depth, and **no client
+grants** (`REVOKE ALL` from anon/authenticated). Unlike `waiver_templates`,
+the public page does not read it as `anon`: `getPublishedCodeOfConduct` reads
+the live row on the service-role client and returns only what the page prints,
+so nothing about the table is reachable with the published anon key.
 
 ### `manager_api_tokens` — manager agent API credentials
 
@@ -1273,7 +1347,7 @@ second announcement, because the second insert collides. `published_at` could
 not have carried that, since it is deliberately never cleared.
 
 **A membership plan announcement is the one subject with no table.**
-`membership_plan_open` rows (`20261023120000_membership_plan_announcement_kind.sql`)
+`membership_plan_open` rows (`20261025120000_membership_plan_announcement_kind.sql`)
 carry `subject_type = 'membership_plan_announcement'` and a `subject_id` that is
 the announcement's own id, minted by whoever announced it, so announcing a plan
 a second time is a second subject rather than a collision. Which plan it was
@@ -1451,6 +1525,12 @@ it load-bearing is that `(section.position, article.position)` is the **only**
 source of the sidebar order, the index page and the previous/next links, so it
 is the path a new member reads through. Seeded as 10/20/30 so a section can be
 slotted between two others without renumbering.
+
+**RLS:** enabled, with **no policies**, and no grant to `anon` or
+`authenticated`. Every read and write goes through server code on the service
+role (`listKnowledgeBase`, `kb-admin.ts`), so the table is default-deny for
+every client role. It once carried a signed-in SELECT policy that the missing
+grant made unreachable; it was dropped in October 2026.
 
 ### `kb_articles` — an article's identity, and where it sits
 

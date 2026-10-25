@@ -76,6 +76,7 @@ const managerNav: NavItem[] = [
   { to: "/manager/items", label: "Items", icon: ShoppingBag },
   { to: "/manager/waivers", label: "Signed waivers", icon: FileText },
   { to: "/manager/waiver-template", label: "Waiver template", icon: FileText },
+  { to: "/manager/code-of-conduct", label: "Code of conduct", icon: ScrollText },
   // "editor" in the label because the member group above already has a
   // "Knowledge base" entry pointing at the reader. Same content, two jobs.
   { to: "/manager/kb", label: "Knowledge base editor", icon: BookOpen },

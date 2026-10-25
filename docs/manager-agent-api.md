@@ -60,19 +60,86 @@ the same code, not a second implementation.
   service-role code, and the acting user is always the token's subject. The
   "minted token is the only credential `/api/manager/agent` accepts" rule above
   still holds: that endpoint is unchanged.
+- **What approving hands over is a full sign-in, not just the tools.** The
+  access token is an ordinary Supabase session token for the manager, so it
+  also works against the database directly, with everything that manager's RLS
+  allows. A minted token reaches only the whitelisted actions. The consent page
+  and `/manager/api-tokens` both say so, and two guards on the consent page
+  follow from it:
+  - It names **where the approval is sent** (the client's registered
+    `redirect_uri`: a host, "this computer" for a loopback address, or an app's
+    URL scheme; `src/lib/oauth-consent.ts`). Assistants register themselves, so
+    the client _name_ can be anything; the redirect address is the one thing a
+    lookalike cannot borrow.
+  - It **never offers Approve to a non-manager**, and never passes one back
+    to an assistant they approved earlier (the role check runs before the
+    "already approved" shortcut). They get "Use a different login" and, where
+    there is still a request to deny, "Cancel the request". This is a guard in
+    the page, **not a server rule**: the OAuth server would still approve a
+    member who called it directly. What holds regardless is the tools
+    refusing them. Closing that fully needs a Supabase Auth hook and so a
+    database change; it has not been made.
+  - It **won't approve a destination it can't name** (an unparseable redirect
+    address, or a `javascript:` / `data:` / `file:` one): Approve is disabled.
+- **Disconnecting:** `/manager/api-tokens` lists the manager's own connected
+  assistants (`supabase.auth.oauth.listGrants`) with a Remove button
+  (`revokeGrant`). That deletes the assistant's sessions and refresh tokens, so
+  it cannot sign back in without asking again; an access token it already holds
+  stays valid until it expires (the project's JWT lifetime, normally an hour),
+  because both the SDK and PostgREST verify it locally. Losing the manager role
+  cuts the tools off at once regardless, since every call re-checks it. It
+  does **not** remove the assistant's grant, and the list lives on a
+  manager-only page, so a demoted manager's assistant keeps a member-level
+  sign-in until somebody revokes it (a known gap, not handled yet).
 - **Three tools:** `club_manifest` (returns `AGENT_MANIFEST`), `club_read`
   (only `list_*` / `get_*` actions, marked read-only so an assistant may run it
   without asking) and `club_change` (everything else, marked destructive). The
   split is `src/lib/mcp/actions.ts`; a new action lands on the change side
   unless its name says it reads.
-- **After changing a tool,** regenerate the MCP manifest and republish; the
-  published site keeps serving the old tool list until then.
+- **After changing a tool or adding an action,** regenerate the MCP manifest
+  (`bunx lovable-mcp-extract-manifest`, which rewrites
+  `.lovable/mcp/manifest.json`), commit it, and republish; the published site
+  keeps serving the old tool list until then. Lovable's commit pipeline does
+  this for its own commits but not for anyone else's, so
+  `src/lib/mcp/actions.test.ts` fails when the committed manifest disagrees
+  with the action split or with a tool's title, description or annotations.
 
 ## Actions
 
 An "invoice" is a `memberships` row — its price/reference/status _are_ the invoice.
 
-- `list_users` — members and their lifecycle status, roles, and invoices.
+- `list_users` — members and their lifecycle status, roles, and invoices, plus
+  the cheap headline fields the person page leads with: `phone`,
+  `email_confirmed_at` (null means not verified) and `code_of_conduct` (the same
+  object `get_user` reports). The acceptances are read once, for the people on
+  the returned page, not once per person.
+- `get_user` — one person, as `/manager/users/<id>` shows them. It is that
+  page's own read: `loadClubUser` in `src/lib/club-user.functions.ts`, which
+  `getClubUser` also calls, projected by `projectAgentUser` in
+  `src/lib/manager-agent.ts`. It has no query of its own, and must never grow
+  one (see "Keep these in sync"). Profile, household, memberships, attendance,
+  code of conduct and every waiver with its approval state. Two things differ
+  from the page, both on purpose:
+  - **What it leaves out is listed, not implied.** `GET_USER_LEFT_OUT` names
+    each field of the read the API does not report, with its reason; today that
+    is a waiver's `signer_ip` and `signer_meta` (forensic evidence no agent
+    workflow needs). The one thing the page reads out of `signer_meta`, whether
+    the waiver is a scanned paper form, is reported as `is_paper`. A test fails
+    if the read gains a field that is neither reported nor listed.
+  - **It refuses a half-read.** The page shows a failed address lookup as no
+    address, a failed code-of-conduct read as "not signed yet", and a failed
+    guardian, class or approver lookup as an unknown name, so a manager can
+    still approve somebody. The read lists each of those in `degraded` (which
+    the page itself never receives), and `get_user` turns a non-empty list into
+    `500 db_error`: an agent cannot see the server log, and would act on the
+    guess. An id with no person record (a lead) is `404 not_found`.
+
+  Its `memberships` are the page's shape, not `list_users`' `invoices`: they
+  carry `kind`, `plan_window` and `checkin_count` (the delete blocker), and leave
+  the money detail (`payment_method`, `notes`, `plan_code`, `is_student`) to
+  `invoices`. A person's item invoices, shown on the same page, are
+  `list_item_invoices {"user_id"}`.
+
 - `list_invoices` — invoices with member name/email (to find an id to edit).
 
 > [!IMPORTANT]
@@ -233,7 +300,7 @@ locked | already_verified` (the record has moved on, checked again at the send);
   (retry with the same `client_submission_id`). Without a
   `client_submission_id` every call is a fresh send. What a resend does and why:
   `docs/emails.md`, "Resending".
-- **Announcing a plan** (`"23"`): `save_membership_plan` takes `announce: true`
+- **Announcing a plan** (`"26"`): `save_membership_plan` takes `announce: true`
   with an `announcement_id` (a UUID the caller mints) to email every member
   about the plan once it is saved: the screen's "Email all members about this
   plan" box. It saves through `saveMembershipPlanRow`, then announces through
@@ -339,8 +406,8 @@ locked | already_verified` (the record has moved on, checked again at the send);
 waiver_template_not_published` with a `Retry-After`, and it carries
   `error.details.version` when a version WAS written and is merely unpublished —
   the case where saving again would file a second numbered draft and publishing
-  that version finishes the job. `WaiverTemplateError` in
-  `src/lib/waiver-template-editor.ts` carries the reason (`not_found` |
+  that version finishes the job. `DocumentVersionError` in
+  `src/lib/document-versions.ts` carries the reason (`not_found` |
   `invalid` | `not_published`) that decides this; the editor screen shows the
   same message either way.
 
@@ -349,6 +416,86 @@ waiver_template_not_published` with a `Retry-After`, and it carries
   both the save and the publish refuse without it. That check now runs **before**
   the insert rather than only inside `promoteWaiverTemplate`, so a refused save
   no longer leaves an unwanted draft version behind in the editor's list.
+
+- `list_code_of_conduct_versions` / `get_code_of_conduct` /
+  `save_code_of_conduct` / `publish_code_of_conduct` — the club's code of
+  conduct, the agent's equivalent of `/manager/code-of-conduct`. Both go through
+  `listCodeOfConductVersionRows`, `loadCodeOfConductVersion`,
+  `saveCodeOfConductVersion` and `promoteCodeOfConductVersion` in
+  `src/lib/code-of-conduct.functions.ts`, and promotion through the same
+  `promoteDocumentVersion` the waiver uses, so the contract is the waiver
+  template's: version-keyed, saving publishes, omitted text carried over from
+  `base_version` with `based_on` naming it, and the same classified refusals
+  (`503 code_of_conduct_not_published` with `Retry-After` and
+  `error.details.version`). Two things are the code of conduct's own:
+  - **`asks_reagreement`** (default false) is stored on the version and decides
+    who is out of date (`docs/code-of-conduct.md`, rule 3). The save's reply
+    carries `reprompted`, the number of people it put out of date, counted on
+    every save (a correction made while nothing is live inherits the newest
+    version's requirement and can re-prompt people) and before the write, so a
+    failed count refuses the call rather than reporting a number nobody
+    checked. `publish_code_of_conduct` reports `reprompted` the same way, the
+    number the editor's confirm shows before a manager makes a version live. A
+    call with no new text is refused unless it asks, which is how a rewrite
+    published without asking gets its ask afterwards.
+  - **`client_submission_id`** makes a save safe to retry, as on
+    `create_item_invoice`: the same id comes back as the version it already
+    wrote, with `already_saved: true` and `reprompted: 0`. If that version is
+    not live (its first attempt lost the promotion, or somebody published or
+    rolled back since), the replay is refused as `503
+code_of_conduct_not_published` with its `version`, and nothing is made
+    live: promoting it on a retry could silently replace another manager's
+    version or undo a deliberate rollback.
+  - **`list_code_of_conduct_versions` reads no text.** It reports
+    `first_published_at`, which the `Previous` label uses so a version rolled
+    away from never reads as `Draft`.
+- `list_blog_posts` / `get_blog_post` / `save_blog_post` / `delete_blog_post` /
+  `upload_blog_image` (`"25"`) — the blog, the agent's equivalent of
+  `/manager/blog`. Every write goes through the plain functions in
+  `src/lib/blog.functions.ts` that the editor's server functions also call
+  (`createBlogPostRow`, `updateBlogPostRow`, `deleteBlogPostRow`,
+  `storeBlogImage`), so an agent-published post and a manager's own are the same
+  row written the same way: slug and excerpt resolution, the publish-date rule
+  and the announcement are the editor's. Product rules: `docs/blog.md`. What is
+  the agent's alone, and why:
+  - **An omitted field keeps its stored value** on a change
+    (`mergeAgentBlogPostEdit` in `src/lib/manager-agent.ts`). The editor always
+    sends the whole form, so the shared writer reads a missing `status` as draft
+    and a missing cover as none; passed straight through, an agent fixing a typo
+    would unpublish the post. Publishing a draft is `{id, status: "published"}`.
+  - **Publishing is announced**, exactly as on the screen: the first time a post
+    goes live, members who opted in hear about it in their daily summary
+    (`docs/notifications.md`). The result's `announced` says whether this save
+    did it, so the agent can tell the manager.
+  - **A create never suffixes a taken address.** The editor turns a second
+    "Grading day" into `...-grading-day-2`, which is right for a person and
+    wrong for a caller retrying a create it never heard back from: that files
+    the post twice and announces it twice (the announcement dedupes on the post
+    id, and the second post has a new one). So `save_blog_post` refuses with
+    `409 slug_taken`, naming the post that holds the address, and the retry
+    learns its post already exists. No `client_submission_id`, because that
+    would need a column; the address does the same job here.
+  - **An edit is guarded against a save in between.** It writes back the
+    fields the caller left out from the row it read, so it only lands if
+    `updated_at` still matches (`409 post_changed` otherwise). The editor sends
+    what is on screen and is not guarded.
+  - **A blank `slug` is refused** rather than re-derived. On the screen a blank
+    slug makes a new one from the title, which on a live post moves it to a new
+    address and breaks every link already shared.
+  - **Two addresses per post.** `url` is the public one and is null for a draft
+    (the public route 404s on one); `edit_url` is the manager's screen.
+  - **`upload_blog_image` takes base64 `data` or a public https `url`** the
+    server downloads. The URL route exists because an assistant over MCP cannot
+    type out a photo's bytes. Its type is read off the bytes, never declared. The
+    download is https only, to a named public host, with every redirect hop
+    checked before it is requested, a 15-second limit and the 8 MB cap enforced
+    while reading. All of that is `src/lib/blog-image.ts`. Refusals: `422
+image_rejected` (will never work) and `502 image_fetch_failed` (the address
+    could not be read just now). Storing an image changes no post; the result's
+    `path` goes in `cover_image_path` and its `markdown` in `body_md`.
+  - **`delete_blog_post` has no confirm flag**, like `delete_invoice`: it is the
+    caller's job to ask the manager first. It removes the post's comments with
+    it (`ON DELETE CASCADE`), and writes an audit line to the server log.
 
 ### `file_waiver`: the parts that have bitten us
 
@@ -405,6 +552,38 @@ per manifest action, forwarding to this endpoint.
 
 ## Keep these in sync
 
+### The screens and the API report the same thing
+
+A manager screen and this API answer the same questions about the same data,
+so they must give the same answer. `get_user` exists because they did not:
+the person page and `list_users` were built separately, and the API could not
+see a person's code of conduct, verification, profile or waivers while the page
+showed all of it. The rule, in both directions:
+
+- **A manager read shown on a manager screen is reported by the API from the
+  same function.** Pull the screen's read out of its `createServerFn` handler
+  into a plain function taking the client (`loadClubUser`, `kb-admin.ts`), call
+  it from both, and project its result. Never write a second query set in
+  `manager-agent-actions.ts`. A field the API deliberately does not report is
+  listed with its reason (`GET_USER_LEFT_OUT`), not silently dropped.
+- **A manager write is either exposed or listed below as screen-only, with the
+  reason.** Adding a write to a manager screen means adding it here too, one way
+  or the other.
+
+**Screen-only writes, deliberately.** These are on `/manager/users/<id>` and
+have no action:
+
+| Write                                               | Why not on the API                                                                                                                                                                                                            |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setWaiverApproval` (approve a waiver)              | Outward-facing and hard to undo: it emails the person, unlocks the login of whoever the club writes to about them and assigns the free trial (`docs/waivers.md`, rule 6). Needs a product decision before an agent may do it. |
+| `setClubUserEmail` (change a login email)           | Moves the person's identity, drops their verified badge and emails the new address. Needs a product decision.                                                                                                                 |
+| `setClubUserKitSizes`                               | Reversible and sends nothing, so safe to expose. Not built because no agent workflow has asked for it yet; add it when one does.                                                                                              |
+| `getWaiverPdfUrl`                                   | A read, but of a signed legal document with health answers in it, handed out as a bearer link. `has_pdf` says whether there is one. Expose only for a caller that needs the document itself.                                  |
+| `attachCheckInCoverage` / `transferCheckInCoverage` | This API has no check-in actions at all, on purpose (see `delete_invoice` above).                                                                                                                                             |
+| `setMembershipStatus` to `active` (reopen)          | Recomputes dates and credits; `edit_invoice` refuses `active` for that reason.                                                                                                                                                |
+
+### The four sync points
+
 The action contract lives in **four** places — change all of them together, or
 the agent glue drifts from the deployed API:
 
@@ -422,7 +601,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"23"`.
+test so the bump is a deliberate edit, and the current value is `"26"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

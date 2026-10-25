@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentGetBlogPostSchema,
+  agentSaveBlogPostSchema,
+  agentUploadBlogImageSchema,
   CLUB_REPLY_TO_MAX,
   DEPENDANT_EMAIL_DOMAIN,
   clubReplyToSchema,
@@ -1963,7 +1966,7 @@ describe("managerEmailChangeSchema", () => {
 });
 
 describe("codeOfConductAcceptSchema", () => {
-  const valid = { agree: true as const, signature_name: "Ada Lovelace", version: 1, hp: "" };
+  const valid = { signature_name: "Ada Lovelace", version: 1, hp: "" };
 
   it("accepts an agreement signed with a typed name", () => {
     const r = codeOfConductAcceptSchema.safeParse({ ...valid, token: " tok " });
@@ -1975,14 +1978,12 @@ describe("codeOfConductAcceptSchema", () => {
     expect(codeOfConductAcceptSchema.safeParse(valid).success).toBe(true);
   });
 
-  it("refuses an unticked box", () => {
-    // `agree` is a literal, not a boolean, so an unticked box cannot reach the
-    // handler at all. An agreement from somebody who did not agree is not
-    // evidence of anything.
-    expect(codeOfConductAcceptSchema.safeParse({ ...valid, agree: false }).success).toBe(false);
-    expect(
-      codeOfConductAcceptSchema.safeParse({ signature_name: "Ada", version: 1, hp: "" }).success,
-    ).toBe(false);
+  // The tick box is gone: typing a name is the agreement. A tab opened before
+  // it went still sends `agree`, and that must keep working rather than fail.
+  it("needs no tick, and still takes a submission from a tab that sends one", () => {
+    expect(codeOfConductAcceptSchema.safeParse(valid).success).toBe(true);
+    const r = codeOfConductAcceptSchema.safeParse({ ...valid, agree: true });
+    expect(r.success && "agree" in r.data).toBe(false);
   });
 
   it("requires a signature", () => {
@@ -1992,9 +1993,9 @@ describe("codeOfConductAcceptSchema", () => {
   });
 
   it("requires the version that was read", () => {
-    expect(
-      codeOfConductAcceptSchema.safeParse({ agree: true, signature_name: "Ada", hp: "" }).success,
-    ).toBe(false);
+    expect(codeOfConductAcceptSchema.safeParse({ signature_name: "Ada", hp: "" }).success).toBe(
+      false,
+    );
     expect(codeOfConductAcceptSchema.safeParse({ ...valid, version: 0 }).success).toBe(false);
   });
 
@@ -2007,12 +2008,7 @@ describe("codeOfConductAcceptSchema", () => {
       email: "someone@example.com",
       user_id: "11111111-1111-1111-1111-111111111111",
     });
-    expect(r.success && Object.keys(r.data).sort()).toEqual([
-      "agree",
-      "hp",
-      "signature_name",
-      "version",
-    ]);
+    expect(r.success && Object.keys(r.data).sort()).toEqual(["hp", "signature_name", "version"]);
   });
 
   it("drops a submission with the honeypot filled", () => {
@@ -2945,4 +2941,81 @@ describe("parseClubReplyTo", () => {
       expect(parseClubReplyTo(raw)).toBeNull();
     },
   );
+});
+
+describe("the blog through the manager agent API", () => {
+  const ID = "5b0f3c1e-9a8d-4c2b-8e7f-1a2b3c4d5e6f";
+
+  it("needs a title and a body to create a post", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ title: "Hi", body_md: "Body" }).success).toBe(true);
+    const r = agentSaveBlogPostSchema.safeParse({ title: "Hi" });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join("."))).toEqual(["body_md"]);
+  });
+
+  it("changes a post from any one field", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, status: "published" }).success).toBe(true);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, excerpt: "" }).success).toBe(true);
+  });
+
+  it("refuses a change that names nothing to change", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID }).success).toBe(false);
+  });
+
+  // The composer re-derives a blank slug, which would move a live post to a
+  // new address. On the API a slug is either given or left alone.
+  it("refuses a blank slug", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, slug: "" }).success).toBe(false);
+  });
+
+  it("refuses an image address where the storage path belongs", () => {
+    const r = agentSaveBlogPostSchema.safeParse({
+      id: ID,
+      cover_image_path: "https://cdn.example.com/blog-media/drafts/a.png",
+    });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].message).toMatch(/upload_blog_image/);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, cover_image_path: "" }).success).toBe(true);
+    for (const address of [
+      "//cdn.example.com/a.png",
+      "/storage/v1/object/public/blog-media/a.png",
+    ]) {
+      expect(agentSaveBlogPostSchema.safeParse({ id: ID, cover_image_path: address }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  // `.strict()`: a misspelt `stauts` must not be dropped, leaving the post a
+  // draft while the caller believes it published it.
+  it("refuses an unknown field rather than dropping it", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, stauts: "published" }).success).toBe(false);
+  });
+
+  it("reads a post by id or by slug, not both and not neither", () => {
+    expect(agentGetBlogPostSchema.safeParse({ id: ID }).success).toBe(true);
+    expect(agentGetBlogPostSchema.safeParse({ slug: "2026-10-20-x" }).success).toBe(true);
+    expect(agentGetBlogPostSchema.safeParse({ id: ID, slug: "x" }).success).toBe(false);
+    const neither = agentGetBlogPostSchema.safeParse({});
+    expect(neither.success).toBe(false);
+    expect(neither.error?.issues[0].message).toBe("Send the post's id or its slug.");
+  });
+
+  it("takes an image as data or as a url, exactly one", () => {
+    expect(agentUploadBlogImageSchema.safeParse({ data: "iVBO" }).success).toBe(true);
+    expect(
+      agentUploadBlogImageSchema.safeParse({ url: "https://a.example.com/x.png" }).success,
+    ).toBe(true);
+    expect(agentUploadBlogImageSchema.safeParse({}).success).toBe(false);
+    expect(
+      agentUploadBlogImageSchema.safeParse({ data: "iVBO", url: "https://a.example.com/x.png" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("refuses an image over 8 MB before decoding it", () => {
+    const r = agentUploadBlogImageSchema.safeParse({ data: "A".repeat(12 * 1024 * 1024) });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].message).toMatch(/8 MB/);
+  });
 });
