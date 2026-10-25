@@ -1238,6 +1238,8 @@ export type Database = {
       profiles: {
         Row: {
           address: string | null
+          archived_at: string | null
+          archived_by: string | null
           belt_size: string | null
           created_at: string
           date_of_birth: string | null
@@ -1270,6 +1272,8 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
           belt_size?: string | null
           created_at?: string
           date_of_birth?: string | null
@@ -1302,6 +1306,8 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
           belt_size?: string | null
           created_at?: string
           date_of_birth?: string | null
