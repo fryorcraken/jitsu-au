@@ -86,8 +86,13 @@ the same code, not a second implementation.
   without asking) and `club_change` (everything else, marked destructive). The
   split is `src/lib/mcp/actions.ts`; a new action lands on the change side
   unless its name says it reads.
-- **After changing a tool,** regenerate the MCP manifest and republish; the
-  published site keeps serving the old tool list until then.
+- **After changing a tool or adding an action,** regenerate the MCP manifest
+  (`bunx lovable-mcp-extract-manifest`, which rewrites
+  `.lovable/mcp/manifest.json`), commit it, and republish; the published site
+  keeps serving the old tool list until then. Lovable's commit pipeline does
+  this for its own commits but not for anyone else's, so
+  `src/lib/mcp/actions.test.ts` fails when the committed manifest and the
+  action split disagree.
 
 ## Actions
 
