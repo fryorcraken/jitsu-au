@@ -25,7 +25,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { InsuranceReminderEmail } from "@/lib/email-templates/insurance-reminder";
-import { SITE_NAME, SITE_URL, emailConfigured, sendClubEmail } from "@/lib/email-send.server";
+import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
+import { SITE_NAME } from "@/lib/email-sender";
+import { SITE_ORIGIN } from "@/lib/seo";
 import { loadHouseholdContacts } from "@/lib/household-email";
 import { contactUserIdFor } from "@/lib/household";
 import { writeNotifications } from "@/lib/notification-email.server";
@@ -219,7 +221,8 @@ export async function sendInsuranceReminders(
     sent: 0,
   };
   if (owed.length === 0) return result;
-  if (!emailConfigured()) {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) {
     // Left pending, not stamped: they are still owed.
     console.warn("[insurance] LOVABLE_API_KEY not set — reminders left pending");
     return result;
@@ -251,6 +254,9 @@ export async function sendInsuranceReminders(
     [...groups.values()].map((g) => g.contactId).filter((id) => !people.has(id)),
   );
   const nameOf = (id: string) => people.get(id) ?? readers.get(id);
+  // An email TO a member carries the club's reply-to address, so somebody who
+  // answers "I already renewed" reaches a person (send-email.server.ts).
+  const replyTo = await clubReplyTo(db);
 
   for (const g of [...groups.values()].slice(0, SEND_BATCH)) {
     try {
@@ -279,12 +285,15 @@ export async function sendInsuranceReminders(
         greeting: `Hi ${greetingName(nameOf(g.contactId) ?? {}) || "there"}`,
         heading: copy.heading,
         body: copy.body,
-        renewUrl: `${SITE_URL}${copy.renewHref}`,
+        renewUrl: `${SITE_ORIGIN}${copy.renewHref}`,
       });
       const [html, text] = await Promise.all([render(el), render(el, { plainText: true })]);
       const ids = g.rows.map((r) => r.id);
-      await sendClubEmail({
+      await sendEmail({
+        apiKey,
+        sendUrl: process.env.LOVABLE_SEND_URL,
         to,
+        replyTo,
         subject: copy.subject,
         html,
         text,
