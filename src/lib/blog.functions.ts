@@ -213,6 +213,30 @@ export async function listBlogPostRows(admin: AdminClient) {
   return data ?? [];
 }
 
+/**
+ * A create that would have taken an address another post already has, when
+ * the caller asked for that to be refused rather than suffixed. Carries the
+ * post that holds it, which on a retried create is the one the first attempt
+ * filed.
+ */
+export class BlogSlugTakenError extends Error {
+  constructor(
+    readonly slug: string,
+    readonly existingId: string,
+  ) {
+    super(`A post already has the address /blog/${slug}.`);
+    this.name = "BlogSlugTakenError";
+  }
+}
+
+/** A guarded update whose post changed after the caller read it. */
+export class BlogPostChangedError extends Error {
+  constructor() {
+    super("The post changed after it was read.");
+    this.name = "BlogPostChangedError";
+  }
+}
+
 /** One post, any status, by id or by slug. Throws `BlogPostNotFoundError`. */
 export async function loadBlogPostRow(admin: AdminClient, key: { id: string } | { slug: string }) {
   const query = admin.from("blog_posts").select("*");
@@ -241,11 +265,31 @@ export type SavedBlogPost = {
   announced: boolean;
 };
 
+/**
+ * `refuseTakenSlug` is for a caller that may retry a create it never heard
+ * back from (the manager agent API). The editor resolves a taken address to
+ * `-2`, `-3`, which is right for a person typing a second post with the same
+ * title; for a retry it files the same post twice and announces it twice. With
+ * the flag, an address already taken throws `BlogSlugTakenError` naming the
+ * post that has it instead.
+ */
 export async function createBlogPostRow(
   admin: AdminClient,
   data: BlogPostInput,
   actorId: string,
+  opts: { refuseTakenSlug?: boolean } = {},
 ): Promise<SavedBlogPost> {
+  if (opts.refuseTakenSlug) {
+    const base = (data.slug || "").trim() || defaultBlogSlug(data.title, new Date());
+    if (!base) throw new BlogSlugError();
+    const { data: holder, error: holderErr } = await admin
+      .from("blog_posts")
+      .select("id")
+      .eq("slug", base)
+      .maybeSingle();
+    if (holderErr) throw new Error(holderErr.message);
+    if (holder) throw new BlogSlugTakenError(base, holder.id);
+  }
   const slug = await resolvePostSlug(admin, data.title, data.slug);
   const excerpt = resolveExcerpt(data.excerpt, data.body_md);
   const publishedAt = data.status === "published" ? new Date().toISOString() : null;
@@ -302,18 +346,32 @@ async function announcePost(
   }
 }
 
+/**
+ * `stored` is the row as a caller read it before deciding what to write (the
+ * manager agent API, which keeps omitted fields from it). Given, it is used in
+ * place of a second read, and the write only lands if the post has not been
+ * saved since: the caller is writing back fields it did not mean to change, so
+ * without the guard a save made in between would be quietly undone. Throws
+ * `BlogPostChangedError` then. The editor sends what is on screen and passes
+ * nothing.
+ */
 export async function updateBlogPostRow(
   admin: AdminClient,
   data: BlogPostInput & { id: string },
   actorId: string,
+  stored?: { status: string; published_at: string | null; updated_at: string },
 ): Promise<SavedBlogPost> {
-  const { data: existing, error: existingErr } = await admin
-    .from("blog_posts")
-    .select("status, published_at")
-    .eq("id", data.id)
-    .maybeSingle();
-  if (existingErr) throw new Error(existingErr.message);
-  if (!existing) throw new BlogPostNotFoundError();
+  let existing = stored;
+  if (!existing) {
+    const { data: row, error: existingErr } = await admin
+      .from("blog_posts")
+      .select("status, published_at, updated_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (existingErr) throw new Error(existingErr.message);
+    if (!row) throw new BlogPostNotFoundError();
+    existing = row;
+  }
   const slug = await resolvePostSlug(admin, data.title, data.slug, data.id);
   const publishedAt = resolvePublishedAt(
     existing.published_at,
@@ -321,7 +379,7 @@ export async function updateBlogPostRow(
     new Date().toISOString(),
   );
   const excerpt = resolveExcerpt(data.excerpt, data.body_md);
-  const { error } = await admin
+  let update = admin
     .from("blog_posts")
     .update({
       slug,
@@ -334,17 +392,26 @@ export async function updateBlogPostRow(
       updated_at: new Date().toISOString(),
     })
     .eq("id", data.id);
+  if (stored) update = update.eq("updated_at", stored.updated_at);
+  const { data: written, error } = await update.select("id");
   if (error) throw new Error(error.message);
+  if (!(written ?? []).length) {
+    if (stored) throw new BlogPostChangedError();
+    throw new BlogPostNotFoundError();
+  }
   // Announce on the transition INTO published, not on every save of a
   // published post: editing a typo is not news. The unique index makes a
   // repeat harmless anyway, so this is about not doing the work rather than
   // about correctness.
-  if (data.status === "published" && existing.status !== "published") {
+  const goesLive = data.status === "published" && existing.status !== "published";
+  if (goesLive) {
     await announcePost(data.id, slug, data.title, actorId);
   }
-  // `published_at` is stamped once and never cleared, so a null one means the
-  // post has never been live before this save.
-  const announced = data.status === "published" && existing.published_at === null;
+  // Reported only when it reached anybody: on the first time live. A
+  // republish calls it again, but the unique index makes that a no-op, and
+  // `published_at` is stamped once and never cleared, so a null one is "never
+  // live before".
+  const announced = goesLive && existing.published_at === null;
   return { id: data.id, slug, excerpt, status: data.status, published_at: publishedAt, announced };
 }
 

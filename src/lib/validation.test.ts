@@ -2976,6 +2976,14 @@ describe("the blog through the manager agent API", () => {
     expect(r.success).toBe(false);
     expect(r.error?.issues[0].message).toMatch(/upload_blog_image/);
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, cover_image_path: "" }).success).toBe(true);
+    for (const address of [
+      "//cdn.example.com/a.png",
+      "/storage/v1/object/public/blog-media/a.png",
+    ]) {
+      expect(agentSaveBlogPostSchema.safeParse({ id: ID, cover_image_path: address }).success).toBe(
+        false,
+      );
+    }
   });
 
   // `.strict()`: a misspelt `stauts` must not be dropped, leaving the post a
@@ -2988,7 +2996,9 @@ describe("the blog through the manager agent API", () => {
     expect(agentGetBlogPostSchema.safeParse({ id: ID }).success).toBe(true);
     expect(agentGetBlogPostSchema.safeParse({ slug: "2026-10-20-x" }).success).toBe(true);
     expect(agentGetBlogPostSchema.safeParse({ id: ID, slug: "x" }).success).toBe(false);
-    expect(agentGetBlogPostSchema.safeParse({}).success).toBe(false);
+    const neither = agentGetBlogPostSchema.safeParse({});
+    expect(neither.success).toBe(false);
+    expect(neither.error?.issues[0].message).toBe("Send the post's id or its slug.");
   });
 
   it("takes an image as data or as a url, exactly one", () => {

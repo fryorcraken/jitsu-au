@@ -100,10 +100,23 @@ export function blogImageFileName(
  * the image early, so they are dropped.
  */
 export function blogImageMarkdown(alt: string, url: string): string {
-  return `![${alt.replace(/[[\]]/g, "").trim()}](${url})`;
+  // A line break would split the image across paragraphs, and a backslash can
+  // escape its closing bracket; neither belongs in a description.
+  const clean = alt
+    .replace(/[[\]\\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `![${clean}](${url})`;
 }
 
-const PRIVATE_HOST = /(^|\.)(localhost|local|internal|localdomain|home|lan|intranet)$/i;
+/**
+ * Names that are private by convention or by standard (RFC 6761, 6762, 8375),
+ * and the public wildcard-DNS services whose whole purpose is to resolve a name
+ * to whatever address it spells (127.0.0.1.nip.io). A suffix list cannot see
+ * where any other name resolves; see the header for why that gap is accepted.
+ */
+const PRIVATE_HOST =
+  /(^|\.)(localhost|local|internal|localdomain|home|lan|intranet|corp|private|test|invalid|arpa|localtest\.me|nip\.io|sslip\.io|xip\.io)$/i;
 
 /**
  * Whether the server may fetch this address on a caller's behalf. Returns the
@@ -118,9 +131,9 @@ export function blogImageUrlProblem(raw: string): string | null {
   }
   if (url.protocol !== "https:") return "Only https addresses are fetched.";
   if (url.username || url.password) return "An address carrying a login is not fetched.";
-  // One trailing dot is the same host written fully qualified ("localhost."),
+  // Trailing dots are the same host written fully qualified ("localhost."),
   // and would otherwise slip past the suffix test below.
-  const host = url.hostname.replace(/\.$/, "");
+  const host = url.hostname.replace(/\.+$/, "");
   // An IP literal (v4 or bracketed v6) names a machine rather than a site, and
   // is how a request is pointed at something on a private network.
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[") || host.includes(":")) {
@@ -145,6 +158,9 @@ function unreachable(e: unknown): BlogImageError {
       : "Could not download the image from that address. Check it opens in a browser, or send the file itself.",
   );
 }
+
+/** Who is asking, for an image host that wants to know. Names the site, nothing about the caller. */
+const IMAGE_FETCH_USER_AGENT = "UTSJitsuBlogImageFetcher/1.0 (+https://utsjitsu.com.au)";
 
 const MAX_REDIRECTS = 5;
 const FETCH_TIMEOUT_MS = 15_000;
@@ -206,7 +222,12 @@ export async function fetchBlogImage(
       res = await fetchImpl(current, {
         redirect: "manual",
         signal,
-        headers: { accept: "image/png,image/jpeg,image/webp,image/gif" },
+        // Some image hosts (Wikimedia's among them) refuse a request that
+        // names no client, and a Workers fetch sends none by default.
+        headers: {
+          accept: "image/png,image/jpeg,image/webp,image/gif",
+          "user-agent": IMAGE_FETCH_USER_AGENT,
+        },
       });
     } catch (e) {
       throw unreachable(e);
@@ -229,8 +250,11 @@ export async function fetchBlogImage(
     }
     if (!res.ok) {
       await res.body?.cancel().catch(() => {});
+      // "Too slow" and "too many requests" pass with time; any other 4xx is
+      // the address itself, which no retry changes.
+      const passes = res.status >= 500 || res.status === 408 || res.status === 429;
       throw new BlogImageError(
-        res.status >= 500 ? "unreachable" : "rejected",
+        passes ? "unreachable" : "rejected",
         `The address answered ${res.status} rather than an image. Check it opens in a browser without signing in.`,
       );
     }

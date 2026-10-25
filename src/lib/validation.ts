@@ -3858,9 +3858,16 @@ export type UploadBlogImageInput = z.infer<typeof uploadBlogImageSchema>;
 export const agentGetBlogPostSchema = z
   .object({ id: z.string().uuid().optional(), slug: z.string().trim().min(1).max(200).optional() })
   .strict()
-  .refine((d) => Boolean(d.id) !== Boolean(d.slug), {
-    message: "Send the post's id or its slug, not both.",
-    path: ["id"],
+  .superRefine((d, ctx) => {
+    if (Boolean(d.id) === Boolean(d.slug)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["id"],
+        message: d.id
+          ? "Send the post's id or its slug, not both."
+          : "Send the post's id or its slug.",
+      });
+    }
   });
 export type AgentGetBlogPostInput = z.infer<typeof agentGetBlogPostSchema>;
 
@@ -3888,7 +3895,9 @@ export const agentSaveBlogPostSchema = z
     excerpt: blogPostSchema.shape.excerpt,
     body_md: blogPostSchema.shape.body_md.optional(),
     cover_image_path: blogPostSchema.shape.cover_image_path.refine(
-      (v) => !v || !/^[a-z]+:\/\//i.test(v),
+      // A path from the bucket never starts with a scheme or a slash; an
+      // address stored here renders as a broken cover on the public blog.
+      (v) => !v || !/^([a-z]+:|\/)/i.test(v),
       "Pass the `path` that upload_blog_image returned, not the image's web address.",
     ),
     status: z.enum(blogPostStatuses).optional(),
@@ -3942,7 +3951,9 @@ export const agentUploadBlogImageSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["data"],
-        message: "Send the image as base64 `data` or as a `url` to download, not both.",
+        message: value.data
+          ? "Send the image as base64 `data` or as a `url` to download, not both."
+          : "Send the image as base64 `data` or as a `url` to download.",
       });
     }
     if (value.data && base64ByteLength(value.data) > MAX_BLOG_IMAGE_BYTES) {

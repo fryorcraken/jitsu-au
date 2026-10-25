@@ -1174,6 +1174,14 @@ have it taken afresh.
 > - **Changing the slug of a live post moves it.** Every link already shared to
 >   the old address stops working. A slug another post has gets `-2` added, so
 >   read the `slug` the result returns.
+> - **A retry never duplicates a post.** A new post refuses an address another
+>   post already has, with `409 slug_taken` and that post's `id` in
+>   `error.details`. If you were retrying a create you never heard back from,
+>   that is your post: read it with `get_blog_post` rather than creating again.
+>   Two different posts with the same title on the same day need a `slug` of
+>   your own for the second.
+> - **`409 post_changed` means somebody saved the post after you read it**, and
+>   nothing was written. Read it again and redo the change on what is there.
 > - A line of its own reading `[[video:<url>]]` embeds a video: a YouTube link
 >   plays inline, anything else shows as a plain link.
 

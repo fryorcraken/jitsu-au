@@ -1746,8 +1746,9 @@ describe("manager agent route: the blog", () => {
    * filters each chain applies rather than ignoring them, so a save that wrote
    * the wrong row or a slug check that matched nothing would show.
    */
-  function fakeBlog(seed: Row[]) {
+  function fakeBlog(seed: Row[], opts: { afterFirstRead?: (rows: Row[]) => void } = {}) {
     const rows = seed.map((r) => ({ ...r }));
+    let reads = 0;
     const uploads: { path: string; type: string; size: number }[] = [];
     const removed: string[] = [];
     const query = (op: "select" | "update" | "delete", patch?: Row) => {
@@ -1776,7 +1777,11 @@ describe("manager agent route: the blog", () => {
         order: () => c,
         limit: () => c,
         select: () => c,
-        maybeSingle: () => Promise.resolve(ok(run()[0] ?? null)),
+        maybeSingle: () => {
+          const hit = run()[0] ?? null;
+          if (reads++ === 0) opts.afterFirstRead?.(rows);
+          return Promise.resolve(ok(hit));
+        },
         then: (resolve: (r: unknown) => void) => resolve(ok(run())),
       };
       return c;
@@ -1933,6 +1938,41 @@ describe("manager agent route: the blog", () => {
     expect(result.post.excerpt).toBe("Classes run all summer.");
     expect(fake.rows[0].author_id).toBe(TOKEN_OWNER);
     expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // A create the agent never heard back from gets retried. Suffixing the
+  // address the way the editor does would file the post twice and announce it
+  // twice; refusing names the post the first attempt made.
+  it("refuses a create whose address is taken, naming the post that has it", async () => {
+    const fake = fakeBlog([DRAFT]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { title: "Grading day", body_md: "Again.", slug: DRAFT.slug, status: "published" },
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatchObject({
+      code: "slug_taken",
+      details: { id: DRAFT_ID, slug: DRAFT.slug },
+    });
+    expect(fake.rows).toHaveLength(1);
+    expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // The agent writes back the fields it did not send, from what it read. A
+  // manager's save landing in between must not be quietly undone.
+  it("refuses an edit when the post was saved after it was read, writing nothing", async () => {
+    const fake = fakeBlog([LIVE], {
+      afterFirstRead: (rows) => {
+        rows[0].body_md = "The manager's new body.";
+        rows[0].updated_at = "2026-10-24T09:00:00Z";
+      },
+    });
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_blog_post", params: { id: LIVE_ID, title: "Hello" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("post_changed");
+    expect(fake.rows[0]).toMatchObject({ title: "Welcome", body_md: "The manager's new body." });
   });
 
   it("refuses a new post with no body, writing nothing", async () => {

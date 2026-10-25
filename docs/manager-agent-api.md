@@ -414,6 +414,18 @@ code_of_conduct_not_published` with its `version`, and nothing is made
     goes live, members who opted in hear about it in their daily summary
     (`docs/notifications.md`). The result's `announced` says whether this save
     did it, so the agent can tell the manager.
+  - **A create never suffixes a taken address.** The editor turns a second
+    "Grading day" into `...-grading-day-2`, which is right for a person and
+    wrong for a caller retrying a create it never heard back from: that files
+    the post twice and announces it twice (the announcement dedupes on the post
+    id, and the second post has a new one). So `save_blog_post` refuses with
+    `409 slug_taken`, naming the post that holds the address, and the retry
+    learns its post already exists. No `client_submission_id`, because that
+    would need a column; the address does the same job here.
+  - **An edit is guarded against a save in between.** It writes back the
+    fields the caller left out from the row it read, so it only lands if
+    `updated_at` still matches (`409 post_changed` otherwise). The editor sends
+    what is on screen and is not guarded.
   - **A blank `slug` is refused** rather than re-derived. On the screen a blank
     slug makes a new one from the title, which on a live post moves it to a new
     address and breaks every link already shared.

@@ -151,8 +151,10 @@ import { loadClubSettings } from "@/lib/club-settings.functions";
 import { ResendNotSentError, resendEmail } from "@/lib/email-resend.functions";
 import type { ResendRefusal } from "@/lib/email-resend";
 import {
+  BlogPostChangedError,
   BlogPostNotFoundError,
   BlogSlugError,
+  BlogSlugTakenError,
   createBlogPostRow,
   deleteBlogPostRow,
   listBlogPostRows,
@@ -1808,6 +1810,23 @@ function blogAgentError(e: unknown, code: string, fallback: string): unknown {
   if (e instanceof AgentError) return e;
   if (e instanceof BlogPostNotFoundError) return new AgentError(404, "not_found", NO_SUCH_POST);
   if (e instanceof BlogSlugError) return new AgentError(422, code, e.message);
+  // A create that would have doubled a post. On a retry the post it names is
+  // the one the first attempt filed, so this is "already done", not a fault.
+  if (e instanceof BlogSlugTakenError) {
+    return new AgentError(
+      409,
+      "slug_taken",
+      `${e.message} If that is the post you were creating (a retry), it is already saved: read it with get_blog_post. If it is a different post, send a slug of your own.`,
+      { id: e.existingId, slug: e.slug },
+    );
+  }
+  if (e instanceof BlogPostChangedError) {
+    return new AgentError(
+      409,
+      "post_changed",
+      "The post was saved by somebody else after this change was read, and nothing was written. Read it again with get_blog_post and make the change on what is there now.",
+    );
+  }
   // Anything else is a database or storage error's own text, which names
   // tables and buckets: it stays in the server log (see errorResponse).
   return new AgentError(500, "db_error", e instanceof Error ? e.message : fallback);
@@ -1854,7 +1873,7 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
   try {
     if (input.id) {
       const stored = await loadBlogPostRow(db, { id: input.id });
-      saved = await updateBlogPostRow(db, mergeAgentBlogPostEdit(stored, input), actingAs);
+      saved = await updateBlogPostRow(db, mergeAgentBlogPostEdit(stored, input), actingAs, stored);
       created = false;
     } else {
       // The schema refuses a new post without both; this narrows the types.
@@ -1869,6 +1888,7 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
           status: input.status ?? "draft",
         },
         actingAs,
+        { refuseTakenSlug: true },
       );
       created = true;
     }

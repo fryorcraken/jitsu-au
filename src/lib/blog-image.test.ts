@@ -74,6 +74,11 @@ describe("blogImageMarkdown", () => {
 
   // A closing bracket in the alt text would end the image early and print the
   // rest of the line as text.
+  it("drops a backslash and line breaks, which would also break it", () => {
+    expect(blogImageMarkdown("C:\\mats\\", "u")).toBe("![C:mats](u)");
+    expect(blogImageMarkdown("Two\n\nlines", "u")).toBe("![Two lines](u)");
+  });
+
   it("drops brackets that would break the image", () => {
     expect(blogImageMarkdown("Belts [all of them]", "u")).toBe("![Belts all of them](u)");
   });
@@ -91,6 +96,10 @@ describe("blogImageUrlProblem", () => {
     ["https://[::1]/x.png", "IP"],
     ["https://localhost/x.png", "public"],
     ["https://localhost./x.png", "public"],
+    ["https://localhost../x.png", "public"],
+    ["https://127.0.0.1.nip.io/x.png", "public"],
+    ["https://localtest.me/x.png", "public"],
+    ["https://router.home.arpa/x.png", "public"],
     ["https://metadata.internal./x.png", "public"],
     ["https://db.internal/x.png", "public"],
     ["https://printer/x.png", "public"],
@@ -107,6 +116,12 @@ describe("fetchBlogImage", () => {
     expect(got.bytes).toEqual(PNG);
     expect(got.finalUrl).toBe("https://a.example.com/x.png");
     expect(fetchImpl.mock.calls[0][1]).toMatchObject({ redirect: "manual" });
+  });
+
+  it("names the site to the image host", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(PNG));
+    await fetchBlogImage("https://a.example.com/x.png", fetchImpl);
+    expect(fetchImpl.mock.calls[0][1].headers["user-agent"]).toMatch(/UTSJitsu/);
   });
 
   it("follows a redirect to another public address", async () => {
@@ -154,6 +169,10 @@ describe("fetchBlogImage", () => {
   it("sorts an error answer into one to retry and one to change", async () => {
     const server = vi.fn().mockResolvedValue(new Response("", { status: 503 }));
     const missing = vi.fn().mockResolvedValue(new Response("", { status: 404 }));
+    const busy = vi.fn().mockResolvedValue(new Response("", { status: 429 }));
+    await expect(fetchBlogImage("https://a.example.com/x", busy)).rejects.toMatchObject({
+      reason: "unreachable",
+    });
     await expect(fetchBlogImage("https://a.example.com/x", server)).rejects.toMatchObject({
       reason: "unreachable",
     });
