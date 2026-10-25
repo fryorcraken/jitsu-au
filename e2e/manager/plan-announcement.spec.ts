@@ -56,18 +56,18 @@ test("a manager emails every member about a plan, after saying yes to the real n
   await step(page, "the app asks first, saying how many people it will email", async () => {
     await save.click();
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText(/Save and email \d+ (people|person) about Next semester\?/);
+    // Nothing on the plan was edited, so it is emailed without being saved,
+    // and the question says only that.
+    await expect(dialog).toContainText(/Email \d+ (people|person) about Next semester\?/);
     await expect(dialog).toContainText("This can't be undone.");
   });
 
   // Read off the dialog, then checked against what the app actually wrote.
-  const asked = Number(
-    /Save and email (\d+)/.exec((await dialog.textContent()) ?? "")?.[1] ?? Number.NaN,
-  );
+  const asked = Number(/Email (\d+)/.exec((await dialog.textContent()) ?? "")?.[1] ?? Number.NaN);
   expect(asked).toBeGreaterThan(0);
 
-  await step(page, "saved and sent, the card says when and to how many", async () => {
-    await dialog.getByRole("button", { name: "Save and email" }).click();
+  await step(page, "sent, the card says when and to how many", async () => {
+    await dialog.getByRole("button", { name: "Email members" }).click();
     await expect(card).toContainText(
       new RegExp(`Announced on \\d{1,2} \\w{3} to ${asked} (people|person)\\.`),
     );
