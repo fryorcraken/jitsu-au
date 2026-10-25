@@ -192,8 +192,8 @@ is without losing their place in a long page.
 
 - **With a mouse**, hover the link and the card appears after a moment; move
   away and it goes. A click still follows the link straight away.
-- **On a phone**, the **first tap** opens the card instead of following the
-  link, and a **second tap** on the link, or the card's own "Go to this section"
+- **On a phone** (or with a pen on a tablet, which has no hover either), the
+  **first tap** opens the card instead of following the link, and a **second tap** on the link, or the card's own "Go to this section"
   / "Read the article" button, follows it. Tapping anywhere else closes it. That
   costs one extra tap for somebody who wanted to go straight there, which is the
   trade: without it a member on a phone could never peek at all, and most of
@@ -213,6 +213,13 @@ is without losing their place in a long page.
   following the link instant, since the text is already in hand.
 - Links **inside** a card have no card of their own: a card on a card is a stack
   nobody can read on a phone.
+- **An article saved on the device previews offline**, because the card reads
+  the same stored copy the page does. One that is not saved says the reader is
+  offline rather than loading for good.
+- **The manager's editor preview has cards too**, and they show the
+  **published** article, not the draft on screen. A link from an article to a
+  section of itself that only exists in the unsaved draft will say the section
+  is not there until the draft is saved.
 
 Nothing has to be switched on. **A preview needs a link**, though: a technique
 name written as plain words has nothing to point at, so the syllabus only

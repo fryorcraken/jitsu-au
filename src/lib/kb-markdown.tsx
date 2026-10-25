@@ -274,9 +274,18 @@ export const kbPreviewMarkdownComponents: Components = {
   a: ({ children, href }) => plainLink(href, children),
 };
 
-function renderPreviewMarkdown(markdown: string): ReactNode {
+export function renderPreviewMarkdown(markdown: string, slug: string): ReactNode {
+  const components: Components = {
+    ...kbPreviewMarkdownComponents,
+    // A bare `#section` in a card names a section of the article being
+    // PREVIEWED, which is usually not the one on screen. Left alone it would
+    // jump the reader to a same-named section of the wrong article, or tell
+    // them it had been renamed away.
+    a: ({ children, href }) =>
+      plainLink(href?.startsWith("#") ? `/kb/${encodeURIComponent(slug)}${href}` : href, children),
+  };
   return (
-    <ReactMarkdown components={kbPreviewMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
+    <ReactMarkdown components={components} remarkPlugins={kbRemarkPlugins}>
       {markdown}
     </ReactMarkdown>
   );

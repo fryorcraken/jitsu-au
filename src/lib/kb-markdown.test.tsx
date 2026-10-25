@@ -26,6 +26,7 @@ import {
   internalLinkTarget,
   kbMarkdownComponents,
   kbRemarkPlugins,
+  renderPreviewMarkdown,
   staysInThisTab,
 } from "./kb-markdown";
 
@@ -84,6 +85,16 @@ describe("kbMarkdownComponents", () => {
   it("gives a fragment no preview outside the reader", () => {
     renderMarkdown("Jump to [fees](#fees).");
     expect(screen.getByRole("link", { name: "fees" })).not.toHaveAttribute("data-state");
+  });
+
+  // Inside a preview card a bare fragment names a section of the article being
+  // previewed, which is usually not the one on screen.
+  it("points a fragment inside a preview card at the previewed article", () => {
+    render(<>{renderPreviewMarkdown("See the [wrist lock](#wrist-lock).", "techniques")}</>);
+    const link = screen.getByRole("link", { name: "wrist lock" });
+    expect(link).toHaveAttribute("href", "/kb/techniques#wrist-lock");
+    // And it has no card of its own: a card on a card.
+    expect(link).not.toHaveAttribute("data-state");
   });
 
   // A fragment names a heading in the article already on screen. The reader

@@ -51,25 +51,28 @@ export function articlePreview(bodyMd: string, hash?: string): KbPreview {
   let start = 0;
   let end = blocks.length;
   if (target) {
-    const headingIndex = blocks.findIndex((block) => block.id === target.blockId);
+    const blockIndex = new Map(blocks.map((block) => [block.id, block.index]));
+    const headingIndex = blockIndex.get(target.blockId) ?? 0;
     // Start AFTER the heading block: the card already titles itself with it.
     start = headingIndex + 1;
-    const nextHeading = headings.find((heading) => {
-      const index = blocks.findIndex((block) => block.id === heading.blockId);
-      return index > headingIndex && heading.depth <= target.depth;
-    });
-    if (nextHeading) end = blocks.findIndex((block) => block.id === nextHeading.blockId);
+    const nextHeading = headings.find(
+      (heading) =>
+        (blockIndex.get(heading.blockId) ?? 0) > headingIndex && heading.depth <= target.depth,
+    );
+    if (nextHeading) end = blockIndex.get(nextHeading.blockId) ?? end;
   }
 
   const passage = blocks.slice(start, end);
   const shown: string[] = [];
   let chars = 0;
   for (const block of passage) {
-    // Always at least one block, however long: an empty card for a passage
-    // that opens with one long paragraph would be the preview failing at the
-    // only thing it is for.
-    if (shown.length > 0 && (shown.length >= PREVIEW_MAX_BLOCKS || chars >= PREVIEW_MAX_CHARS)) {
-      break;
+    // The first block always goes in, however long: an empty card for a
+    // passage that opens with one long paragraph would be the preview failing
+    // at the only thing it is for. After that, a block goes in only if it
+    // fits, so one long one cannot carry the card far past the budget.
+    if (shown.length > 0) {
+      if (shown.length >= PREVIEW_MAX_BLOCKS) break;
+      if (chars + block.markdown.length > PREVIEW_MAX_CHARS) break;
     }
     shown.push(block.markdown);
     chars += block.markdown.length;

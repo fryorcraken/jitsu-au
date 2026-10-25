@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ReactMarkdown from "react-markdown";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -26,7 +26,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 const preview = vi.fn();
 vi.mock("@/hooks/useKbArticle", () => ({
-  useKbArticlePreview: (slug: string) => preview(slug),
+  useKbArticle: (slug: string) => preview(slug),
 }));
 
 import { KbLinkPreview } from "./KbLinkPreview";
@@ -34,6 +34,7 @@ import { KbLinkPreview } from "./KbLinkPreview";
 const SYLLABUS = {
   isPending: false,
   isError: false,
+  fetchStatus: "idle",
   error: null,
   data: {
     redirect_to: null,
@@ -50,7 +51,7 @@ function renderLink() {
     <KbLinkPreview
       slug="techniques"
       hash="advanced-body-grab"
-      renderMarkdown={(markdown) => <ReactMarkdown>{markdown}</ReactMarkdown>}
+      renderMarkdown={(markdown: string) => <ReactMarkdown>{markdown}</ReactMarkdown>}
     >
       <a href="/kb/techniques#advanced-body-grab">advanced body grab</a>
     </KbLinkPreview>,
@@ -119,6 +120,7 @@ describe("KbLinkPreview", () => {
     preview.mockReturnValue({
       isPending: false,
       isError: true,
+      fetchStatus: "idle",
       error: new Error("That article does not exist, or is not available to you."),
       data: undefined,
     });
@@ -129,6 +131,79 @@ describe("KbLinkPreview", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "That article does not exist, or is not available to you.",
+    );
+  });
+
+  // A pen on a tablet has no hover either, so it peeks like a finger.
+  it("treats a pen like a finger", async () => {
+    preview.mockReturnValue(SYLLABUS);
+    renderLink();
+    const link = screen.getByRole("link", { name: "advanced body grab" });
+
+    fireEvent.pointerDown(link, { pointerType: "pen" });
+    expect(click(link)).toBe(true);
+    expect(await screen.findByText("Step in, hips low.")).toBeInTheDocument();
+  });
+
+  // A keyboard Enter is a click with no pointer behind it: that reader chose
+  // the link and goes, rather than being made to press twice.
+  it("follows a click with no pointer behind it", () => {
+    preview.mockReturnValue(SYLLABUS);
+    renderLink();
+    expect(click(screen.getByRole("link", { name: "advanced body grab" }))).toBe(false);
+  });
+
+  // A `#section` jump stays on the page, so the card has to close itself.
+  it("closes the card when the second tap follows the link", async () => {
+    preview.mockReturnValue(SYLLABUS);
+    renderLink();
+    const link = screen.getByRole("link", { name: "advanced body grab" });
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    click(link);
+    await screen.findByText("Step in, hips low.");
+
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    click(link);
+    await waitFor(() => expect(screen.queryByText("Step in, hips low.")).not.toBeInTheDocument());
+  });
+
+  // React Query holds a fetch with no connection rather than failing it, so
+  // "Loading" would otherwise never end.
+  it("says so when it is offline with nothing saved", async () => {
+    preview.mockReturnValue({
+      isPending: true,
+      isError: false,
+      fetchStatus: "paused",
+      error: null,
+      data: undefined,
+    });
+    renderLink();
+    const link = screen.getByRole("link", { name: "advanced body grab" });
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    click(link);
+
+    expect(await screen.findByText(/You are offline/)).toBeInTheDocument();
+  });
+
+  // A link to the whole article, not a section of it.
+  it("titles a whole-article preview once", async () => {
+    preview.mockReturnValue(SYLLABUS);
+    render(
+      <KbLinkPreview
+        slug="techniques"
+        renderMarkdown={(markdown: string) => <ReactMarkdown>{markdown}</ReactMarkdown>}
+      >
+        <a href="/kb/techniques">techniques</a>
+      </KbLinkPreview>,
+    );
+    const link = screen.getByRole("link", { name: "techniques" });
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    click(link);
+
+    expect(await screen.findAllByText("Techniques")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: /Read the article/ })).toHaveAttribute(
+      "href",
+      "/kb/techniques",
     );
   });
 });

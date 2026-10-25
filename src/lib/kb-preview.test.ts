@@ -66,6 +66,14 @@ describe("articlePreview", () => {
     expect(preview.truncated).toBe(true);
   });
 
+  // One long block after a short one must not carry the card far past the
+  // budget it exists to keep.
+  it("leaves out a later block that would blow the budget", () => {
+    const preview = articlePreview(`Short opener.\n\n${"word ".repeat(400).trim()}`);
+    expect(preview.markdown).toBe("Short opener.");
+    expect(preview.truncated).toBe(true);
+  });
+
   it("does not claim more when the whole passage fits", () => {
     expect(articlePreview(SYLLABUS, "wrist-lock").truncated).toBe(false);
   });
