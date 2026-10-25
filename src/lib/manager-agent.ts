@@ -260,7 +260,7 @@ export const AGENT_MANIFEST: {
       breaking: false,
       notes: [
         "The code of conduct is now a document managers edit, in numbered versions with one live, like the waiver. New actions: list_code_of_conduct_versions, get_code_of_conduct, save_code_of_conduct and publish_code_of_conduct, with the same contract as the four waiver template actions: keyed on the version number, saving publishes, an omitted title/body is carried over from base_version (default the live one) and based_on names it, refusals are 404 not_found, 422 save_code_of_conduct_failed / publish_code_of_conduct_failed, and 503 code_of_conduct_not_published with Retry-After.",
-        "save_code_of_conduct takes asks_reagreement (default false): whether this version asks everybody who agreed to an older one to agree again. Leave it off for a correction. The reply's reprompted says how many people it put out of date. It also takes client_submission_id: resend the same one on a retry and you get already_saved true and no second version. If that version is not live (it lost the publish, or the live version changed since), the retry is 503 code_of_conduct_not_published with details.version and nothing is made live: publish it yourself only if it should replace what is live now.",
+        "save_code_of_conduct takes asks_reagreement (default false): whether this version asks everybody who agreed to an older one to agree again. Leave it off for a correction. The reply's reprompted says how many people it put out of date, and publish_code_of_conduct's reply carries the same count. It also takes client_submission_id: resend the same one on a retry and you get already_saved true and no second version. If that version is not live (it lost the publish, or the live version changed since), the retry is 503 code_of_conduct_not_published with details.version and nothing is made live: publish it yourself only if it should replace what is live now.",
         "code_of_conduct on list_users rows and in get_user carries required_version: the version people must have agreed to while the live one is live (the last version that asked everybody to agree again, unless a rollback undid that ask). state is now outdated only when accepted_version is below required_version, not below current_version, so a typo-fix version no longer puts anybody out of date. current_version is null if nothing is live.",
       ],
     },
@@ -956,7 +956,7 @@ export const AGENT_MANIFEST: {
       name: "publish_code_of_conduct",
       method: "POST",
       summary:
-        "Make an existing version the live one, e.g. to roll back. published false means it was already live and nothing changed. The reply's required_version says who is out of date afterwards: rolling back below a version that asked everybody to agree again undoes that ask.",
+        "Make an existing version the live one, e.g. to roll back. published false means it was already live and nothing changed. The reply's required_version says who is out of date afterwards: rolling back below a version that asked everybody to agree again undoes that ask. Its reprompted is how many people the publish put out of date, counted before it (a failed count is 500 db_error and publishes nothing).",
       params: [
         { name: "version", required: true, description: "The version number to make live." },
       ],

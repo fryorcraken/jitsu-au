@@ -4,7 +4,7 @@
 // (saving from a failed load would publish an empty code of conduct). And the
 // re-agreement choice says, in numbers and before the click, who a save will
 // ask to agree again: off, nobody; on, everybody who is up to date.
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -181,6 +181,38 @@ describe("manager code of conduct editor", () => {
     const v2 = { ...v1, id: "v2", version: 2, is_current: false, required_version: 2 };
     listCodeOfConductVersions.mockResolvedValue({ versions: [v2, v1], highest_accepted: [] });
     render(<EditorPage />);
+    const row = await screen.findByRole("button", { name: /version 2/i });
+    expect(row).toHaveTextContent("Previous");
+    expect(row).not.toHaveTextContent("Draft");
+  });
+
+  // A version whose own save lost its promotion reads "Draft". Making it live
+  // and then rolling back in the same visit must not put it back to "Draft":
+  // it has been live, and people may have agreed to it.
+  it("keeps a version made live in this visit as Previous after rolling back", async () => {
+    const v2 = {
+      ...v1,
+      id: "v2",
+      version: 2,
+      asks_reagreement: false,
+      is_current: false,
+      first_published_at: null,
+    };
+    listCodeOfConductVersions.mockResolvedValue({ versions: [v2, v1], highest_accepted: [] });
+    setCurrentCodeOfConduct.mockResolvedValue({ ok: true });
+    render(<EditorPage />);
+    expect(await screen.findByRole("button", { name: /version 2/i })).toHaveTextContent("Draft");
+
+    for (const [i, n] of [2, 1].entries()) {
+      await userEvent.click(screen.getByRole("button", { name: new RegExp(`version ${n}`, "i") }));
+      await userEvent.click(
+        screen.getByRole("button", { name: new RegExp(`make version ${n} live`, "i") }),
+      );
+      const dialog = await screen.findByRole("alertdialog");
+      await userEvent.click(within(dialog).getByRole("button", { name: /make it live/i }));
+      await waitFor(() => expect(setCurrentCodeOfConduct).toHaveBeenCalledTimes(i + 1));
+    }
+
     const row = await screen.findByRole("button", { name: /version 2/i });
     expect(row).toHaveTextContent("Previous");
     expect(row).not.toHaveTextContent("Draft");

@@ -20,6 +20,12 @@ import { DocumentVersionError } from "@/lib/document-versions";
 /** The tables that hold a document in numbered versions with one live. */
 export type VersionedTable = "waiver_templates" | "code_of_conduct_versions";
 
+/** A promoted row, as far as the promotion itself reads it. */
+export type VersionRow = { id: string; version: number; is_current: boolean } & Record<
+  string,
+  unknown
+>;
+
 /** Which document, and how to talk about it when promoting it goes wrong. */
 export type VersionedDocument = {
   table: VersionedTable;
@@ -27,6 +33,22 @@ export type VersionedDocument = {
   noun: string;
   /** What having none live means for people, finishing "so ...": "nobody can sign". */
   withoutOne: string;
+  /**
+   * What promoting reads of the target: `id, version, is_current`, plus
+   * whatever the document's `refuse` rule and `setLive` look at. Never the
+   * body, which can be 50,000 characters and is not needed to flip a flag.
+   */
+  columns: string;
+  /**
+   * The write that makes the target live, when the document needs more than
+   * `is_current = true` in that same statement. It is one statement on
+   * purpose: anything that must change the moment a version goes live belongs
+   * here, not in a second write that can fail after the first succeeded.
+   */
+  setLive?: (
+    admin: SupabaseClient<Database>,
+    row: VersionRow,
+  ) => PromiseLike<{ error: { message: string } | null }>;
 };
 
 /**
@@ -42,14 +64,15 @@ export async function promoteDocumentVersion(
   admin: SupabaseClient<Database>,
   doc: VersionedDocument,
   id: string,
-  refuse?: (row: Record<string, unknown>) => string | null,
+  refuse?: (row: VersionRow) => string | null,
 ): Promise<{ version: number }> {
-  const { data: target, error: tErr } = await admin
+  const { data, error: tErr } = await admin
     .from(doc.table)
-    .select("*")
+    .select(doc.columns)
     .eq("id", id)
     .maybeSingle();
   if (tErr) throw new DocumentVersionError(tErr.message, "not_published");
+  const target = data as VersionRow | null;
   if (!target)
     throw new DocumentVersionError(`That ${doc.noun} version no longer exists.`, "not_found");
   if (target.is_current) return { version: target.version };
@@ -69,10 +92,9 @@ export async function promoteDocumentVersion(
     .eq("is_current", true);
   if (clearErr) throw new DocumentVersionError(clearErr.message, "not_published", target.version);
 
-  const { error: setErr } = await admin
-    .from(doc.table)
-    .update({ is_current: true })
-    .eq("id", target.id);
+  const { error: setErr } = doc.setLive
+    ? await doc.setLive(admin, target)
+    : await admin.from(doc.table).update({ is_current: true }).eq("id", target.id);
   if (!setErr) return { version: target.version };
 
   // From here the club has no live version until something sets one.

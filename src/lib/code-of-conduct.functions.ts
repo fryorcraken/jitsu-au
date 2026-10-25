@@ -51,11 +51,7 @@ import {
   type SaveCodeOfConductInput,
 } from "@/lib/validation";
 import { DocumentVersionError } from "@/lib/document-versions";
-import {
-  nextDocumentVersion,
-  promoteDocumentVersion,
-  type VersionedDocument,
-} from "@/lib/document-version-store";
+import { promoteDocumentVersion, type VersionedDocument } from "@/lib/document-version-store";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -472,6 +468,20 @@ const CODE_OF_CONDUCT_DOCUMENT: VersionedDocument = {
   table: "code_of_conduct_versions",
   noun: "code of conduct",
   withoutOne: "nobody can read it or agree to it",
+  columns: "id, version, is_current, first_published_at",
+  // Stamps `first_published_at` the first time a version goes live, in the
+  // same statement that makes it live, which is what lets the version list keep
+  // calling a rolled-back version "Previous". A second write could fail after
+  // the first succeeded and leave a version that was live reading "Draft".
+  setLive: (admin, row) =>
+    admin
+      .from("code_of_conduct_versions")
+      .update(
+        row.first_published_at
+          ? { is_current: true }
+          : { is_current: true, first_published_at: new Date().toISOString() },
+      )
+      .eq("id", row.id),
 };
 
 /**
@@ -571,27 +581,23 @@ export async function highestAcceptedVersions(admin: AdminClient): Promise<numbe
 }
 
 /**
- * Make one stored version the live one. There is no content rule to check.
- *
- * Also stamps `first_published_at` the first time a version goes live, which is
- * what lets the version list keep calling a rolled-back version "Previous". The
- * stamp is only ever a label, so a failure to write it is logged rather than
- * reported as a failed publish: the publish itself happened.
+ * Make one stored version the live one. There is no content rule to check, and
+ * the first-went-live stamp travels in the same write (`setLive` above).
  */
 export async function promoteCodeOfConductVersion(
   admin: AdminClient,
   id: string,
 ): Promise<{ version: number }> {
-  const promoted = await promoteDocumentVersion(admin, CODE_OF_CONDUCT_DOCUMENT, id);
-  const { error } = await admin
-    .from("code_of_conduct_versions")
-    .update({ first_published_at: new Date().toISOString() })
-    .eq("id", id)
-    .is("first_published_at", null);
-  if (error)
-    console.error("[promoteCodeOfConductVersion] could not stamp first_published_at:", error);
-  return promoted;
+  return promoteDocumentVersion(admin, CODE_OF_CONDUCT_DOCUMENT, id);
 }
+
+/**
+ * How long after it was written an unpublished version can still be its own
+ * save, mid-flight. The editor gives up on a reply after 20 seconds and retries
+ * with the same `client_submission_id`, while the first attempt may still be
+ * between writing the version and making it live.
+ */
+const SAVE_IN_FLIGHT_MS = 2 * 60_000;
 
 /**
  * Write a new version and make it the live one: the whole of "save", as the
@@ -612,6 +618,10 @@ export async function saveCodeOfConductVersion(
   admin: AdminClient,
   input: SaveCodeOfConductInput,
   createdBy: string | null,
+  // The version flags, when the caller has just read them to count who the
+  // save re-prompts: the save then works from that same snapshot rather than
+  // reading the table again.
+  flags?: CodeOfConductVersionFlags[],
 ): Promise<{ id: string; version: number; is_current: boolean; already_saved: boolean }> {
   // What an earlier attempt of this same save already wrote, if anything.
   //
@@ -630,7 +640,9 @@ export async function saveCodeOfConductVersion(
     if (!input.client_submission_id) return null;
     const { data, error } = await admin
       .from("code_of_conduct_versions")
-      .select("id, version, title, body_md, asks_reagreement, is_current")
+      .select(
+        "id, version, title, body_md, asks_reagreement, is_current, first_published_at, created_at",
+      )
       .eq("client_submission_id", input.client_submission_id)
       .maybeSingle();
     if (error) throw new DocumentVersionError(error.message, "not_published");
@@ -645,6 +657,18 @@ export async function saveCodeOfConductVersion(
         "invalid",
         data.version,
       );
+    }
+    if (!data.is_current && !data.first_published_at) {
+      // Never live, and written moments ago: most likely the first attempt of
+      // this very save, still finishing. Not a refusal of the manager's work,
+      // so say what to check rather than blaming another manager.
+      if (Date.now() - Date.parse(data.created_at) < SAVE_IN_FLIGHT_MS) {
+        throw new DocumentVersionError(
+          `Version ${data.version} was saved and is not live yet: it may still be finishing. Reload the version list in a moment, and make version ${data.version} live from there if it is still not live.`,
+          "not_published",
+          data.version,
+        );
+      }
     }
     if (!data.is_current) {
       throw new DocumentVersionError(
@@ -662,11 +686,14 @@ export async function saveCodeOfConductVersion(
   // requires: an ask that a rollback undid must stay undone.
   let now: CodeOfConductVersionFlags[];
   try {
-    now = await listCodeOfConductVersionFlags(admin);
+    now = flags ?? (await listCodeOfConductVersionFlags(admin));
   } catch (e) {
     throw new DocumentVersionError(e instanceof Error ? e.message : String(e), "not_published");
   }
-  const version = await nextDocumentVersion(admin, CODE_OF_CONDUCT_DOCUMENT.table);
+  // Numbered from the same snapshot, which lists every version. A concurrent
+  // save taking the same number fails the insert on the unique version index,
+  // exactly as a separate max() read would have let it.
+  const version = now.reduce((n, v) => Math.max(n, v.version), 0) + 1;
   const { data: created, error } = await admin
     .from("code_of_conduct_versions")
     .insert({

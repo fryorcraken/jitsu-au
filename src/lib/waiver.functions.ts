@@ -73,6 +73,8 @@ const WAIVER_DOCUMENT: VersionedDocument = {
   table: "waiver_templates",
   noun: "waiver",
   withoutOne: "nobody can sign",
+  // `acknowledgements` is what the media-consent rule below reads.
+  columns: "id, version, is_current, acknowledgements",
 };
 
 const BUCKET = "waivers";

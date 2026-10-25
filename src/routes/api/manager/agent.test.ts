@@ -1567,6 +1567,11 @@ describe("manager agent route: the code of conduct", () => {
       body_md: LIVE.body_md,
       asks_reagreement: true,
     });
+    // The save works from the flags this count read, not a second read.
+    expect(saveCodeOfConductVersionMock.mock.calls[0][3]).toEqual([
+      LIVE,
+      v(1, { asks_reagreement: true }),
+    ]);
   });
 
   // A correction must not ask anybody anything, and must not spend a read on
@@ -1654,15 +1659,50 @@ describe("manager agent route: the code of conduct", () => {
   });
 
   it("rolls back, saying who is out of date afterwards", async () => {
-    // Version 2 did not ask, so it requires what version 1 did.
+    // Version 2 did not ask, so it requires what version 1 did. Rolling back
+    // from version 3, which asked, puts nobody out of date.
     loadCodeOfConductVersionMock.mockResolvedValue(v(2, { required_version: 1 }));
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([
+      v(1, { asks_reagreement: true }),
+      v(2, { required_version: 1 }),
+      v(3, { asks_reagreement: true, required_version: 3, is_current: true }),
+    ]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 3]);
     promoteCodeOfConductVersionMock.mockResolvedValue({ version: 2 });
     const res = await post({ action: "publish_code_of_conduct", params: { version: 2 } });
     expect((await res.json()).result).toEqual({
       version: 2,
       published: true,
       required_version: 1,
+      reprompted: 0,
     });
+  });
+
+  // The editor tells a manager how many people a publish re-prompts before the
+  // click; the API reports the same number, so an agent can say it too.
+  it("says how many people a publish asks to agree again", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(
+      v(3, { asks_reagreement: true, required_version: 3 }),
+    );
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([
+      v(1, { asks_reagreement: true }),
+      LIVE,
+      v(3, { asks_reagreement: true, required_version: 3 }),
+    ]);
+    highestAcceptedVersionsMock.mockResolvedValue([1, 2, 3]);
+    promoteCodeOfConductVersionMock.mockResolvedValue({ version: 3 });
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 3 } });
+    expect((await res.json()).result).toMatchObject({ published: true, reprompted: 2 });
+  });
+
+  it("publishes nothing when it cannot count who the publish re-prompts", async () => {
+    loadCodeOfConductVersionMock.mockResolvedValue(v(3));
+    listCodeOfConductVersionFlagsMock.mockResolvedValue([LIVE, v(3)]);
+    highestAcceptedVersionsMock.mockRejectedValue(new Error("connection reset"));
+    const res = await post({ action: "publish_code_of_conduct", params: { version: 3 } });
+    expect(res.status).toBe(500);
+    expect((await res.json()).error.code).toBe("db_error");
+    expect(promoteCodeOfConductVersionMock).not.toHaveBeenCalled();
   });
 
   it("changes nothing, and says so, for the version already live", async () => {

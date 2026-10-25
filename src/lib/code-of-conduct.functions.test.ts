@@ -88,6 +88,7 @@ function versionStore(
 ) {
   const rows = initial.map((r) => ({ ...r }));
   const reads: { table: string; range?: [number, number] }[] = [];
+  const patches: Row[] = [];
   const from = (table: string) => {
     const filters: [string, unknown][] = [];
     let order: { col: string; asc: boolean } | null = null;
@@ -109,6 +110,7 @@ function versionStore(
         return { data: row, error: null };
       }
       if (patch) {
+        patches.push(patch);
         for (const r of matching()) Object.assign(r, patch);
         return { data: null, error: null };
       }
@@ -141,7 +143,7 @@ function versionStore(
     };
     return b;
   };
-  return { admin: { from } as unknown as SupabaseClient<Database>, rows, reads };
+  return { admin: { from } as unknown as SupabaseClient<Database>, rows, reads, patches };
 }
 
 const V1 = {
@@ -230,6 +232,49 @@ describe("saveCodeOfConductVersion", () => {
     expect(store.rows).toHaveLength(2);
   });
 
+  // The editor gives up on a reply after 20 seconds and retries with the same
+  // id while the first attempt may still be making its version live. That
+  // retry must not tell the manager somebody else changed the live version.
+  it("says a just-written version may still be finishing, not that someone replaced it", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const store = versionStore([
+      V1,
+      {
+        ...V1,
+        ...input,
+        id: "id-2",
+        version: 2,
+        required_version: 1,
+        is_current: false,
+        first_published_at: null,
+        client_submission_id: id,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    const attempt = saveCodeOfConductVersion(
+      store.admin,
+      { ...input, client_submission_id: id },
+      null,
+    );
+    await expect(attempt).rejects.toMatchObject({ reason: "not_published", version: 2 });
+    await expect(attempt).rejects.toThrow(/may still be finishing/);
+    await expect(attempt).rejects.not.toThrow(/someone may have changed/);
+    expect(store.rows.filter((r) => r.is_current).map((r) => r.version)).toEqual([1]);
+  });
+
+  // The agent's save has just read the flags to count who it re-prompts; the
+  // save works from that same snapshot rather than a second read.
+  it("numbers and requires from the flags it is handed", async () => {
+    const store = versionStore([V1]);
+    const flags = [
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: false },
+      { version: 6, asks_reagreement: true, required_version: 6, is_current: true },
+    ];
+    const saved = await saveCodeOfConductVersion(store.admin, input, null, flags);
+    expect(saved.version).toBe(7);
+    expect(store.rows.find((r) => r.version === 7)).toMatchObject({ required_version: 6 });
+  });
+
   it("inherits the newest version's requirement for a correction when nothing is live", async () => {
     const store = versionStore([
       { ...V1, is_current: false },
@@ -288,6 +333,20 @@ describe("promoteCodeOfConductVersion", () => {
     expect(store.rows.find((r) => r.version === 1)?.first_published_at).toBe(
       "2026-01-01T00:00:00Z",
     );
+  });
+
+  // One statement makes it live and stamps it, so a failure between two writes
+  // can never leave a version that was live reading "Draft".
+  it("stamps the first-went-live time in the same write that makes it live", async () => {
+    const store = versionStore([
+      V1,
+      { ...V1, id: "id-2", version: 2, is_current: false, first_published_at: null },
+    ]);
+    await promoteCodeOfConductVersion(store.admin, "id-2");
+    expect(store.patches).toEqual([
+      { is_current: false },
+      { is_current: true, first_published_at: expect.any(String) },
+    ]);
   });
 
   it("names the code of conduct when the version has gone", async () => {

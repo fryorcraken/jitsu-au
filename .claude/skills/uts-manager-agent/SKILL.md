@@ -934,7 +934,8 @@ rewrite went out without asking.
 
 `params`: `version` (**required**). The reply's `required_version` says who is
 out of date afterwards: rolling back below a version that asked undoes that
-ask.
+ask. Its `reprompted` is how many people this publish asked to agree again:
+tell the manager that number, as the editor screen would have before the click.
 
 ```bash
 scripts/agent.sh publish_code_of_conduct '{"version": 3}'

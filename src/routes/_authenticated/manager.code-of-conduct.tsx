@@ -283,7 +283,16 @@ function EditorPage() {
     setPromoteError(null);
     try {
       await promote({ data: { id: version.id } });
-      setVersions((prev) => prev.map((v) => ({ ...v, is_current: v.id === version.id })));
+      // The promoted version has now been live, so it keeps "Previous" after a
+      // later rollback in this same visit, as the server's stamp says.
+      const now = new Date().toISOString();
+      setVersions((prev) =>
+        prev.map((v) =>
+          v.id === version.id
+            ? { ...v, is_current: true, first_published_at: v.first_published_at ?? now }
+            : { ...v, is_current: false },
+        ),
+      );
       toast.success(`Version ${version.version} is now live`);
     } catch (e) {
       setPromoteError(

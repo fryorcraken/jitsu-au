@@ -380,8 +380,11 @@ waiver_template_not_published` with a `Retry-After`, and it carries
     carries `reprompted`, the number of people it put out of date, counted on
     every save (a correction made while nothing is live inherits the newest
     version's requirement and can re-prompt people) and before the write, so a
-    failed count refuses the call rather than reporting a number nobody checked. A call with no new text is refused unless it asks,
-    which is how a rewrite published without asking gets its ask afterwards.
+    failed count refuses the call rather than reporting a number nobody
+    checked. `publish_code_of_conduct` reports `reprompted` the same way, the
+    number the editor's confirm shows before a manager makes a version live. A
+    call with no new text is refused unless it asks, which is how a rewrite
+    published without asking gets its ask afterwards.
   - **`client_submission_id`** makes a save safe to retry, as on
     `create_item_invoice`: the same id comes back as the version it already
     wrote, with `already_saved: true` and `reprompted: 0`. If that version is

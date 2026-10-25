@@ -81,6 +81,7 @@ import {
   codeOfConductStandard,
   codeOfConductSummary,
   countReprompted,
+  standardAfterPublishing,
   standardAfterSaving,
 } from "@/lib/code-of-conduct";
 import {
@@ -1396,9 +1397,14 @@ async function handleSaveCodeOfConduct(params: unknown, actingAs: string) {
   // version's requirement and can re-prompt people without asking anything. A
   // failed count fails the call before anything is written rather than
   // reporting a number nobody checked.
+  //
+  // The save then works from these same flags, so the count and the stored
+  // requirement describe one snapshot rather than two reads apart.
   let reprompted: number;
+  let versions: Awaited<ReturnType<typeof listCodeOfConductVersionFlags>>;
   try {
-    const [versions, highest] = await Promise.all([
+    let highest: number[];
+    [versions, highest] = await Promise.all([
       listCodeOfConductVersionFlags(db),
       highestAcceptedVersions(db),
     ]);
@@ -1421,6 +1427,7 @@ async function handleSaveCodeOfConduct(params: unknown, actingAs: string) {
         client_submission_id: input.client_submission_id,
       },
       actingAs,
+      versions,
     );
     return {
       version: saved.version,
@@ -1448,6 +1455,24 @@ async function handlePublishCodeOfConduct(params: unknown) {
   // Read before promoting so the reply can say whether this call changed
   // anything: a retry reporting "published" for a no-op reads as a second change.
   if (target.is_current) return { version: target.version, published: false as const };
+  // How many people this publish puts out of date, counted before it, as the
+  // editor counts it for its confirm and as `save_code_of_conduct` reports it.
+  // A failed count fails the call before anything changes, rather than
+  // publishing and reporting a number nobody checked.
+  let reprompted: number;
+  try {
+    const [versions, highest] = await Promise.all([
+      listCodeOfConductVersionFlags(db),
+      highestAcceptedVersions(db),
+    ]);
+    reprompted = countReprompted(
+      highest,
+      codeOfConductStandard(versions),
+      standardAfterPublishing(versions, target.version),
+    );
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
   try {
     const { version } = await promoteCodeOfConductVersion(db, target.id);
     return {
@@ -1456,6 +1481,7 @@ async function handlePublishCodeOfConduct(params: unknown) {
       // Who is now out of date is decided by this, so a rollback that undoes an
       // ask says so here.
       required_version: target.required_version,
+      reprompted,
     };
   } catch (e) {
     throw templateFailure(e, "publish_code_of_conduct_failed", "code_of_conduct_not_published");
