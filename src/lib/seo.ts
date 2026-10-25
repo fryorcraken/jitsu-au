@@ -47,10 +47,10 @@ export const SITE_HOST = new URL(SITE_ORIGIN).host;
  * nothing, while omitting one that does costs the site its search traffic.
  */
 export const PRODUCTION_HOSTS = [
-  "jitsu.au",
-  "www.jitsu.au",
   "utsjitsu.com.au",
   "www.utsjitsu.com.au",
+  "jitsu.au",
+  "www.jitsu.au",
   "sydneyjitsu.com.au",
   "www.sydneyjitsu.com.au",
 ];
