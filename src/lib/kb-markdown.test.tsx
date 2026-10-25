@@ -68,6 +68,24 @@ describe("kbMarkdownComponents", () => {
     expect(link).toHaveAttribute("href", "/kb/belt-system#grading");
   });
 
+  // A link to an article is a preview trigger (Radix marks its trigger with a
+  // `data-state`); a link to anywhere else is just a link.
+  it("gives a link to an article a preview card, and other links none", () => {
+    renderMarkdown("See [the syllabus](/kb/syllabus#yellow-belt) and [the FAQ](/faq).");
+    expect(screen.getByRole("link", { name: "the syllabus" })).toHaveAttribute(
+      "data-state",
+      "closed",
+    );
+    expect(screen.getByRole("link", { name: "the FAQ" })).not.toHaveAttribute("data-state");
+  });
+
+  // Outside the reader nothing says which article a bare fragment belongs to,
+  // so it has nothing to preview.
+  it("gives a fragment no preview outside the reader", () => {
+    renderMarkdown("Jump to [fees](#fees).");
+    expect(screen.getByRole("link", { name: "fees" })).not.toHaveAttribute("data-state");
+  });
+
   // A fragment names a heading in the article already on screen. The reader
   // page listens for `hashchange` to jump to it, so it stays a plain anchor.
   it("leaves a fragment as a plain anchor", () => {

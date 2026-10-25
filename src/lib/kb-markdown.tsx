@@ -15,8 +15,12 @@
 // Heading levels are shifted down by one — a body `#` renders as an `<h2>` — so
 // a manager's markdown never produces a second `<h1>` competing with the page's
 // own title, keeping the heading outline correct for assistive tech.
+import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import type { Components } from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
+import { KbLinkPreview } from "@/components/site/KbLinkPreview";
+import { useCurrentKbArticleSlug } from "@/hooks/use-current-kb-article";
+import { kbArticleSlug } from "@/lib/kb-preview";
 import { remarkKbAnchors } from "@/lib/remark-kb-anchors";
 import { remarkKbTables } from "@/lib/remark-kb-tables";
 
@@ -83,6 +87,45 @@ export function staysInThisTab(href: string | undefined): boolean {
  */
 export const kbRemarkPlugins = [remarkKbTables, remarkKbAnchors];
 
+const LINK_CLASS = "break-words text-primary underline underline-offset-2 hover:no-underline";
+
+/**
+ * A link in an article body, with no preview card.
+ *
+ * What the preview card itself renders its links with: a card inside a card is
+ * a stack nobody can read on a phone, and following the link is one tap away.
+ */
+function plainLink(href: string | undefined, children: ReactNode) {
+  // A same-site path goes through the ROUTER, not the browser. A club article
+  // links to another club article constantly, and rendering those as bare
+  // anchors made every one of them a full page load: blank screen, the whole
+  // bundle again, auth resolved again, the sidebar fetched again, and the
+  // reader's place in the knowledge base thrown away to move one page.
+  const target = internalLinkTarget(href);
+  if (target) {
+    return (
+      <Link {...target} className={LINK_CLASS}>
+        {children}
+      </Link>
+    );
+  }
+
+  // Everything the router cannot take as a bare string. A fragment names a
+  // heading in the article already on screen, and the reader page listens for
+  // `hashchange` to jump to it; a same-site path with a query string is still
+  // this site. Both stay in the tab. Anything else is leaving, and gets the
+  // new-tab treatment.
+  return (
+    <a
+      href={href}
+      {...(staysInThisTab(href) ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+      className={LINK_CLASS}
+    >
+      {children}
+    </a>
+  );
+}
+
 export const kbMarkdownComponents: Components = {
   h1: ({ children }) => (
     <h2 className="mb-3 mt-10 scroll-mt-24 text-2xl font-bold tracking-tight text-foreground first:mt-0">
@@ -116,37 +159,44 @@ export const kbMarkdownComponents: Components = {
   ul: ({ children }) => <ul className="mb-4 ml-6 list-disc space-y-1.5">{children}</ul>,
   ol: ({ children }) => <ol className="mb-4 ml-6 list-decimal space-y-1.5">{children}</ol>,
   li: ({ children }) => <li className="leading-relaxed text-foreground">{children}</li>,
-  a: ({ children, href }) => {
-    const className = "break-words text-primary underline underline-offset-2 hover:no-underline";
+  /**
+   * A link in an article body: the plain link, plus a preview card when it points
+   * at an article, or at a section of the one on screen (`KbLinkPreview`).
+   */
+  a: function KbMarkdownLink({ children, href }) {
+    const currentSlug = useCurrentKbArticleSlug();
+    const link = plainLink(href, children);
 
-    // A same-site path goes through the ROUTER, not the browser. A club article
-    // links to another club article constantly, and rendering those as bare
-    // anchors made every one of them a full page load: blank screen, the whole
-    // bundle again, auth resolved again, the sidebar fetched again, and the
-    // reader's place in the knowledge base thrown away to move one page.
     const target = internalLinkTarget(href);
-    if (target) {
+    const slug = target ? kbArticleSlug(target.to) : null;
+    if (slug) {
       return (
-        <Link {...target} className={className}>
-          {children}
-        </Link>
+        <KbLinkPreview
+          slug={slug}
+          hash={target?.hash}
+          samePage={slug === currentSlug && Boolean(target?.hash)}
+          renderMarkdown={renderPreviewMarkdown}
+        >
+          {link}
+        </KbLinkPreview>
       );
     }
 
-    // Everything the router cannot take as a bare string. A fragment names a
-    // heading in the article already on screen, and the reader page listens for
-    // `hashchange` to jump to it; a same-site path with a query string is still
-    // this site. Both stay in the tab. Anything else is leaving, and gets the
-    // new-tab treatment.
-    return (
-      <a
-        href={href}
-        {...(staysInThisTab(href) ? {} : { target: "_blank", rel: "noopener noreferrer" })}
-        className={className}
-      >
-        {children}
-      </a>
-    );
+    const fragment = href?.startsWith("#") ? href.slice(1) : "";
+    if (fragment && currentSlug) {
+      return (
+        <KbLinkPreview
+          slug={currentSlug}
+          hash={fragment}
+          samePage
+          renderMarkdown={renderPreviewMarkdown}
+        >
+          {link}
+        </KbLinkPreview>
+      );
+    }
+
+    return link;
   },
   blockquote: ({ children }) => (
     <blockquote className="my-4 border-l-4 border-primary/30 pl-4 italic text-muted-foreground">
@@ -200,3 +250,34 @@ export const kbMarkdownComponents: Components = {
     </td>
   ),
 };
+
+/**
+ * The same styling, compacted for a preview card: headings at body size (a
+ * 20rem card has no room for a 2xl heading with a 2.5rem margin above it), and
+ * links without previews of their own.
+ */
+const previewHeading = ({ children }: { children?: ReactNode }) => (
+  <p className="mb-1 mt-3 font-semibold text-foreground first:mt-0">{children}</p>
+);
+
+export const kbPreviewMarkdownComponents: Components = {
+  ...kbMarkdownComponents,
+  h1: previewHeading,
+  h2: previewHeading,
+  h3: previewHeading,
+  h4: previewHeading,
+  h5: previewHeading,
+  h6: previewHeading,
+  p: ({ children }) => <p className="mb-2 leading-relaxed text-foreground">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 ml-5 list-disc space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 ml-5 list-decimal space-y-1">{children}</ol>,
+  a: ({ children, href }) => plainLink(href, children),
+};
+
+function renderPreviewMarkdown(markdown: string): ReactNode {
+  return (
+    <ReactMarkdown components={kbPreviewMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
+      {markdown}
+    </ReactMarkdown>
+  );
+}

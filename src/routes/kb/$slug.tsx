@@ -33,6 +33,7 @@ import { Loading } from "@/components/site/Loading";
 import { StaleNotice } from "@/components/site/StaleNotice";
 import type { NewAnnotation } from "@/components/site/KbArticleReader";
 import { useKbNav } from "@/hooks/useKbNav";
+import { CurrentKbArticle } from "@/hooks/use-current-kb-article";
 import { kbAnnotationsQueryKey, useKbArticle, useKbArticlePrefetch } from "@/hooks/useKbArticle";
 import {
   createAnnotation,
@@ -380,39 +381,43 @@ function ArticlePage() {
         </Collapsible>
       )}
 
-      <KbArticleReader
-        article={article}
-        annotations={annotationsQ.data ?? []}
-        viewer={viewer}
-        busy={busy || annotationsQ.isFetching}
-        onCreate={(input: NewAnnotation) =>
-          run(
-            () =>
-              create({
-                data: {
-                  slug,
-                  article_version: article.version,
-                  block_id: input.block_id ?? undefined,
-                  quote: input.quote ?? undefined,
-                  visibility: input.visibility,
-                  parent_id: input.parent_id,
-                  body: input.body,
-                  hp: "",
-                },
-              }),
-            "Could not save your comment",
-          )
-        }
-        onUpdate={(id, body) =>
-          run(() => update({ data: { id, body } }), "Could not save your edit")
-        }
-        onDelete={async (id) => {
-          await run(() => remove({ data: { id } }), "Could not delete that");
-        }}
-        onResolve={async (id, resolved) => {
-          await run(() => resolve({ data: { id, resolved } }), "Could not update that thread");
-        }}
-      />
+      {/* Tells a `#section` link in the text which article it belongs to, so it
+          can show a preview card of that section too (`KbLinkPreview`). */}
+      <CurrentKbArticle.Provider value={slug}>
+        <KbArticleReader
+          article={article}
+          annotations={annotationsQ.data ?? []}
+          viewer={viewer}
+          busy={busy || annotationsQ.isFetching}
+          onCreate={(input: NewAnnotation) =>
+            run(
+              () =>
+                create({
+                  data: {
+                    slug,
+                    article_version: article.version,
+                    block_id: input.block_id ?? undefined,
+                    quote: input.quote ?? undefined,
+                    visibility: input.visibility,
+                    parent_id: input.parent_id,
+                    body: input.body,
+                    hp: "",
+                  },
+                }),
+              "Could not save your comment",
+            )
+          }
+          onUpdate={(id, body) =>
+            run(() => update({ data: { id, body } }), "Could not save your edit")
+          }
+          onDelete={async (id) => {
+            await run(() => remove({ data: { id } }), "Could not delete that");
+          }}
+          onResolve={async (id, resolved) => {
+            await run(() => resolve({ data: { id, resolved } }), "Could not update that thread");
+          }}
+        />
+      </CurrentKbArticle.Provider>
 
       {/* What the read observer watches. Deliberately after the article and
           before the prev/next links: reaching it means the reader is at the end

@@ -16,7 +16,7 @@
 //    the article is simply there, which is the difference between the knowledge
 //    base feeling like a set of pages and feeling like an app.
 import { useCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/hooks/useAuth";
 import { usePersistentQuery } from "@/hooks/use-persistent-query";
@@ -83,6 +83,25 @@ export function useKbArticle(slug: string) {
     owner: userId,
     maxAgeMs: KB_CACHE_MAX_AGE_MS,
     revive: cacheReviver<KbArticlePayload>(kbArticleCacheSchema),
+  });
+}
+
+/**
+ * One article for a link preview card.
+ *
+ * Under the same key as `useKbArticle`, so a preview and the page share one
+ * copy: hovering a link and then following it opens the article with its text
+ * already in hand, and a link to the article on screen is answered from the
+ * cache without asking the server at all. A plain query rather than a
+ * persistent one, since what a card glanced at for a second is not worth a slot
+ * on the device.
+ */
+export function useKbArticlePreview(slug: string) {
+  const { user, loading: authLoading } = useAuth();
+  const fetchArticle = useServerFn(getKbArticle);
+  return useQuery({
+    ...articleQueryOptions(fetchArticle, user?.id ?? null, slug),
+    enabled: !authLoading,
   });
 }
 

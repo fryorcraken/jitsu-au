@@ -182,6 +182,48 @@ earlier wording", not lost). And nothing validates a cross-reference at save
 time: a link to `/kb/no-such-article#x` is an ordinary broken link until
 somebody follows it.
 
+### Previews: peeking at a link without following it
+
+A link to another article, or to a section of one, shows a **preview card**:
+the passage it points at, in a small card over the page, the way Quartz and
+Obsidian do it. It is what makes a syllabus full of technique names readable. A
+member reading the yellow belt who meets "advanced body grab" can see what it
+is without losing their place in a long page.
+
+- **With a mouse**, hover the link and the card appears after a moment; move
+  away and it goes. A click still follows the link straight away.
+- **On a phone**, the **first tap** opens the card instead of following the
+  link, and a **second tap** on the link, or the card's own "Go to this section"
+  / "Read the article" button, follows it. Tapping anywhere else closes it. That
+  costs one extra tap for somebody who wanted to go straight there, which is the
+  trade: without it a member on a phone could never peek at all, and most of
+  this club reads on a phone.
+- **A link to a section shows that section**: from its heading down to the next
+  heading at the same level or above, so a belt includes its own techniques and
+  stops at the next belt. A link to a whole article shows its start. Either way
+  the card stops after a few paragraphs and says there is more.
+- **Links to a section of the same article** (`[wrist lock](#wrist-lock)`) get a
+  card too, read from the article already on screen.
+- **A link at a section that is gone** shows the start of the article and says
+  the section is not there any more, the same honesty as the reader page.
+- **The card asks for nothing it is not already allowed to see.** It reads the
+  article through the same call, and under the same cached copy, as opening it
+  would, so a managers-only article previews for a manager and refuses a member
+  exactly as following the link would. A preview that has been looked at makes
+  following the link instant, since the text is already in hand.
+- Links **inside** a card have no card of their own: a card on a card is a stack
+  nobody can read on a phone.
+
+Nothing has to be switched on. **A preview needs a link**, though: a technique
+name written as plain words has nothing to point at, so the syllabus only
+previews the terms a manager has linked, `[advanced body grab](/kb/techniques#advanced-body-grab)`.
+Pin the anchors those links aim at (`{#advanced-body-grab}`), for the reason
+given above. Links to pages outside the knowledge base (`/faq`, another site)
+have no preview.
+
+The card's contents are worked out in `src/lib/kb-preview.ts` and drawn by
+`components/site/KbLinkPreview`.
+
 **Markdown tables render.** `| Belt | Time |` is a table, in the reader and in
 the manager's preview, and a wide one scrolls inside its own box rather than
 scrolling the page sideways on a phone. Alignment markers (`| :-: |`) work, and
