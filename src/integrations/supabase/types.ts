@@ -500,6 +500,48 @@ export type Database = {
           },
         ]
       }
+      code_of_conduct_versions: {
+        Row: {
+          asks_reagreement: boolean
+          body_md: string
+          client_submission_id: string | null
+          created_at: string
+          created_by: string | null
+          first_published_at: string | null
+          id: string
+          is_current: boolean
+          required_version: number
+          title: string
+          version: number
+        }
+        Insert: {
+          asks_reagreement?: boolean
+          body_md: string
+          client_submission_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          first_published_at?: string | null
+          id?: string
+          is_current?: boolean
+          required_version: number
+          title: string
+          version: number
+        }
+        Update: {
+          asks_reagreement?: boolean
+          body_md?: string
+          client_submission_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          first_published_at?: string | null
+          id?: string
+          is_current?: boolean
+          required_version?: number
+          title?: string
+          version?: number
+        }
+        Relationships: []
+      }
       contact_messages: {
         Row: {
           client_submission_id: string | null
