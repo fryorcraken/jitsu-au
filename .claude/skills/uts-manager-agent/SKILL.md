@@ -1,24 +1,28 @@
 ---
 name: uts-manager-agent
 description: >-
-  Perform UTS Jitsu manager actions (list members and their status, raise a
+  Perform UTS Jitsu manager actions (list members and their status, look up
+  everything the manager person page shows about one person, raise a
   membership for someone, cancel or delete an invoice, edit an invoice's
   details, file a scanned paper waiver, edit and publish the waiver template
-  people sign, manage the club's membership dates, publish and reorder the
+  people sign and the code of conduct members agree to, manage the club's membership dates, publish and reorder the
   club's knowledge base and read members' comments on it) against the live site
   via its manager agent HTTP API. Use when a club
-  manager asks an agent to look up members/invoices, put a member on a plan or
+  manager asks an agent to look up members/invoices, check one person's state
+  (verification, code of conduct, waivers, attendance, profile), put a member on a plan or
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), keep the club's item price
   list and charge somebody for items, see where replies to club emails go,
   resend an invoice, receipt or waiver email,
   migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
-  version of it (or roll back to an earlier one), add or edit a membership
+  version of it (or roll back to an earlier one), edit and publish the club's
+  code of conduct (and choose whether members must agree to it again), add or edit a membership
   window's start/end dates, or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
-  and review the feedback left on them. Requires the UTS_MANAGER_API_URL and
-  UTS_MANAGER_API_KEY environment variables.
+  and review the feedback left on them, or write, edit, publish or delete a
+  blog post at /blog/<slug> and upload its pictures. Requires the
+  UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
 ---
 
 # UTS Jitsu — manager agent
@@ -143,6 +147,76 @@ curl -s "$UTS_MANAGER_API_URL/api/manager/agent" \
 ```
 
 `params` (all optional): `status` (lifecycle filter), `limit` (1–500, default 200).
+
+Each row also carries three headline fields, the ones the person page leads with:
+
+- `phone`.
+- `email_confirmed_at`: when the address was verified, `null` when it is not.
+  For a child it is the state of the guardian's address, because `email` is
+  the guardian's.
+- `code_of_conduct`: `{ state, current_version, required_version,
+accepted_version, accepted_at, signature_name }`, where `state` is
+  `unsigned | signed | outdated`. `outdated` means `accepted_version` is below
+  `required_version`, the last version that asked everybody to agree again
+  (unless a rollback undid that ask); a newer live version that did not ask (a
+  correction) puts nobody out of date.
+  It never blocks anything: an unsigned member can still train.
+
+For anything more about one person, call `get_user`.
+
+### `get_user` — everything the person page shows about one person
+
+The answer a manager reads on `/manager/users/<id>`, from the same read the
+page makes. Use it to answer "what is the state of this person?" rather than
+piecing it together from `list_users`.
+
+```bash
+scripts/agent.sh get_user '{"user_id":"<uuid>"}'
+```
+
+`params`: `user_id` (**required**, from `list_users`). The result:
+
+- `user`: name, `email` + `email_belongs_to`, `email_confirmed_at`, `phone`,
+  `roles`, `lifecycle_status`, `sessions_attended` (exact, lifetime),
+  `latest_plan_kind` / `latest_membership_status` /
+  `latest_sessions_remaining`, `first_seen_at`.
+- `profile`: the club's live record. Preferred name, date of birth, address,
+  UTS student number, emergency contact, `medical_notes`, `is_minor` and the
+  guardian block, SMS/WhatsApp consent, `gi_size` / `belt_size`, and
+  `media_consent` (`null` means never asked, not "no") with who last set it.
+- `household`: `guardian` and `dependants`, by `user_id` and `name`.
+- `memberships`: each with `plan_name`, `kind`, `status`, `price_cents`,
+  `payment_reference`, dates, `sessions_remaining`, `paid_at` and
+  `checkin_count` (a membership with check-ins cannot be deleted). The money
+  detail (`payment_method`, `notes`, `plan_code`) is on `list_users`' `invoices`.
+- `checkins`: attendance, newest first, capped at 100. `user.sessions_attended`
+  is the real total.
+- `code_of_conduct`: the same object `list_users` carries.
+- `waivers`: every waiver they submitted, as submitted, with `status`
+  (`pending | active | superseded`), `template_version`, `signed_at`,
+  `has_pdf`, `approved_at`, the approver, and `is_paper` (`true` for a scanned
+  paper form a manager filed; check it before `file_waiver` so you do not file
+  one twice). The signer's IP address and browser context are deliberately not
+  reported.
+
+> **This is sensitive.** Medical notes, addresses and dates of birth are here
+> because a manager needs them on the page. Read them when the question needs
+> them; do not repeat them into a summary nobody asked for.
+
+> **The same address rule as `list_users`.** A child's `email` is their
+> guardian's, and `email_belongs_to` says so. Report the two together or
+> neither.
+
+A person, not a lead: an id with no person record is `404 not_found`. A read
+that could not fill any part of the answer (the address, the code of conduct,
+the guardian's name, a class name or a waiver approver's name) is
+`500 db_error` rather than a `null` email, an `unsigned` or an unknown name the
+server never actually checked, so retry it.
+
+Some things a manager does from the person page are deliberately **not**
+actions: approving a waiver, changing somebody's login email, resending the
+verification email, correcting kit sizes, opening the waiver PDF, and moving
+check-in coverage. Tell the manager to do those on the page.
 
 ### `list_invoices` — find an invoice to edit
 
@@ -794,6 +868,80 @@ created; on the version that is already live it does nothing and reports
 scripts/agent.sh publish_waiver_template '{"version": 4}'
 ```
 
+### The code of conduct
+
+The club's house rules, at `/code-of-conduct`. Members agree to them by typing
+their name; it is never a condition of training. Like the waiver, the text is
+kept in numbered versions with one live, and these four actions are the
+agent's equivalent of the manager's editor at `/manager/code-of-conduct`.
+They work the same way as the waiver template actions above (version-keyed,
+saving publishes, omitted text carried over from `base_version`, the same
+refusals with `code_of_conduct_not_published` as the 503), with one addition.
+
+> **`asks_reagreement` decides who is out of date.** Every save is a new
+> version, but only a save with `asks_reagreement: true` asks everybody who
+> agreed to an earlier version to agree again. Leave it off for a correction
+> (a typo, a broken link, clearer wording): everybody stays up to date. Turn it
+> on when the rules themselves change, and tell the manager the reply's
+> `reprompted` count, which is how many people it put out of date. Nobody is
+> emailed either way; they see a prompt on their account page.
+
+### `list_code_of_conduct_versions` — every version, and which is live
+
+`live_version`, `required_version` (anybody whose highest agreement is below it
+is out of date), and each version without its text: `version`, `title`,
+`status` (`Live | Previous | Draft`; `Previous` means it has been live, so a
+version rolled away from stays `Previous`), `asks_reagreement`,
+`required_version`, `first_published_at`. Read a version's text with
+`get_code_of_conduct`.
+
+### `get_code_of_conduct` — read one version's text
+
+`params`: `version` (optional, default the live one). The text is a small
+markdown subset: `# Heading`, `## Section`, `- bullet`, `**bold**`, bare
+`https://` links, and a blank line between paragraphs. Anything else shows as
+typed.
+
+### `save_code_of_conduct` — publish new wording
+
+```bash
+# A correction: nobody is asked to agree again.
+scripts/agent.sh save_code_of_conduct '{"title":"UTS Jitsu Code of Conduct","body_md":"# UTS Jitsu Code of Conduct\n\n..."}'
+# The rules changed: ask everybody to agree to the new text.
+scripts/agent.sh save_code_of_conduct '{"title":"...","body_md":"...","asks_reagreement":true}'
+```
+
+`params` (all optional, but there must be something to save): `title` and
+`body_md` (together, or neither), `asks_reagreement` (default `false`),
+`base_version`, `client_submission_id` (a UUID you choose; resend it on a retry
+and a save that already landed comes back `already_saved: true` instead of
+writing a second version). Sending only `asks_reagreement: true` republishes the
+current text as a new version that asks everybody to agree to it, for when a
+rewrite went out without asking.
+
+> **Read `reprompted` even when you did not ask.** A correction normally puts
+> nobody out of date, but if nothing was live (a publish failed and left the
+> club without one) the new version inherits the newest version's requirement,
+> and that can. Tell the manager the number either way.
+>
+> **A retry can come back `503 code_of_conduct_not_published` with
+> `error.details.version`.** That version was written but is not live: its first
+> attempt lost the race to publish, or somebody has changed the live version
+> since. It is never made live behind your back. Check with
+> `list_code_of_conduct_versions`, then `publish_code_of_conduct` it only if it
+> should replace what is live now.
+
+### `publish_code_of_conduct` — roll back to an earlier version
+
+`params`: `version` (**required**). The reply's `required_version` says who is
+out of date afterwards: rolling back below a version that asked undoes that
+ask. Its `reprompted` is how many people this publish asked to agree again:
+tell the manager that number, as the editor screen would have before the click.
+
+```bash
+scripts/agent.sh publish_code_of_conduct '{"version": 3}'
+```
+
 ### The knowledge base
 
 Versioned markdown pages served at `/kb/<slug>` that members read and comment on,
@@ -967,6 +1115,106 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
 > conversation, not everything anybody wrote — do not describe its output to a
 > manager as "all the feedback".
 
+### The blog
+
+Posts at `/blog/<slug>`, written in Markdown. These are the same saves the
+manager's blog editor at `/manager/blog` makes. A post is a **draft** (only
+managers can see it) or **published** (anyone on the internet can).
+
+### `list_blog_posts` — every post, drafts included
+
+```bash
+scripts/agent.sh list_blog_posts '{}'
+```
+
+Each post has `url`, its public address, which is **null for a draft**: a draft
+has no public address, so never hand a draft's slug to anybody as a link. Give a
+manager `edit_url` instead, their own screen for the post.
+
+### `get_blog_post` — read one post in full
+
+By `id`, or by the `slug` in its address:
+
+```bash
+scripts/agent.sh get_blog_post '{"slug":"2026-10-20-grading-day"}'
+```
+
+### `save_blog_post` — write, edit or publish
+
+No `id` creates a post, which is a draft unless you say otherwise:
+
+```bash
+scripts/agent.sh save_blog_post '{
+  "title": "Grading day",
+  "body_md": "Grading is on Saturday 8 November.\n\n![The mats](https://...)\n"
+}'
+```
+
+With an `id`, **every field you leave out keeps what is stored**. Publishing a
+draft as it stands:
+
+```bash
+scripts/agent.sh save_blog_post '{"id":"<id>","status":"published"}'
+```
+
+A blank `slug` is made from today's date and the title, and a blank `excerpt`
+from the opening of the body; read both back from the result. An excerpt does
+not follow a rewritten body by itself: send `"excerpt": ""` with the new body to
+have it taken afresh.
+
+> [!IMPORTANT]
+>
+> - **Publishing is public and announced.** The post is on the public blog the
+>   moment it saves, and the first time a post goes live every member who opted
+>   in to announcements hears about it in their daily summary email. Taking it
+>   back to draft hides it again but cannot take the announcement back. The
+>   result's `announced` says whether this save announced it.
+> - **`body_md` REPLACES the whole body.** Always `get_blog_post` first and edit
+>   the text you get back.
+> - **Changing the slug of a live post moves it.** Every link already shared to
+>   the old address stops working. A slug another post has gets `-2` added, so
+>   read the `slug` the result returns.
+> - **A retry never duplicates a post.** A new post refuses an address another
+>   post already has, with `409 slug_taken` and that post's `id` in
+>   `error.details`. If you were retrying a create you never heard back from,
+>   that is your post: read it with `get_blog_post` rather than creating again.
+>   Two different posts with the same title on the same day need a `slug` of
+>   your own for the second.
+> - **`409 post_changed` means somebody saved the post after you read it**, and
+>   nothing was written. Read it again and redo the change on what is there.
+> - A line of its own reading `[[video:<url>]]` embeds a video: a YouTube link
+>   plays inline, anything else shows as a plain link.
+
+### `upload_blog_image` — a picture for a post
+
+PNG, JPEG, WebP or GIF, up to 8 MB. Send the file as base64 `data`, or a public
+https `url` the site downloads it from (the one to use over MCP). The format is
+read from the image itself.
+
+```bash
+scripts/agent.sh upload_blog_image "$(jq -n --arg d "$(base64 -w0 mats.jpg)" \
+  '{data:$d, name:"mats.jpg", alt:"The mats laid out for grading"}')"
+scripts/agent.sh upload_blog_image '{"url":"https://images.example.com/belt.png","alt":"A brown belt"}'
+```
+
+The result has `path` (give it to `save_blog_post` as `cover_image_path` for the
+picture at the top of the post) and `markdown` (paste it into `body_md` where the
+picture belongs). Uploading changes no post: the picture appears nowhere until a
+save puts it in one. `image_rejected` (422) means this image will never work;
+`image_fetch_failed` (502) means the address could not be read just now.
+
+Write `alt` for somebody who cannot see the picture: what is in it, not
+"image".
+
+### `delete_blog_post` — remove a post for good
+
+Deletes the post and every comment on it, with no undo. To take a post off the
+blog and keep it, save it with `"status":"draft"` instead.
+
+```bash
+scripts/agent.sh delete_blog_post '{"id":"<id>"}'
+```
+
 ## Guidance
 
 - Confirm the target invoice with the manager (member name + amount) before an
@@ -984,6 +1232,10 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   that saving publishes it to everyone who signs from that moment. It is the
   club's legal document, and rolling back (`publish_waiver_template`) restores
   old wording but cannot unsign anybody.
+- Before publishing a blog post, show the manager the title and the text and
+  say plainly that it goes public and is announced to members. Drafting is
+  safe; publishing is the step to confirm. The same goes for
+  `delete_blog_post`, which cannot be undone.
 - Before a `file_waiver` batch, confirm scope with the manager: how many
   records, whether any should be flagged for review rather than filed
   automatically, and that leaving everything pending (not approved) is what
@@ -1004,7 +1256,7 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"14"`), and its
+- The manifest's `version` tells generations apart (currently `"25"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

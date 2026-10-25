@@ -913,12 +913,83 @@ export const waiverApprovalSchema = z.object({
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 
+// ---- Code of conduct: managers edit it, in numbered versions ----
+//
+// Shaped like the waiver template schemas above, with two differences. There
+// are no acknowledgements (the undertaking a signer gives stays in code,
+// `code-of-conduct.ts`). And saving carries `asks_reagreement`: whether this
+// version puts everybody who agreed to an older one out of date. It is off by
+// default, because the commonest save is a correction, and a correction that
+// asked the whole club to agree again would be noise people learn to ignore.
+
+/** The body's ceiling. Generous: today's document is under 5000 characters. */
+export const CODE_OF_CONDUCT_BODY_MAX = 50000;
+
+/** The editor screen's save: a whole version, written and made live. */
+export const saveCodeOfConductSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  body_md: z.string().trim().min(1).max(CODE_OF_CONDUCT_BODY_MAX),
+  asks_reagreement: z.boolean().default(false),
+  // One per press of Save, resent unchanged on a retry, so a save whose reply
+  // was lost comes back as the version it already wrote rather than a second.
+  client_submission_id: z.string().uuid().optional(),
+});
+export type SaveCodeOfConductInput = z.infer<typeof saveCodeOfConductSchema>;
+
+/** The agent API reads one version by number, or the live one. */
+export const agentGetCodeOfConductSchema = z
+  .object({ version: z.number().int().positive().optional() })
+  .strict();
+
+/**
+ * The agent API's save. Every field optional, carried over from `base_version`
+ * (default the live one), exactly as `agentSaveWaiverTemplateSchema`: `title`
+ * and `body_md` travel together, and a call that changes nothing is refused.
+ *
+ * "Changes nothing" counts `asks_reagreement: true` as a change. Somebody who
+ * published a rewrite and forgot to ask everybody to agree again needs a way to
+ * ask without inventing an edit, and a new version that asks, with the same
+ * text, is exactly that.
+ */
+export const agentSaveCodeOfConductSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    body_md: z.string().trim().min(1).max(CODE_OF_CONDUCT_BODY_MAX).optional(),
+    asks_reagreement: z.boolean().optional().default(false),
+    base_version: z.number().int().positive().optional(),
+    client_submission_id: z.string().uuid().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (Boolean(value.title) !== Boolean(value.body_md)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [value.title ? "body_md" : "title"],
+        message: "Saving new text needs both title and body_md: a version is written as a whole.",
+      });
+    }
+    if (!value.title && !value.body_md && !value.asks_reagreement) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["body_md"],
+        message:
+          "Nothing to save: send title and body_md, or asks_reagreement true to ask everybody to agree to the current text again. To make an existing version live again, use publish_code_of_conduct.",
+      });
+    }
+  });
+export type AgentSaveCodeOfConductInput = z.infer<typeof agentSaveCodeOfConductSchema>;
+
+/** Make an existing stored version the live one. */
+export const agentPublishCodeOfConductSchema = z
+  .object({ version: z.number().int().positive() })
+  .strict();
+
 // ---- Code of conduct ----
 //
 // Deliberately small next to `waiverSubmitSchema`. The signer is a person the
 // club already has on file, so nothing about them is retyped here: the name and
 // email stored on the acceptance are copied server-side from their profile and
-// login. What the form actually collects is agreement and a signature.
+// login. What the form actually collects is a signature, which is the agreement.
 //
 // `token` is the proof-of-click token from the "sign it later" email. Someone
 // who just signed a waiver is a locked applicant and cannot log in yet, so
@@ -928,10 +999,11 @@ export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
 // revoked, or minted for an address the account no longer has.
 export const codeOfConductAcceptSchema = z.object({
   token: z.string().trim().max(120).optional().or(z.literal("")),
-  // Must be ticked. A code of conduct signed by someone who did not agree to it
-  // is not evidence of anything, so this is `z.literal(true)` rather than a
-  // boolean the server has to remember to check.
-  agree: z.literal(true),
+  // The agreement. There is no separate tick box: the page prints the
+  // undertaking above the signature field and says that typing a name and
+  // submitting is agreeing to it, so a signature that is not blank IS the
+  // agreement. (An `agree` field from a tab opened before the box was removed
+  // is stripped, not refused.)
   signature_name: z.string().trim().min(1).max(120),
   // Which version they actually read. The server refuses a version it does not
   // recognise rather than filing an agreement against unknown text, the same
@@ -2796,6 +2868,7 @@ export const matchTransactionToItemInvoiceSchema = z
 /** Actions the manager agent endpoint accepts. Order mirrors AGENT_MANIFEST. */
 export const managerAgentActions = [
   "list_users",
+  "get_user",
   "list_invoices",
   "create_membership",
   "edit_invoice",
@@ -2806,6 +2879,10 @@ export const managerAgentActions = [
   "get_waiver_template",
   "save_waiver_template",
   "publish_waiver_template",
+  "list_code_of_conduct_versions",
+  "get_code_of_conduct",
+  "save_code_of_conduct",
+  "publish_code_of_conduct",
   "list_membership_plans",
   "save_membership_plan",
   "list_kb_sections",
@@ -2825,6 +2902,11 @@ export const managerAgentActions = [
   "delete_item_invoice",
   "get_club_settings",
   "resend_email",
+  "list_blog_posts",
+  "get_blog_post",
+  "save_blog_post",
+  "delete_blog_post",
+  "upload_blog_image",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -2940,6 +3022,14 @@ export const listAgentUsersSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
 });
 export type ListAgentUsersInput = z.infer<typeof listAgentUsersSchema>;
+
+/**
+ * `get_user` params: one person, by the id `list_users` reports. `.strict()` so
+ * a caller that sends `id` (the invoice actions' name for a key) is told so,
+ * rather than having it stripped and being refused for a missing `user_id`.
+ */
+export const getAgentUserSchema = z.object({ user_id: z.string().uuid() }).strict();
+export type GetAgentUserInput = z.infer<typeof getAgentUserSchema>;
 
 /** `list_invoices` params — optional membership-status filter + result cap. */
 export const listAgentInvoicesSchema = z.object({
@@ -3761,6 +3851,120 @@ export const uploadBlogImageSchema = z
     path: ["data"],
   });
 export type UploadBlogImageInput = z.infer<typeof uploadBlogImageSchema>;
+
+// ---- Blog, through the manager agent API (docs/manager-agent-api.md) ----
+
+/** Agent: read one post, any status, by its id or by the slug in its address. */
+export const agentGetBlogPostSchema = z
+  .object({ id: z.string().uuid().optional(), slug: z.string().trim().min(1).max(200).optional() })
+  .strict()
+  .superRefine((d, ctx) => {
+    if (Boolean(d.id) === Boolean(d.slug)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["id"],
+        message: d.id
+          ? "Send the post's id or its slug, not both."
+          : "Send the post's id or its slug.",
+      });
+    }
+  });
+export type AgentGetBlogPostInput = z.infer<typeof agentGetBlogPostSchema>;
+
+/**
+ * Agent: create a post (no `id`) or change one (`id`). Every field the post
+ * form has, with one difference that matters: on a change, an **omitted field
+ * keeps its stored value**. The form always sends every field, so it never
+ * needed that; an agent asked to fix one typo or to publish a draft would
+ * otherwise have to resend the whole post, and `status` defaulting to draft
+ * would quietly take a live post off the blog.
+ *
+ * - A new post needs `title` and `body_md`, and is a draft unless `status`
+ *   says otherwise.
+ * - `slug` cannot be blanked on a change: the composer re-derives a blank one,
+ *   which would move a live post to a new address and break every link to it.
+ * - `excerpt: ""` and `cover_image_path: ""` clear those, as on the form.
+ * - `cover_image_path` is a storage path from `upload_blog_image`, not an
+ *   address. An address stored there would render as a broken image.
+ */
+export const agentSaveBlogPostSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    title: blogPostSchema.shape.title.optional(),
+    slug: blogSlug.optional(),
+    excerpt: blogPostSchema.shape.excerpt,
+    body_md: blogPostSchema.shape.body_md.optional(),
+    cover_image_path: blogPostSchema.shape.cover_image_path.refine(
+      // A path from the bucket never starts with a scheme or a slash; an
+      // address stored here renders as a broken cover on the public blog.
+      (v) => !v || !/^([a-z]+:|\/)/i.test(v),
+      "Pass the `path` that upload_blog_image returned, not the image's web address.",
+    ),
+    status: z.enum(blogPostStatuses).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.id) {
+      if (Object.entries(value).every(([k, v]) => k === "id" || v === undefined)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["id"],
+          message: "Nothing to change: send at least one field besides id.",
+        });
+      }
+      return;
+    }
+    for (const field of ["title", "body_md"] as const) {
+      if (!value[field]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [field],
+          message: "A new post needs a title and a body_md.",
+        });
+      }
+    }
+  });
+export type AgentSaveBlogPostInput = z.infer<typeof agentSaveBlogPostSchema>;
+
+/** Agent: delete a post outright. */
+export const agentDeleteBlogPostSchema = deleteBlogPostSchema.strict();
+
+/**
+ * Agent: put an image in the blog's bucket, from base64 `data` or from a
+ * public https `url` the server downloads (the practical route for an
+ * assistant, which cannot type out a photo's bytes). Exactly one of the two.
+ * There is no `type`: it is read from the bytes (`sniffBlogImageType`), since
+ * an agent relays files it did not make.
+ */
+export const agentUploadBlogImageSchema = z
+  .object({
+    post_id: z.string().uuid().optional(),
+    name: z.string().trim().min(1).max(255).optional(),
+    alt: z.string().trim().max(300).optional(),
+    /** Raw base64, no `data:` prefix. */
+    data: z.string().min(1).optional(),
+    url: z.string().trim().url().max(2000).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (Boolean(value.data) === Boolean(value.url)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["data"],
+        message: value.data
+          ? "Send the image as base64 `data` or as a `url` to download, not both."
+          : "Send the image as base64 `data` or as a `url` to download.",
+      });
+    }
+    if (value.data && base64ByteLength(value.data) > MAX_BLOG_IMAGE_BYTES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["data"],
+        message: "That image is too large. Keep it under 8 MB.",
+      });
+    }
+  });
+export type AgentUploadBlogImageInput = z.infer<typeof agentUploadBlogImageSchema>;
 
 // ---- Blog comments ----
 //

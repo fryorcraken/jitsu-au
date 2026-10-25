@@ -22,6 +22,9 @@ describe("MCP action split", () => {
       "publish_waiver_template",
       "create_item_invoice",
       "delete_item",
+      "save_blog_post",
+      "delete_blog_post",
+      "upload_blog_image",
     ]) {
       expect(READ_ACTIONS).not.toContain(action);
       expect(CHANGE_ACTIONS).toContain(action);
@@ -31,6 +34,8 @@ describe("MCP action split", () => {
   it("treats list_ and get_ actions as reads", () => {
     expect(READ_ACTIONS).toContain("list_users");
     expect(READ_ACTIONS).toContain("get_club_settings");
+    expect(READ_ACTIONS).toContain("list_blog_posts");
+    expect(READ_ACTIONS).toContain("get_blog_post");
     expect(isReadAction("save_item")).toBe(false);
   });
 });
