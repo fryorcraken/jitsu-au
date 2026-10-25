@@ -357,15 +357,12 @@ describe("/manager/membership-plans", () => {
       render(<PlansPage />);
       const plan = await card();
 
-      // Ticking the box is reason enough to press Save on an unedited plan.
-      const save = plan.getByRole("button", { name: "Save" });
-      expect(save).toBeDisabled();
+      await user.type(plan.getByLabelText("Name"), "!");
       await user.click(plan.getByLabelText("Email all members about this plan"));
-      expect(save).toBeEnabled();
-      await user.click(save);
+      await user.click(plan.getByRole("button", { name: "Save" }));
 
       expect(
-        await screen.findByText("Save and email 2 people about Semester 2 2026?"),
+        await screen.findByText("Save and email 2 people about Semester 2 2026!?"),
       ).toBeInTheDocument();
       expect(screen.getByText("This can't be undone.")).toBeInTheDocument();
       expect(saveMembershipPlan).not.toHaveBeenCalled();
@@ -377,6 +374,33 @@ describe("/manager/membership-plans", () => {
       expect(await plan.findByText("Announced on 3 Nov to 2 people.")).toBeInTheDocument();
       // Done, so the box is clear again: the next tick is a new announcement.
       expect(plan.getByLabelText("Email all members about this plan")).not.toBeChecked();
+    });
+
+    // Nothing edited means nothing to save. Saving anyway would write the
+    // card's copy back over the stored plan, which may be newer.
+    it("only emails, and says so, when the plan itself is unchanged", async () => {
+      const user = userEvent.setup();
+      saveMembershipPlan.mockClear();
+      announcePlan.mockReset();
+      announcePlan.mockImplementation(
+        async ({ data }: { data: { client_submission_id: string } }) =>
+          announced({ announcement_id: data.client_submission_id }),
+      );
+      render(<PlansPage />);
+      const plan = await card();
+
+      // Ticking the box is reason enough to press Save on an unedited plan.
+      const save = plan.getByRole("button", { name: "Save" });
+      expect(save).toBeDisabled();
+      await user.click(plan.getByLabelText("Email all members about this plan"));
+      expect(save).toBeEnabled();
+      await user.click(save);
+
+      expect(await screen.findByText("Email 2 people about Semester 2 2026?")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Email members" }));
+      await waitFor(() => expect(announcePlan).toHaveBeenCalledTimes(1));
+      expect(saveMembershipPlan).not.toHaveBeenCalled();
+      expect(await plan.findByText("Announced on 3 Nov to 2 people.")).toBeInTheDocument();
     });
 
     it("saves and sends nothing when the manager cancels", async () => {
@@ -406,13 +430,14 @@ describe("/manager/membership-plans", () => {
       render(<PlansPage />);
       const plan = await card();
 
+      await user.type(plan.getByLabelText("Name"), "!");
       await user.click(plan.getByLabelText("Email all members about this plan"));
       await user.click(plan.getByRole("button", { name: "Save" }));
       await user.click(await screen.findByRole("button", { name: "Save and email" }));
 
       expect(
         await plan.findByText(
-          "Semester 2 2026 is saved, but the email to members has not gone out.",
+          "Semester 2 2026! is saved, but the email to members has not gone out.",
         ),
       ).toBeInTheDocument();
       await user.click(plan.getByRole("button", { name: /try again/i }));
@@ -445,12 +470,12 @@ describe("/manager/membership-plans", () => {
       const box = plan.getByLabelText("Email all members about this plan");
       await user.click(box);
       await user.click(plan.getByRole("button", { name: "Save" }));
-      await user.click(await screen.findByRole("button", { name: "Save and email" }));
+      await user.click(await screen.findByRole("button", { name: "Email members" }));
       await plan.findByText("Semester 2 2026 is saved, but the email to members has not gone out.");
 
       await user.click(box);
       await user.click(plan.getByRole("button", { name: "Save" }));
-      await user.click(await screen.findByRole("button", { name: "Save and email" }));
+      await user.click(await screen.findByRole("button", { name: "Email members" }));
       await waitFor(() => expect(announcePlan).toHaveBeenCalledTimes(2));
       expect(announcePlan.mock.calls[1][0].data.client_submission_id).not.toBe(
         announcePlan.mock.calls[0][0].data.client_submission_id,

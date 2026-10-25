@@ -426,7 +426,7 @@ function ItemInvoicesCard({
 function MembershipPage() {
   const navigate = useNavigate();
   const { confirm, confirmDialog } = useConfirm();
-  const { for: subjectParam } = Route.useSearch();
+  const { for: subjectParam, plan: planParam } = Route.useSearch();
   const fetchPlans = useServerFn(listMembershipPlans);
   const fetchMine = useServerFn(getMyMemberships);
   const fetchInstructions = useServerFn(getPaymentInstructions);
@@ -648,17 +648,17 @@ function MembershipPage() {
     setScrollToPay(false);
   }, [scrollToPay]);
 
-  // A plan announcement's email links to `#plan-<id>` (`planAnnouncementHref`).
-  // The browser looks for that anchor once, on arrival, before this page has
-  // loaded its plans, so it finds nothing. Look again once the cards exist.
-  const hashScrolled = useRef(false);
+  // A plan announcement's email links to `?plan=<id>` (`planAnnouncementHref`).
+  // The cards only exist once the plans have loaded, so scroll then, and mark
+  // it done only once the card was actually there to scroll to.
+  const scrolledToPlan = useRef(false);
   useEffect(() => {
-    if (hashScrolled.current || plans.length === 0) return;
-    const hash = window.location.hash;
-    if (!hash.startsWith("#plan-")) return;
-    hashScrolled.current = true;
-    document.getElementById(hash.slice(1))?.scrollIntoView?.({ block: "start" });
-  }, [plans]);
+    if (scrolledToPlan.current || loading || !planParam) return;
+    const card = document.getElementById(`plan-${planParam}`);
+    if (!card) return;
+    scrolledToPlan.current = true;
+    card.scrollIntoView?.({ block: "start" });
+  }, [plans, loading, planParam]);
 
   async function choose(plan: Plan) {
     // ⚠️ Only when buying for somebody else, and that narrowness is the point.

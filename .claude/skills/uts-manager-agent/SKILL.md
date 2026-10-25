@@ -475,7 +475,10 @@ to buy it. It goes immediately and **nobody can turn it off**.
   gone yet (one call sends at most 150): call again with the same id to send the
   rest, or leave them for the next morning's summary, which picks them up.
 - **`502 announcement_failed`** means the plan IS saved and the email did not
-  go. `error.details.id` is the plan. Retry with the same `announcement_id`.
+  go. `error.details.id` is the plan. Retry with **that `id`** and the same
+  `announcement_id`: without the id, a plan you just created would be created
+  again (and refused, since its code is taken).
+- **`404 not_found`** means the `id` you sent matches no plan. Nothing was saved.
 - **`409 submission_conflict`** means that id was already used for a different
   plan. Mint a new one.
 

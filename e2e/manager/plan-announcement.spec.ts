@@ -30,7 +30,7 @@ test.afterAll(async () => {
     .from("notifications")
     .delete()
     .eq("kind", "membership_plan_open")
-    .eq("href", `/membership#plan-${planId}`);
+    .eq("href", `/membership?plan=${planId}`);
 });
 
 test("a manager emails every member about a plan, after saying yes to the real number", async ({
@@ -80,7 +80,7 @@ test("a manager emails every member about a plan, after saying yes to the real n
     .from("notifications")
     .select("user_id")
     .eq("kind", "membership_plan_open")
-    .eq("href", `/membership#plan-${planId}`);
+    .eq("href", `/membership?plan=${planId}`);
   const recipients = (rows ?? []).map((r) => r.user_id);
   expect(recipients).toHaveLength(asked);
   expect(recipients).toContain(fixture.personas.member.userId);

@@ -659,7 +659,9 @@ agent API does the same through `save_membership_plan` with `announce: true`
   item like any other pending row. A row for somebody who has left the audience
   since it was written is stamped rather than sent, so the digest does not mail
   them either. The email's link opens the plan's own card on `/membership`; the
-  page scrolls to it once the plans have loaded.
+  page scrolls to it once the plans have loaded. It is a query parameter
+  rather than a `#fragment` so it survives a signed-out member going through
+  sign-in first.
 - **A club of 500.** About 250 to 400 inboxes once families fold. The first
   request sends 150 and reports the rest pending; the manager presses "Send the
   rest now" once or twice (or an agent repeats the call with the same id), or
@@ -667,9 +669,12 @@ agent API does the same through `save_membership_plan` with `announce: true`
 - **Announcing again.** Allowed, on purpose: the manager may want to re-send
   after a price change. Each announcement is its own subject: its
   `subject_id` is the id the screen (or agent) minted, and the plan is named by
-  the row's `href`, `/membership#plan-<id>`, which is also the link the email
+  the row's `href`, `/membership?plan=<id>`, which is also the link the email
   opens. A retried save or a double click reuses the same id, so the unique
   index absorbs it and nobody gets a second copy; a fresh tick is a fresh id.
+- **Nothing edited, nothing saved.** Ticking the box on a plan nobody has
+  changed asks "Email 84 people about Semester 1 2027?" and sends without
+  saving, so announcing can never write a stale copy of the plan back.
 - **Save first, then send.** The screen saves the plan, then announces, as two
   calls it reports separately. A failed send says the plan is saved and the
   email did not go, with a retry that announces again without saving again, so

@@ -38,7 +38,7 @@ export function usePlanAnnouncement(onAnnounced: (result: AnnounceResult) => voi
    * save: either the manager said no, or the count could not be read, in which
    * case `panel` says so.
    */
-  confirmBeforeSave: (planName: string) => Promise<boolean>;
+  confirmBeforeSave: (planName: string, opts?: { saving: boolean }) => Promise<boolean>;
   /** Announce a plan that has just been saved. */
   send: (plan: { id: string; name: string }) => Promise<void>;
   /** Everything this puts on screen: progress, failure, partial send, the dialog. */
@@ -54,7 +54,10 @@ export function usePlanAnnouncement(onAnnounced: (result: AnnounceResult) => voi
   const submit = useResilientSubmit<AnnounceResult>(ANNOUNCE_SUBMIT);
   const { confirm, confirmDialog } = useConfirm();
 
-  async function confirmBeforeSave(planName: string): Promise<boolean> {
+  async function confirmBeforeSave(
+    planName: string,
+    opts: { saving: boolean } = { saving: true },
+  ): Promise<boolean> {
     // Cleared first, so a count that failed on an earlier Save never sits next
     // to a save that has since worked.
     setCountError(null);
@@ -67,15 +70,16 @@ export function usePlanAnnouncement(onAnnounced: (result: AnnounceResult) => voi
       return false;
     }
     return confirm({
-      title: announceConfirmTitle(planName, inboxes),
-      description:
-        "This saves the plan, then emails everyone whose waiver has been approved. A family gets one email, sent to the parent and naming the children.",
+      title: announceConfirmTitle(planName, inboxes, opts),
+      description: `${
+        opts.saving ? "This saves the plan, then emails" : "This emails"
+      } everyone whose waiver has been approved. A family gets one email, sent to the parent and naming the children.`,
       details: [
         "The email has the plan's dates and price, and a link to buy it.",
         "Nobody can turn this email off, because it is about their membership.",
       ],
       footnote: "This can't be undone.",
-      confirmLabel: "Save and email",
+      confirmLabel: opts.saving ? "Save and email" : "Email members",
     });
   }
 

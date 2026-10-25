@@ -2271,6 +2271,13 @@ export function composeManagerNotifications(sources: {
  */
 export const membershipSearchSchema = z.object({
   for: z.coerce.string().max(64).optional().catch(undefined),
+  /**
+   * The plan a membership plan announcement links to (`planAnnouncementHref`),
+   * which the page scrolls to once its cards exist. A query parameter rather
+   * than a `#fragment` because the sign-in gate keeps the query on its way
+   * back from `/auth`, and drops a fragment.
+   */
+  plan: z.string().uuid().optional().catch(undefined),
 });
 export type MembershipSearch = z.infer<typeof membershipSearchSchema>;
 

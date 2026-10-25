@@ -937,12 +937,17 @@ async function handleSaveMembershipPlan(params: unknown, actingAs: string) {
   } catch (e) {
     if (e instanceof PlanAnnouncementError && e.code === "submission_conflict")
       throw new AgentError(409, "submission_conflict", e.message, { id: saved.id });
+    // An update naming an id that matches no plan writes nothing and does not
+    // fail, so this is where it surfaces. Nothing was saved, and nothing will
+    // be by retrying.
+    if (e instanceof PlanAnnouncementError && e.code === "plan_not_found")
+      throw new AgentError(404, "not_found", "No membership plan has that id.");
     throw new AgentError(
       502,
       "announcement_failed",
       `The plan was saved, but the email to members did not go out (${
         e instanceof Error ? e.message : "unknown error"
-      }). Call again with the same announcement_id to finish it: nobody is emailed twice.`,
+      }). Call again with id set to error.details.id and the same announcement_id to finish it: nobody is emailed twice.`,
       { id: saved.id, announcement_id },
     );
   }

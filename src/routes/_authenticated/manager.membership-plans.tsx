@@ -245,6 +245,14 @@ function PlanCard({
   // manager is never asked "email 84 people?" about a plan that then fails to
   // save for a missing date.
   async function save() {
+    if (!dirty) {
+      // Only the box is ticked. There is nothing to save, and saving anyway
+      // would write this card's copy of the plan back over whatever is stored,
+      // which may be newer (an agent's edit, another manager's).
+      if (await announce.confirmBeforeSave(plan.name, { saving: false }))
+        await announce.send({ id: plan.id, name: plan.name });
+      return;
+    }
     const saved = await onSave(plan, () => announce.confirmBeforeSave(plan.name));
     if (saved && announce.ticked) await announce.send({ id: plan.id, name: plan.name });
   }

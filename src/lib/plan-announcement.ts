@@ -24,6 +24,7 @@
 //    the announcement's own id and the plan is named by the `href`, which is
 //    also the link the email opens. Re-sending the SAME announcement (a retried
 //    save, a double click) collides on the unique index and emails nobody twice.
+import { formatDateOnlyWords } from "@/lib/dates";
 import { contactUserIdFor, type HouseholdLink } from "@/lib/household";
 import { formatCents, greetingName, type PersonNameParts } from "@/lib/validation";
 import type { MembershipPlanKind } from "@/lib/validation";
@@ -32,14 +33,20 @@ import type { MembershipPlanKind } from "@/lib/validation";
 export const PLAN_ANNOUNCEMENT_KIND = "membership_plan_open" as const;
 export const PLAN_ANNOUNCEMENT_SUBJECT = "membership_plan_announcement" as const;
 
-/** Where the email and the in-app row send somebody: that plan, on /membership. */
+/**
+ * Where the email and the in-app row send somebody: that plan, on /membership.
+ *
+ * A query parameter, not a `#fragment`: a member who opens the email signed out
+ * is sent through `/auth`, which carries the path and query back and drops a
+ * fragment. The page scrolls to the plan once its cards have loaded.
+ */
 export function planAnnouncementHref(planId: string): string {
-  return `/membership#plan-${planId.toLowerCase()}`;
+  return `/membership?plan=${planId.toLowerCase()}`;
 }
 
 /** The plan an announcement row is about, read back off its `href`. */
 export function planIdFromAnnouncementHref(href: string): string | null {
-  const m = /^\/membership#plan-([0-9a-f-]{36})$/.exec(href);
+  const m = /^\/membership\?plan=([0-9a-f-]{36})$/.exec(href);
   return m ? m[1] : null;
 }
 
@@ -119,16 +126,6 @@ export type AnnouncedPlan = {
   session_credits: number | null;
 };
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/** `2027-03-02` as `2 Mar 2027`, or `2 Mar` without the year. No timezone: it is a date. */
-export function formatPlanDate(dateOnly: string, opts: { year?: boolean } = {}): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
-  if (!m) return dateOnly;
-  const day = `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}`;
-  return opts.year === false ? day : `${day} ${m[1]}`;
-}
-
 /** Both rates where there is a student price: `$445, or $245 for UTS students`. */
 export function planPriceText(
   plan: Pick<AnnouncedPlan, "public_price_cents" | "student_price_cents">,
@@ -144,7 +141,7 @@ export function planRunsText(
   plan: Pick<AnnouncedPlan, "starts_on" | "ends_on" | "duration_days" | "session_credits">,
 ): string | null {
   if (plan.starts_on && plan.ends_on)
-    return `${formatPlanDate(plan.starts_on)} to ${formatPlanDate(plan.ends_on)}`;
+    return `${formatDateOnlyWords(plan.starts_on)} to ${formatDateOnlyWords(plan.ends_on)}`;
   if (plan.duration_days) return `${plan.duration_days} days from the day it starts`;
   if (plan.session_credits)
     return plan.session_credits === 1 ? "One class" : `${plan.session_credits} classes`;
@@ -261,14 +258,18 @@ export function announcementSummaries(
 export function announcedLine(summary: AnnouncementSummary, clubDate: string): string {
   const people = summary.recipients === 1 ? "1 person" : `${summary.recipients} people`;
   const again = summary.times > 1 ? "Last announced" : "Announced";
-  const line = `${again} on ${formatPlanDate(clubDate, { year: false })} to ${people}`;
+  const line = `${again} on ${formatDateOnlyWords(clubDate, { year: false })} to ${people}`;
   const waiting = summary.recipients - summary.emailed;
   if (waiting <= 0) return `${line}.`;
   return `${line}. ${waiting} of those emails ${waiting === 1 ? "has" : "have"} not gone out yet, and will go with the next morning's summary.`;
 }
 
 /** The hard stop's question, with the real number in it. */
-export function announceConfirmTitle(planName: string, inboxes: number): string {
+export function announceConfirmTitle(
+  planName: string,
+  inboxes: number,
+  opts: { saving: boolean } = { saving: true },
+): string {
   const people = inboxes === 1 ? "1 person" : `${inboxes} people`;
-  return `Save and email ${people} about ${planName}?`;
+  return `${opts.saving ? "Save and email" : "Email"} ${people} about ${planName}?`;
 }

@@ -243,7 +243,7 @@ describe("announceMembershipPlan", () => {
     expect(family.text).toContain("1 Mar 2027 to 30 Jun 2027");
     // Cy is covered; Bea is not. The parent does not train, so is not named.
     expect(family.text).toContain("To train, Bea will also need yearly insurance ($90)");
-    expect(family.text).toContain(`/membership#plan-${PLAN_ID}`);
+    expect(family.text).toContain(`/membership?plan=${PLAN_ID}`);
     expect(family.text).not.toContain("—");
   });
 
@@ -324,7 +324,7 @@ describe("announceMembershipPlan", () => {
       kind: "membership_plan_open",
       subject_type: "membership_plan_announcement",
       subject_id: ANNOUNCEMENT,
-      href: `/membership#plan-${PLAN_ID}`,
+      href: `/membership?plan=${PLAN_ID}`,
       emailed_at: null,
       created_at: "2026-11-01T00:00:00.000Z",
     });
@@ -340,7 +340,7 @@ describe("announceMembershipPlan", () => {
       user_id: ADULT,
       kind: "membership_plan_open",
       subject_id: ANNOUNCEMENT,
-      href: "/membership#plan-33333333-3333-4333-8333-333333333333",
+      href: "/membership?plan=33333333-3333-4333-8333-333333333333",
       emailed_at: "2026-11-01T00:00:00.000Z",
       created_at: "2026-11-01T00:00:00.000Z",
     });

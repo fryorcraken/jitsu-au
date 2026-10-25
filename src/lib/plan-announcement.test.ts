@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { formatDateOnlyWords } from "./dates";
+import { membershipSearchSchema } from "./validation";
 import {
   announceConfirmTitle,
   announcedLine,
@@ -8,7 +10,6 @@ import {
   announcementSummaries,
   announcementTitle,
   forWhomText,
-  formatPlanDate,
   planAnnouncementHref,
   planIdFromAnnouncementHref,
   planNeedsInsurance,
@@ -127,8 +128,8 @@ describe("what the email says", () => {
   });
 
   it("formats a date without a timezone shift", () => {
-    expect(formatPlanDate("2027-03-01")).toBe("1 Mar 2027");
-    expect(formatPlanDate("2026-11-03", { year: false })).toBe("3 Nov");
+    expect(formatDateOnlyWords("2027-03-01")).toBe("1 Mar 2027");
+    expect(formatDateOnlyWords("2026-11-03", { year: false })).toBe("3 Nov");
   });
 
   it("names who it is for", () => {
@@ -182,9 +183,16 @@ describe("what the email says", () => {
 });
 
 describe("the plan link", () => {
+  // The link survives sign-in only because the member page keeps the parameter:
+  // its search schema drops anything it does not declare.
+  it("is a parameter the membership page keeps, and junk is dropped", () => {
+    expect(membershipSearchSchema.parse({ plan: PLAN_ID })).toEqual({ plan: PLAN_ID });
+    expect(membershipSearchSchema.parse({ plan: "not-a-plan" })).toEqual({ plan: undefined });
+  });
+
   it("round-trips the plan id", () => {
     const href = planAnnouncementHref(PLAN_ID);
-    expect(href).toBe(`/membership#plan-${PLAN_ID}`);
+    expect(href).toBe(`/membership?plan=${PLAN_ID}`);
     expect(planIdFromAnnouncementHref(href)).toBe(PLAN_ID);
     expect(planIdFromAnnouncementHref("/blog/a-post")).toBeNull();
   });
@@ -242,6 +250,11 @@ describe("announcementSummaries", () => {
     );
     expect(announceConfirmTitle("Semester 1 2027", 1)).toBe(
       "Save and email 1 person about Semester 1 2027?",
+    );
+    // Announcing a plan nobody edited saves nothing, so the question does not
+    // claim to.
+    expect(announceConfirmTitle("Semester 1 2027", 84, { saving: false })).toBe(
+      "Email 84 people about Semester 1 2027?",
     );
   });
 });

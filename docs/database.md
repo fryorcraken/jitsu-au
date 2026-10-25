@@ -1277,7 +1277,7 @@ not have carried that, since it is deliberately never cleared.
 carry `subject_type = 'membership_plan_announcement'` and a `subject_id` that is
 the announcement's own id, minted by whoever announced it, so announcing a plan
 a second time is a second subject rather than a collision. Which plan it was
-about is the `href` (`/membership#plan-<plan id>`), the same link the email
+about is the `href` (`/membership?plan=<plan id>`), the same link the email
 opens; `announcementSummaries` in `src/lib/plan-announcement.ts` reads it back
 for the "Announced on..." line. One row per **inbox**, not per person: a family
 is one row on the parent, which is also why its count is the number of emails.

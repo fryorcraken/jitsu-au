@@ -1295,6 +1295,22 @@ describe("save_membership_plan with announce", () => {
     });
   });
 
+  // An update naming an id that matches no plan writes nothing and does not
+  // fail, so the announcement is where it surfaces: as a 404, never as "saved".
+  it("answers an id that matches no plan with 404, not 'the plan was saved'", async () => {
+    fakePlans();
+    const { PlanAnnouncementError } = await import("@/lib/plan-announcement.server");
+    announceMembershipPlanMock.mockRejectedValue(
+      new PlanAnnouncementError("plan_not_found", "That plan does not exist."),
+    );
+    const res = await post({
+      action: "save_membership_plan",
+      params: { ...PARAMS, announce: true, announcement_id: ANNOUNCEMENT_ID },
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+  });
+
   it("says the plan is saved when only the email failed, so the caller retries the email", async () => {
     fakePlans();
     announceMembershipPlanMock.mockRejectedValue(new Error("provider down"));
@@ -1307,5 +1323,7 @@ describe("save_membership_plan with announce", () => {
     expect(body.error.code).toBe("announcement_failed");
     expect(body.error.details).toEqual({ id: PLAN_ID, announcement_id: ANNOUNCEMENT_ID });
     expect(body.error.message).toMatch(/same announcement_id/);
+    // A plan this call created has to be retried by id, or it is created again.
+    expect(body.error.message).toMatch(/error\.details\.id/);
   });
 });

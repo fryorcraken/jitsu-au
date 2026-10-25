@@ -245,8 +245,9 @@ locked | already_verified` (the record has moved on, checked again at the send);
   Refusals: `400 invalid_params` for `announce` without an id (before anything
   is saved), `409 submission_conflict` for an id already used on another plan,
   and `502 announcement_failed` when the plan saved but the email did not (the
-  plan's id is in `error.details`, so the caller retries the email, not the
-  save). `list_membership_plans` reports each plan's `last_announcement`.
+  plan's id is in `error.details`, so the caller retries with that id rather
+  than creating the plan again), and `404 not_found` for an `id` that matches
+  no plan. `list_membership_plans` reports each plan's `last_announcement`.
   There is no eligibility rule: any plan can be announced, as on the screen.
   Product rules: `docs/notifications.md`, "A plan is announced".
 - `delete_invoice` — delete an invoice outright, for tidying up one that should
