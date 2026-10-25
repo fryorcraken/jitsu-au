@@ -14,11 +14,22 @@ describe("linkOrigin", () => {
     }
   });
 
-  it("keeps a preview or local stack's own origin, so its links point at itself", () => {
-    expect(linkOrigin("https://preview--utsjitsu.lovable.app")).toBe(
-      "https://preview--utsjitsu.lovable.app",
-    );
+  it("sends a Lovable preview or the published lovable.app address to the canonical origin", () => {
+    // Same app, same live database, but a host that can change or go away.
+    expect(linkOrigin("https://preview--utsjitsu.lovable.app")).toBe(SITE_ORIGIN);
+    expect(linkOrigin("https://utsjitsu.lovable.app")).toBe(SITE_ORIGIN);
+  });
+
+  it("keeps a loopback stack's own origin, so its links point at its own database", () => {
     expect(linkOrigin("http://localhost:4173")).toBe("http://localhost:4173");
+    expect(linkOrigin("http://127.0.0.1:4173")).toBe("http://127.0.0.1:4173");
+    expect(linkOrigin("http://[::1]:4173")).toBe("http://[::1]:4173");
+    expect(linkOrigin("http://club.localhost:4173")).toBe("http://club.localhost:4173");
+  });
+
+  it("does not mistake a look-alike for loopback", () => {
+    expect(linkOrigin("https://localhost.example.com")).toBe(SITE_ORIGIN);
+    expect(linkOrigin("https://127.0.0.1.example.com")).toBe(SITE_ORIGIN);
   });
 
   it("drops anything after the origin", () => {

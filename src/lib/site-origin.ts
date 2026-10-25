@@ -52,11 +52,16 @@ export function isProductionHost(host: string | null | undefined): boolean {
  * calendar subscription, the manager agent's endpoint), given the origin the
  * request came in on.
  *
- * On any of the club's own hosts that is SITE_ORIGIN, whichever one the
- * person happens to be browsing: the others only redirect to it or duplicate
- * it, and these links carry a token that a redirect to another host drops.
- * Anywhere else (a Lovable preview, a branch deploy, localhost) it is that
- * origin, so a test stack hands out links to itself rather than to the club.
+ * That is SITE_ORIGIN wherever the page is being browsed, with one exception.
+ * The club's other domains only redirect to it or duplicate it, and these
+ * links carry a token that a redirect to another host drops. A Lovable preview
+ * or the project's lovable.app address is the same app on the same live
+ * database, but on a host that can change or go away, while the calendar app
+ * holding the link polls it for months.
+ *
+ * The exception is a loopback host (local development, the end-to-end suite):
+ * that stack has its own database, so its tokens mean nothing to the club and
+ * its links have to point back at itself.
  */
 export function linkOrigin(requestOrigin: string | null | undefined): string {
   if (!requestOrigin) return SITE_ORIGIN;
@@ -66,5 +71,15 @@ export function linkOrigin(requestOrigin: string | null | undefined): string {
   } catch {
     return SITE_ORIGIN;
   }
-  return isProductionHost(url.host) ? SITE_ORIGIN : url.origin;
+  return isLoopbackHost(url.hostname) ? url.origin : SITE_ORIGIN;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const name = hostname.toLowerCase();
+  return (
+    name === "localhost" ||
+    name.endsWith(".localhost") ||
+    name === "[::1]" ||
+    /^127(\.\d{1,3}){3}$/.test(name)
+  );
 }

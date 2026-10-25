@@ -736,9 +736,10 @@ in `src/lib/site-origin.ts`: every canonical, the sitemap, and every link in eve
 come from it (`SITE_HOST` is the same thing without the scheme, for copy). The
 two links a person carries out of the browser, the calendar subscription on
 `/account` and the endpoint in the manager agent prompt, go through
-`linkOrigin` in `src/lib/site-origin.ts`: on any of the club's hosts they get
-`SITE_ORIGIN`, and on a local or preview stack they name that stack, so it
-hands out links to itself. `jitsu.au` (the address until October 2026) now
+`linkOrigin` in `src/lib/site-origin.ts`: they get `SITE_ORIGIN` wherever the
+page is browsed (the club's other domains, a Lovable preview, the lovable.app
+address, all of which run on the live database), except on a loopback host,
+whose stack has its own database and so hands out links to itself. `jitsu.au` (the address until October 2026) now
 redirects there. Three rules follow, and the first one has already cost the club
 its nightly email once:
 
@@ -756,9 +757,11 @@ its nightly email once:
   calendar), and `dependant.jitsu.au` is the reserved address domain for
   dependants. All three stay as they are. Anything else is a mistake:
   `src/lib/seo.test.ts` ("the old domain") fails on any other mention of
-  `jitsu.au` in code under `src/`, `public/`, `scripts/`, `e2e/` and
-  `.claude/skills/`, whether a URL or copy. It skips comments and tests, and it
-  does not read `docs/`, where the old name is history.
+  `jitsu.au`, in any case, in every text file under `src/`, `public/`,
+  `scripts/`, `e2e/` and `.claude/skills/`, whether a URL or copy. It skips
+  comments (blanked by file type, so markdown copy that starts with `#` or `*`
+  is still read) and tests, and it does not read `docs/`, where the old name is
+  history. A line that has to name it goes on that test's `ALLOWED` list.
 
 ## Security headers
 
