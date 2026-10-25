@@ -57,12 +57,12 @@ requests, the CI logs, and the screenshot artifacts.
     run **2026-09-04**: **76 migration files, 2 reported unapplied**, both then
     allowlisted as already-live re-emissions (see below), so the next run
     reports 0 and lists them separately. Also
-    **18 client grants live, 18 expected, 0 unexpected** as of **2026-09-01**. So
-    `supabase/lint/client-grants-expected.txt` is verified against production as
-    of that date, not just against the migration files, and `profiles` still
-    holds no **table** privilege for `anon` or `authenticated`. That run read
-    table ACLs only; the query has read column ACLs too since 2026-10-23 and
-    has not been run live with them yet. It goes stale the moment
+    **18 client grants live, 18 expected, 0 unexpected** as of **2026-10-25**,
+    read with the query that also sees column, `PUBLIC` and inherited grants,
+    and none of those exist. So `supabase/lint/client-grants-expected.txt` is
+    verified against production as of that date, not just against the
+    migration files, and `profiles` holds no privilege at all for `anon` or
+    `authenticated`. It goes stale the moment
     anyone changes a grant by hand in the Lovable UI, which produces no commit
     and no signal — so re-run them after applying a migration and before a
     release. Nothing does it for you.

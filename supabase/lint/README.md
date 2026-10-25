@@ -133,12 +133,11 @@ The column half exists because a `GRANT UPDATE (col) ON t` writes only the
 column's ACL: a table-only query reports that table as closed while one column
 of it is writable. A column grant is reported, and listed in
 `client-grants-expected.txt`, as `table(column)`. It was added on 2026-10-23 with
-`profiles.archived_at`, which a member must never be able to write, and **has not
-yet been run against the live database**: the 2026-09-01 figures below are
-table grants only. Nothing in the migrations makes a column or PUBLIC grant,
-so a `table(column)` or `PUBLIC` row from the first live run is a finding to
-investigate (a grant made by hand in the Lovable UI, most likely), not an
-artefact of the new query. The same query also reports any grant to `PUBLIC`,
+`profiles.archived_at`, which a member must never be able to write. Nothing in
+the migrations makes a column or PUBLIC grant, so a `table(column)` or `PUBLIC`
+row from a live run is a finding to investigate (a grant made by hand in the
+Lovable UI, most likely), not an artefact of the query. The same query also
+reports any grant to `PUBLIC`,
 or to a role `anon` or `authenticated` is a member of, since both reach the
 client roles without naming them, and it reads views, materialized views,
 partitioned and foreign tables as well as plain tables.
@@ -155,9 +154,11 @@ produces no commit and no signal, and is exactly the drift these catch.
 unapplied** — the two below. Both were then allowlisted as already-live
 re-emissions, so the next run reports **0 unapplied** and lists them under
 "Allowlisted, so not counted above" instead.
-**Client grants last run: 2026-09-01**, straight after applying
-`20260828000000_waiver_pdf_guardian_read.sql`: 18 live, 18 expected, 0
-unexpected. The one ledger row with no file here (`20260722131547`) is the known
+**Client grants last run: 2026-10-25**, straight after applying
+`20261023120000_profile_archive.sql`, and the first run of the widened
+`client-grants.sql`: 18 live, 18 expected, 0 unexpected, and no column,
+`PUBLIC` or inherited grant anywhere in `public`. (The run before it,
+2026-09-01, read table grants only, with the same 18.) The one ledger row with no file here (`20260722131547`) is the known
 duplicate re-emission described in `docs/database-changes.md`, not missing
 schema.
 
