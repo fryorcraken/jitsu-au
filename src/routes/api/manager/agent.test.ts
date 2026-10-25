@@ -205,6 +205,13 @@ vi.mock("@/lib/code-of-conduct.functions", async (importOriginal) => ({
   highestAcceptedVersions: (...args: unknown[]) => highestAcceptedVersionsMock(...args),
 }));
 
+// Publishing a post announces it. The announcement's own fan-out is covered in
+// the notification tests; what the blog actions own is whether it is asked for.
+const notifyNewBlogPostMock = vi.fn();
+vi.mock("@/lib/notification-events.server", () => ({
+  notifyNewBlogPost: (...args: unknown[]) => notifyNewBlogPostMock(...args),
+}));
+
 const MINTED_TOKEN = "utsj_0123456789abcdef0123456789abcdef0123456789abcdef";
 const TOKEN_OWNER = "44444444-4444-4444-4444-444444444444";
 /**
@@ -1716,5 +1723,383 @@ describe("manager agent route: the code of conduct", () => {
     loadCodeOfConductVersionMock.mockResolvedValue(null);
     const res = await post({ action: "publish_code_of_conduct", params: { version: 9 } });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("manager agent route: the blog", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    notifyNewBlogPostMock.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const DRAFT_ID = "5b0f3c1e-9a8d-4c2b-8e7f-1a2b3c4d5e6f";
+  const LIVE_ID = "6c1a4d2f-0b9e-4d3c-9f80-2b3c4d5e6f70";
+
+  type Row = Record<string, unknown>;
+
+  /**
+   * An in-memory `blog_posts` table and `blog-media` bucket, evaluating the
+   * filters each chain applies rather than ignoring them, so a save that wrote
+   * the wrong row or a slug check that matched nothing would show.
+   */
+  function fakeBlog(seed: Row[], opts: { afterFirstRead?: (rows: Row[]) => void } = {}) {
+    const rows = seed.map((r) => ({ ...r }));
+    let reads = 0;
+    const uploads: { path: string; type: string; size: number }[] = [];
+    const removed: string[] = [];
+    const query = (op: "select" | "update" | "delete", patch?: Row) => {
+      const filters: ((r: Row) => boolean)[] = [];
+      const matching = () => rows.filter((r) => filters.every((f) => f(r)));
+      const run = () => {
+        const hit = matching();
+        if (op === "update") for (const r of hit) Object.assign(r, patch);
+        if (op === "delete") for (const r of hit) rows.splice(rows.indexOf(r), 1);
+        return hit.map((r) => ({ ...r }));
+      };
+      const c: Record<string, unknown> = {
+        eq: (col: string, val: unknown) => (filters.push((r) => r[col] === val), c),
+        neq: (col: string, val: unknown) => (filters.push((r) => r[col] !== val), c),
+        ilike: (col: string, pattern: string) => {
+          const re = new RegExp(
+            `^${pattern
+              .split("%")
+              .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+              .join(".*")}$`,
+            "i",
+          );
+          filters.push((r) => re.test(String(r[col])));
+          return c;
+        },
+        order: () => c,
+        limit: () => c,
+        select: () => c,
+        maybeSingle: () => {
+          const hit = run()[0] ?? null;
+          if (reads++ === 0) opts.afterFirstRead?.(rows);
+          return Promise.resolve(ok(hit));
+        },
+        then: (resolve: (r: unknown) => void) => resolve(ok(run())),
+      };
+      return c;
+    };
+    return {
+      rows,
+      uploads,
+      removed,
+      db: {
+        from: (table: string) => {
+          if (table !== "blog_posts") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => query("select"),
+            update: (patch: Row) => query("update", patch),
+            delete: () => query("delete"),
+            insert: (row: Row) => ({
+              select: () => ({
+                single: () => {
+                  const id = "7d2b5e30-1caf-4e4d-a091-3c4d5e6f7081";
+                  rows.push({ id, created_at: "2026-10-24T00:00:00Z", updated_at: "now", ...row });
+                  return Promise.resolve(ok({ id, slug: row.slug }));
+                },
+              }),
+            }),
+          };
+        },
+        storage: {
+          from: (bucket: string) => {
+            if (bucket !== "blog-media") throw new Error(`unexpected bucket ${bucket}`);
+            return {
+              upload: (path: string, bytes: Uint8Array, opts: { contentType: string }) => {
+                uploads.push({ path, type: opts.contentType, size: bytes.byteLength });
+                return Promise.resolve({ error: null });
+              },
+              getPublicUrl: (path: string) => ({
+                data: { publicUrl: `https://cdn.example.com/blog-media/${path}` },
+              }),
+              remove: (paths: string[]) => {
+                removed.push(...paths);
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        },
+      },
+    };
+  }
+
+  const DRAFT = {
+    id: DRAFT_ID,
+    slug: "2026-10-20-grading-day",
+    title: "Grading day",
+    excerpt: "Who is grading, and when.",
+    body_md: "Grading is on Saturday.",
+    cover_image_path: "drafts/cover.jpg",
+    status: "draft",
+    published_at: null,
+    created_at: "2026-10-20T00:00:00Z",
+    updated_at: "2026-10-20T00:00:00Z",
+  };
+  const LIVE = {
+    ...DRAFT,
+    id: LIVE_ID,
+    slug: "2026-09-01-welcome",
+    title: "Welcome",
+    status: "published",
+    published_at: "2026-09-01T00:00:00Z",
+  };
+
+  // The reason the action carries omitted fields over: publishing a draft is
+  // one field, and it must not wipe the cover or the excerpt it was written with.
+  it("publishes a draft from status alone, keeping everything else, and announces it once", async () => {
+    const fake = fakeBlog([DRAFT]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { id: DRAFT_ID, status: "published" },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({
+      created: false,
+      announced: true,
+      post: {
+        status: "published",
+        title: "Grading day",
+        excerpt: "Who is grading, and when.",
+        cover_image_path: "drafts/cover.jpg",
+        url: "https://utsjitsu.com.au/blog/2026-10-20-grading-day",
+        edit_url: `https://utsjitsu.com.au/manager/blog/${DRAFT_ID}`,
+      },
+    });
+    expect(fake.rows[0].body_md).toBe("Grading is on Saturday.");
+    expect(fake.rows[0].published_at).toEqual(expect.any(String));
+    expect(notifyNewBlogPostMock).toHaveBeenCalledTimes(1);
+    expect(notifyNewBlogPostMock.mock.calls[0][1]).toMatchObject({
+      postId: DRAFT_ID,
+      actorId: TOKEN_OWNER,
+    });
+  });
+
+  // The failure this guards: the shared writer reads an absent status as
+  // draft, so a typo fix sent straight through would take the post down.
+  it("edits a live post's body without unpublishing it or announcing it again", async () => {
+    const fake = fakeBlog([LIVE]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { id: LIVE_ID, body_md: "Welcome to the club." },
+    });
+    expect(res.status).toBe(200);
+    expect(fake.rows[0]).toMatchObject({
+      status: "published",
+      published_at: "2026-09-01T00:00:00Z",
+      body_md: "Welcome to the club.",
+      cover_image_path: "drafts/cover.jpg",
+      slug: "2026-09-01-welcome",
+    });
+    expect((await res.json()).result.announced).toBe(false);
+    expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // Members were told the first time. Republishing calls the announcement
+  // again, but the unique index swallows it, so it must not be reported as one.
+  it("does not report a republish as announcing the post again", async () => {
+    const fake = fakeBlog([{ ...LIVE, status: "draft" }]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { id: LIVE_ID, status: "published" },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toMatchObject({
+      announced: false,
+      post: { status: "published", published_at: "2026-09-01T00:00:00Z" },
+    });
+  });
+
+  it("creates a new post as a draft with no public address unless told otherwise", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { title: "Summer timetable", body_md: "Classes run all summer." },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({
+      created: true,
+      announced: false,
+      post: { status: "draft", url: null },
+    });
+    expect(result.post.slug).toMatch(/^\d{4}-\d{2}-\d{2}-summer-timetable$/);
+    expect(result.post.excerpt).toBe("Classes run all summer.");
+    expect(fake.rows[0].author_id).toBe(TOKEN_OWNER);
+    expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // A create the agent never heard back from gets retried. Suffixing the
+  // address the way the editor does would file the post twice and announce it
+  // twice; refusing names the post the first attempt made.
+  it("refuses a create whose address is taken, naming the post that has it", async () => {
+    const fake = fakeBlog([DRAFT]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_blog_post",
+      params: { title: "Grading day", body_md: "Again.", slug: DRAFT.slug, status: "published" },
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatchObject({
+      code: "slug_taken",
+      details: { id: DRAFT_ID, slug: DRAFT.slug },
+    });
+    expect(fake.rows).toHaveLength(1);
+    expect(notifyNewBlogPostMock).not.toHaveBeenCalled();
+  });
+
+  // The agent writes back the fields it did not send, from what it read. A
+  // manager's save landing in between must not be quietly undone.
+  it("refuses an edit when the post was saved after it was read, writing nothing", async () => {
+    const fake = fakeBlog([LIVE], {
+      afterFirstRead: (rows) => {
+        rows[0].body_md = "The manager's new body.";
+        rows[0].updated_at = "2026-10-24T09:00:00Z";
+      },
+    });
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_blog_post", params: { id: LIVE_ID, title: "Hello" } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("post_changed");
+    expect(fake.rows[0]).toMatchObject({ title: "Welcome", body_md: "The manager's new body." });
+  });
+
+  it("refuses a new post with no body, writing nothing", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_blog_post", params: { title: "Half a post" } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_params");
+    expect(fake.rows).toEqual([]);
+  });
+
+  it("reports a change to a post that is not there as not_found", async () => {
+    currentAdmin = fakeBlog([]).db;
+    const res = await post({ action: "save_blog_post", params: { id: DRAFT_ID, title: "x" } });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+  });
+
+  it("reads a draft by its slug, body included", async () => {
+    currentAdmin = fakeBlog([DRAFT, LIVE]).db;
+    const res = await post({ action: "get_blog_post", params: { slug: DRAFT.slug } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result.post).toMatchObject({
+      id: DRAFT_ID,
+      body_md: "Grading is on Saturday.",
+      cover_image_url: "https://cdn.example.com/blog-media/drafts/cover.jpg",
+      url: null,
+    });
+  });
+
+  it("lists drafts and live posts alike, with the public address only on the live one", async () => {
+    currentAdmin = fakeBlog([DRAFT, LIVE]).db;
+    const res = await post({ action: "list_blog_posts", params: {} });
+    const { result } = await res.json();
+    expect(result.count).toBe(2);
+    expect(result.posts.map((p: { url: string | null }) => p.url)).toEqual([
+      null,
+      "https://utsjitsu.com.au/blog/2026-09-01-welcome",
+    ]);
+    expect(result.posts[0]).not.toHaveProperty("body_md");
+  });
+
+  it("deletes a post and its cover, and reports one that is not there as not_found", async () => {
+    const fake = fakeBlog([DRAFT]);
+    currentAdmin = fake.db;
+    const res = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
+    expect(res.status).toBe(200);
+    expect(fake.rows).toEqual([]);
+    expect(fake.removed).toEqual(["drafts/cover.jpg"]);
+
+    const again = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
+    expect(again.status).toBe(404);
+  });
+
+  // The agent can give two posts the same stored picture. Deleting one must
+  // not take the picture away from the other.
+  it("keeps a cover another post still shows", async () => {
+    const fake = fakeBlog([
+      DRAFT,
+      { ...LIVE, cover_image_path: null, body_md: "![x](https://cdn/blog-media/drafts/cover.jpg)" },
+    ]);
+    currentAdmin = fake.db;
+    const res = await post({ action: "delete_blog_post", params: { id: DRAFT_ID } });
+    expect(res.status).toBe(200);
+    expect(fake.rows.map((r) => r.id)).toEqual([LIVE_ID]);
+    expect(fake.removed).toEqual([]);
+  });
+
+  // A one-pixel PNG: the smallest real image there is.
+  const PNG_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  it("stores a base64 image under the type its bytes say, with markdown to paste", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "upload_blog_image",
+      params: { data: PNG_BASE64, name: "mat", alt: "The mats laid out" },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(fake.uploads).toEqual([
+      { path: expect.stringMatching(/^drafts\/.+-mat\.png$/), type: "image/png", size: 70 },
+    ]);
+    expect(result).toMatchObject({ type: "image/png", path: fake.uploads[0].path });
+    expect(result.markdown).toBe(`![The mats laid out](${result.url})`);
+  });
+
+  it("refuses bytes that are not an image, storing nothing", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "upload_blog_image",
+      params: { data: btoa("<html>not a picture</html>"), name: "photo.png" },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("image_rejected");
+    expect(fake.uploads).toEqual([]);
+  });
+
+  it("downloads an image from a public https address", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const png = Uint8Array.from(atob(PNG_BASE64), (ch) => ch.charCodeAt(0));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(png, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({
+      action: "upload_blog_image",
+      params: { url: "https://images.example.com/photos/belt.png" },
+    });
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fake.uploads[0].path).toMatch(/-belt\.png$/);
+  });
+
+  it("will not fetch an address that is not public https", async () => {
+    const fake = fakeBlog([]);
+    currentAdmin = fake.db;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({
+      action: "upload_blog_image",
+      params: { url: "http://169.254.169.254/latest/meta-data" },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("image_rejected");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fake.uploads).toEqual([]);
   });
 });

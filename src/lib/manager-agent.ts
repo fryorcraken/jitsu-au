@@ -8,9 +8,10 @@
 // Keep AGENT_MANIFEST, managerAgentActions (validation.ts), the route dispatch,
 // and the skill (.claude/skills/uts-manager-agent/) in lockstep. See docs/manager-agent-api.md.
 import { formatCents, isPaperWaiver, sameInstant } from "@/lib/validation";
-import type { EditInvoiceInput } from "@/lib/validation";
+import type { AgentSaveBlogPostInput, BlogPostInput, EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import { versionLabel } from "@/lib/document-versions";
+import { SITE_ORIGIN, canonicalUrl } from "@/lib/seo";
 
 /** The columns `list_kb_articles` projects from. */
 export type AgentKbArticle = {
@@ -216,6 +217,74 @@ export function projectAgentCodeOfConductVersion(
   };
 }
 
+/** The `blog_posts` columns the blog actions project from. */
+export type AgentBlogPost = {
+  id: string;
+  slug: string;
+  title: string;
+  status: string;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * A post as the blog actions report it. Two addresses, because they answer
+ * different questions: `url` is where the public reads it, and is null for a
+ * draft, which has no public address (the public route 404s on one, so a link
+ * to it handed to anybody is a dead link); `edit_url` is the manager's own
+ * screen for it, which works whatever its status and is the link to give a
+ * manager who wants to look before it goes live.
+ */
+export function projectAgentBlogPost(post: AgentBlogPost) {
+  return {
+    id: post.id,
+    slug: post.slug,
+    title: post.title,
+    status: post.status,
+    published_at: post.published_at,
+    created_at: post.created_at,
+    updated_at: post.updated_at,
+    url: post.status === "published" ? canonicalUrl(`/blog/${post.slug}`) : null,
+    edit_url: `${SITE_ORIGIN}/manager/blog/${post.id}`,
+  };
+}
+
+/** The stored post a `save_blog_post` change starts from. */
+export type AgentBlogPostStored = {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  body_md: string;
+  cover_image_path: string | null;
+  status: string;
+};
+
+/**
+ * The whole post a `save_blog_post` change writes: what the agent sent, and
+ * the stored value of everything it left out.
+ *
+ * This is the function the action's safety rests on. The post form always
+ * sends every field, so the shared writer treats an absent `status` as draft
+ * and an absent `cover_image_path` as none. Sent straight through, "fix the
+ * typo in the second paragraph" would unpublish the post and drop its cover.
+ */
+export function mergeAgentBlogPostEdit(
+  stored: AgentBlogPostStored,
+  input: AgentSaveBlogPostInput,
+): BlogPostInput & { id: string } {
+  return {
+    id: stored.id,
+    title: input.title ?? stored.title,
+    slug: input.slug ?? stored.slug,
+    excerpt: input.excerpt ?? stored.excerpt ?? "",
+    body_md: input.body_md ?? stored.body_md,
+    cover_image_path: input.cover_image_path ?? stored.cover_image_path ?? "",
+    status: input.status ?? (stored.status === "published" ? "published" : "draft"),
+  };
+}
+
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
 export type AgentActionSpec = {
   name: string;
@@ -239,7 +308,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "24",
+  version: "25",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -252,6 +321,16 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "25",
+      // Purely additive: five new actions. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "New actions for the blog, the same writes the manager's blog editor makes: list_blog_posts and get_blog_post read posts, drafts included; save_blog_post creates a post or changes one, and publishes it when status is published; delete_blog_post deletes one for good; upload_blog_image stores a picture for a post, from base64 data or a public https url, and returns the path for cover_image_path and the markdown for body_md.",
+        "A new post never takes an address another post already has: save_blog_post refuses with 409 slug_taken and names the post that has it, so a retried create cannot file the post twice or announce it twice. An edit refuses with 409 post_changed when the post was saved by somebody else after the edit read it, rather than writing back what it read over their change.",
+        "Publishing is public and announced. The first time a post goes live, every member who opted in to announcements hears about it in their daily summary email, and taking the post back to draft does not take that back. On a change, save_blog_post keeps every field you leave out, so sending only status publishes a draft as it stands.",
+      ],
+    },
     {
       version: "24",
       // Four new actions and one new field. Nothing that worked before changes,
@@ -1332,6 +1411,118 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "A UUID for this resend. Reuse it to retry the same resend safely; omit it and every call is a new send.",
+        },
+      ],
+    },
+    {
+      name: "list_blog_posts",
+      method: "POST",
+      summary:
+        "List every blog post, drafts included, newest first: id, slug, title, status (draft | published), published_at, and two addresses. url is where the public reads it, and is null for a draft, which has no public address. edit_url is the manager's own screen for the post, which works whatever its status. No bodies: get_blog_post reads one.",
+      params: [],
+    },
+    {
+      name: "get_blog_post",
+      method: "POST",
+      summary:
+        "Read one post, any status, in full: everything list_blog_posts reports plus excerpt, body_md (Markdown), cover_image_path and cover_image_url. Pass id, or the slug from the post's address (/blog/<slug>). 404 not_found when there is no such post.",
+      params: [
+        { name: "id", required: false, description: "The post's id. Send this or slug." },
+        {
+          name: "slug",
+          required: false,
+          description: "The last part of the post's address, /blog/<slug>. Send this or id.",
+        },
+      ],
+    },
+    {
+      name: "save_blog_post",
+      method: "POST",
+      summary:
+        "Create a post (no id) or change one (id). The same save as the manager's blog editor: a blank slug is made from the title and today's date, a blank excerpt is taken from the opening of the body, and published_at is set the first time a post goes live and never moves after that. On a change, every field you leave out keeps its stored value, so publishing a draft is {id, status: \"published\"} and fixing a typo is {id, body_md}. PUBLISHING IS PUBLIC AND ANNOUNCED: the first time a post goes live it is on the public blog at once, and every member who has opted in to announcements hears about it in their daily summary email. Taking it back to draft hides it again but cannot take the announcement back. Saving a post that is already live announces nothing. The result says whether this save announced it (announced), with the post's url and edit_url. 404 not_found for an id with no post. 409 slug_taken when a new post's address (the slug you sent, or the one made from today's date and the title) already belongs to a post, whose id and slug are in error.details: after a create you never heard back from, that is the post you made, so read it rather than creating again; for a genuinely different post, send a slug of your own. 409 post_changed when somebody saved the post after this change was read: nothing was written, so read it again and redo the change.",
+      params: [
+        {
+          name: "id",
+          required: false,
+          description: "The post to change, from list_blog_posts. Omit to create a new post.",
+        },
+        {
+          name: "title",
+          required: false,
+          description: "Up to 200 characters. Required for a new post.",
+        },
+        {
+          name: "body_md",
+          required: false,
+          description:
+            "The whole post as Markdown, up to 50000 characters. Required for a new post. It REPLACES the stored body, so read the post with get_blog_post first and edit what you get back. Images are ordinary Markdown images; put one in with the markdown that upload_blog_image returns. A line of its own reading [[video:<url>]] embeds a video: a YouTube link plays inline, any other link shows as a plain link.",
+        },
+        {
+          name: "status",
+          required: false,
+          description:
+            "draft | published. A new post is a draft unless you say otherwise. Omit on a change to leave it as it is. See the summary for what publishing does.",
+        },
+        {
+          name: "slug",
+          required: false,
+          description:
+            "The post's address, /blog/<slug>: lowercase letters, numbers and single hyphens. Omit on a new post to have one made from the date and title. Changing it on a live post moves the post to a new address and every link already shared to the old one stops working. A slug another post already has gets -2, -3 added rather than failing, so read the slug the result returns.",
+        },
+        {
+          name: "excerpt",
+          required: false,
+          description:
+            "The line under the title on the blog list, and the description search engines show. Up to 500 characters. An empty string takes it from the opening of the body. Omit on a change to keep the stored one, which does not follow a rewritten body by itself: send an empty string with the new body to have it taken afresh.",
+        },
+        {
+          name: "cover_image_path",
+          required: false,
+          description:
+            "The picture at the top of the post and on the blog list: the path that upload_blog_image returned, not its url. An empty string removes it.",
+        },
+      ],
+    },
+    {
+      name: "delete_blog_post",
+      method: "POST",
+      summary:
+        "Delete a post for good, with every comment on it. There is no undo and nothing keeps a copy. To take a post off the public blog and keep it, use save_blog_post with status draft instead. 404 not_found when there is no such post.",
+      params: [{ name: "id", required: true, description: "The post's id, from list_blog_posts." }],
+    },
+    {
+      name: "upload_blog_image",
+      method: "POST",
+      summary:
+        "Store an image for a blog post: PNG, JPEG, WebP or GIF, up to 8 MB. Send the image as base64 data, or a public https url for the server to download (the practical route over MCP, where the bytes would have to be typed out). The format is read from the image itself, so a file that is not one of the four is refused whatever it is called. Returns path (give it to save_blog_post as cover_image_path), url (where it is served from) and markdown (paste it into body_md where the image belongs). Storing an image changes no post: it shows nowhere until a save puts it in one. 422 image_rejected when the image can never be used (not an image, too large, an address that is not public https, or one that answers not found or forbidden); 502 image_fetch_failed when the address could not be read just now (no answer, too slow, busy, or a server error), which may work on a later try.",
+      params: [
+        {
+          name: "data",
+          required: false,
+          description: "The image as raw base64, no data: prefix. Send this or url.",
+        },
+        {
+          name: "url",
+          required: false,
+          description:
+            "A public https address to download it from: one that opens in a browser without signing in. Up to five redirects are followed. Send this or data.",
+        },
+        {
+          name: "alt",
+          required: false,
+          description:
+            "Words describing the image for somebody who cannot see it, used in the returned markdown. Defaults to the file name.",
+        },
+        {
+          name: "name",
+          required: false,
+          description: "A file name to store it under. Defaults to the one in url, else image.",
+        },
+        {
+          name: "post_id",
+          required: false,
+          description:
+            "The post it is for, which only decides the folder it is filed in. Omit for a post not saved yet.",
         },
       ],
     },

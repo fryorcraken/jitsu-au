@@ -603,8 +603,10 @@ publish, because it does not.
 
 ### A post goes live
 
-`createBlogPost` and `updateBlogPost` announce on the transition **into**
-`published`, fanned out to everybody with a `profiles` row. Editing a published
+`createBlogPostRow` and `updateBlogPostRow` announce on the transition **into**
+`published`, fanned out to everybody with a `profiles` row. Those are the writers
+behind both the blog editor and the manager agent API's `save_blog_post`, so a
+post an assistant publishes is announced the same way. Editing a published
 post announces nothing: a typo fix is not news.
 
 An unpublish and republish round trip announces the post exactly once, because
