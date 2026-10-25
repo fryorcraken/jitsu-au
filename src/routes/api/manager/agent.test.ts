@@ -212,6 +212,27 @@ vi.mock("@/lib/notification-events.server", () => ({
   notifyNewBlogPost: (...args: unknown[]) => notifyNewBlogPostMock(...args),
 }));
 
+// The announcement's own behaviour (who is emailed, retries, pending rows) is
+// pinned in plan-announcement.server.test.ts. What the route owns is the
+// sequencing around it: refuse before saving, save, then announce, and say the
+// plan is saved when only the email failed.
+const announceMembershipPlanMock = vi.fn();
+vi.mock("@/lib/plan-announcement.server", () => {
+  class PlanAnnouncementError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+    ) {
+      super(message);
+    }
+  }
+  return {
+    PlanAnnouncementError,
+    announceMembershipPlan: (...args: unknown[]) => announceMembershipPlanMock(...args),
+    loadAnnouncementSummaries: async () => new Map(),
+  };
+});
+
 const MINTED_TOKEN = "utsj_0123456789abcdef0123456789abcdef0123456789abcdef";
 const TOKEN_OWNER = "44444444-4444-4444-4444-444444444444";
 /**
@@ -2101,5 +2122,129 @@ describe("manager agent route: the blog", () => {
     expect((await res.json()).error.code).toBe("image_rejected");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(fake.uploads).toEqual([]);
+  });
+});
+
+describe("save_membership_plan with announce", () => {
+  const PLAN_ID = "55555555-5555-4555-8555-555555555555";
+  const ANNOUNCEMENT_ID = "66666666-6666-4666-8666-666666666666";
+  const PARAMS = {
+    id: PLAN_ID,
+    code: "2027-s1",
+    name: "Semester 1 2027",
+    kind: "period",
+    public_price_cents: 44500,
+    student_price_cents: 24500,
+    duration_days: null,
+    session_credits: null,
+    is_active: true,
+    sort_order: 1,
+    starts_on: "2027-03-01",
+    ends_on: "2027-06-30",
+  };
+
+  /** Records every plan write, so a refusal can be shown to have written nothing. */
+  function fakePlans() {
+    const writes: unknown[] = [];
+    currentAdmin = {
+      from: (table: string) => {
+        if (table !== "membership_plans") throw new Error(`unexpected table ${table}`);
+        return {
+          update: (values: unknown) => {
+            writes.push(values);
+            return { eq: () => Promise.resolve(ok(null)) };
+          },
+        };
+      },
+    };
+    return writes;
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    announceMembershipPlanMock.mockReset();
+  });
+
+  it("saves without emailing anybody when announce is not asked for", async () => {
+    const writes = fakePlans();
+    const res = await post({ action: "save_membership_plan", params: PARAMS });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toMatchObject({ id: PLAN_ID, announcement: null });
+    expect(writes).toHaveLength(1);
+    expect(announceMembershipPlanMock).not.toHaveBeenCalled();
+  });
+
+  // Without an id a retried call would email the whole club twice, so it is
+  // refused before the plan is even saved.
+  it("refuses announce without an announcement_id, before saving anything", async () => {
+    const writes = fakePlans();
+    const res = await post({
+      action: "save_membership_plan",
+      params: { ...PARAMS, announce: true },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("invalid_params");
+    expect(body.error.issues[0].path).toBe("announcement_id");
+    expect(writes).toHaveLength(0);
+    expect(announceMembershipPlanMock).not.toHaveBeenCalled();
+  });
+
+  it("saves, then announces as the token's owner, and reports the send", async () => {
+    fakePlans();
+    announceMembershipPlanMock.mockResolvedValue({
+      plan_id: PLAN_ID,
+      announcement_id: ANNOUNCEMENT_ID,
+      recipients: 84,
+      emailed: 84,
+      pending: 0,
+      announced_at: "2026-11-03T01:00:00.000Z",
+    });
+    const res = await post({
+      action: "save_membership_plan",
+      params: { ...PARAMS, announce: true, announcement_id: ANNOUNCEMENT_ID },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toMatchObject({
+      id: PLAN_ID,
+      announcement: { recipients: 84, pending: 0, announcement_id: ANNOUNCEMENT_ID },
+    });
+    expect(announceMembershipPlanMock.mock.calls[0][1]).toEqual({
+      planId: PLAN_ID,
+      announcementId: ANNOUNCEMENT_ID,
+      actorId: TOKEN_OWNER,
+    });
+  });
+
+  // An update naming an id that matches no plan writes nothing and does not
+  // fail, so the announcement is where it surfaces: as a 404, never as "saved".
+  it("answers an id that matches no plan with 404, not 'the plan was saved'", async () => {
+    fakePlans();
+    const { PlanAnnouncementError } = await import("@/lib/plan-announcement.server");
+    announceMembershipPlanMock.mockRejectedValue(
+      new PlanAnnouncementError("plan_not_found", "That plan does not exist."),
+    );
+    const res = await post({
+      action: "save_membership_plan",
+      params: { ...PARAMS, announce: true, announcement_id: ANNOUNCEMENT_ID },
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("not_found");
+  });
+
+  it("says the plan is saved when only the email failed, so the caller retries the email", async () => {
+    fakePlans();
+    announceMembershipPlanMock.mockRejectedValue(new Error("provider down"));
+    const res = await post({
+      action: "save_membership_plan",
+      params: { ...PARAMS, announce: true, announcement_id: ANNOUNCEMENT_ID },
+    });
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error.code).toBe("announcement_failed");
+    expect(body.error.details).toEqual({ id: PLAN_ID, announcement_id: ANNOUNCEMENT_ID });
+    expect(body.error.message).toMatch(/same announcement_id/);
+    // A plan this call created has to be retried by id, or it is created again.
+    expect(body.error.message).toMatch(/error\.details\.id/);
   });
 });

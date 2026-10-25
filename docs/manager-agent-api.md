@@ -300,6 +300,23 @@ locked | already_verified` (the record has moved on, checked again at the send);
   (retry with the same `client_submission_id`). Without a
   `client_submission_id` every call is a fresh send. What a resend does and why:
   `docs/emails.md`, "Resending".
+- **Announcing a plan** (`"26"`): `save_membership_plan` takes `announce: true`
+  with an `announcement_id` (a UUID the caller mints) to email every member
+  about the plan once it is saved: the screen's "Email all members about this
+  plan" box. It saves through `saveMembershipPlanRow`, then announces through
+  `announceMembershipPlan` (`src/lib/plan-announcement.server.ts`), the same
+  two calls the screen makes, and returns `announcement` (`recipients`,
+  `emailed`, `pending`, `announced_at`). The id is **required**, because it is
+  what makes a retry safe: the same id finishes the same announcement and
+  emails nobody twice, while a new id announces the plan again on purpose.
+  Refusals: `400 invalid_params` for `announce` without an id (before anything
+  is saved), `409 submission_conflict` for an id already used on another plan,
+  and `502 announcement_failed` when the plan saved but the email did not (the
+  plan's id is in `error.details`, so the caller retries with that id rather
+  than creating the plan again), and `404 not_found` for an `id` that matches
+  no plan. `list_membership_plans` reports each plan's `last_announcement`.
+  There is no eligibility rule: any plan can be announced, as on the screen.
+  Product rules: `docs/notifications.md`, "A plan is announced".
 - `delete_invoice` — delete an invoice outright, for tidying up one that should
   never have existed. Dispatches to `deleteMembershipRow`, which the manager
   screens' Delete button also calls, so both refuse for the same reasons in the
@@ -584,7 +601,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"25"`.
+test so the bump is a deliberate edit, and the current value is `"26"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

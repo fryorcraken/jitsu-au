@@ -18,7 +18,7 @@ description: >-
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
   version of it (or roll back to an earlier one), edit and publish the club's
   code of conduct (and choose whether members must agree to it again), add or edit a membership
-  window's start/end dates, or edit a
+  window's start/end dates (and email every member about a plan), or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them, or write, edit, publish or delete a
   blog post at /blog/<slug> and upload its pictures. Requires the
@@ -495,7 +495,9 @@ scripts/agent.sh list_membership_plans '{}'
 Returns every plan (including inactive/retired ones), each with `id`, `code`,
 `name`, `description`, `kind`, `public_price_cents`, `student_price_cents`,
 `duration_days`, `session_credits`, `is_active`, `sort_order`, `starts_on`,
-`ends_on`.
+`ends_on`, and `last_announcement`: the plan's most recent email to members
+(`announcement_id`, `announced_at`, `recipients`, `emailed`, `times`), or null
+if it was never announced.
 
 ```bash
 scripts/agent.sh save_membership_plan '{
@@ -510,6 +512,49 @@ Pass `id` to update an existing plan in place; omit it to create a new one.
 `starts_on`/`ends_on` and `duration_days` are mutually exclusive — sending both
 is refused. Setting up a new training period is a new plan with its own price
 and dates, not a second date range on an existing one.
+
+#### Emailing every member about a plan (`announce`)
+
+The manager screen's "Email all members about this plan" box, as two params on
+the same call:
+
+```bash
+scripts/agent.sh save_membership_plan '{
+  "id": "<plan id>", "code": "semester_1_2027", "name": "Semester 1 2027",
+  "kind": "period", "public_price_cents": 46000, "student_price_cents": 25500,
+  "duration_days": null, "session_credits": null, "is_active": true, "sort_order": 2,
+  "starts_on": "2027-02-01", "ends_on": "2027-06-26",
+  "announce": true, "announcement_id": "<a UUID you mint, e.g. from uuidgen>"
+}'
+```
+
+It saves the plan, then emails everyone whose waiver has been approved: one
+email per family, to the parent, naming the children. The email has the plan's
+dates, both prices, a line on yearly insurance for whoever needs it, and a link
+to buy it. It goes immediately and **nobody can turn it off**.
+
+> [!CAUTION]
+> **This is irreversible and reaches the whole club.** Confirm with the manager
+> first, in words, before sending `announce: true`: which plan, and that every
+> member will be emailed. `last_announcement` on `list_membership_plans` says
+> whether and when it already went, so check it before announcing again.
+
+- **`announcement_id` is required with `announce: true`**, and it is what makes
+  a retry safe. Mint one UUID per announcement and **reuse it** to retry a
+  failed or timed-out call: the same id never emails anybody twice. A new id
+  announces the plan again, on purpose (after a price change, say). Missing it
+  is `400 invalid_params`, before anything is saved.
+- The response carries `announcement`: `recipients` (emails it is), `emailed`,
+  `pending`, `announced_at`. **`pending` above zero** means some emails have not
+  gone yet (one call sends at most 150): call again with the same id to send the
+  rest, or leave them for the next morning's summary, which picks them up.
+- **`502 announcement_failed`** means the plan IS saved and the email did not
+  go. `error.details.id` is the plan. Retry with **that `id`** and the same
+  `announcement_id`: without the id, a plan you just created would be created
+  again (and refused, since its code is taken).
+- **`404 not_found`** means the `id` you sent matches no plan. Nothing was saved.
+- **`409 submission_conflict`** means that id was already used for a different
+  plan. Mint a new one.
 
 > [!TIP]
 > Add next year's plan before enrolments open for it, and check

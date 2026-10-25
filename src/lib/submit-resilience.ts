@@ -48,6 +48,14 @@ export type SubmitOutcome<T> =
 export const WAIVER_SUBMIT = { attempts: 5, timeoutMs: 45_000, slowAfterMs: 8_000 } as const;
 export const INTAKE_SUBMIT = { attempts: 3, timeoutMs: 20_000, slowAfterMs: 8_000 } as const;
 
+/**
+ * A manager announcing a plan to every member (`use-plan-announcement.tsx`).
+ * One request sends up to 150 emails, ten at a time, so it is allowed far
+ * longer than a form submit. A timeout is still safe: the retry carries the
+ * same id, and the server sends only what is left.
+ */
+export const ANNOUNCE_SUBMIT = { attempts: 3, timeoutMs: 90_000, slowAfterMs: 10_000 } as const;
+
 /** Backoff between attempts, in order. Index 0 is the wait after attempt 1. */
 export const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 20_000] as const;
 

@@ -308,7 +308,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "25",
+  version: "26",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -321,6 +321,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "26",
+      // A new optional param and two new response fields. Nothing that worked
+      // before changes: without `announce`, save_membership_plan does exactly
+      // what it did, with `announcement: null` added to its response.
+      breaking: false,
+      notes: [
+        "save_membership_plan takes `announce: true` plus an `announcement_id` (a UUID you mint) to email every member about the plan once it is saved, the same as the manager screen's \"Email all members about this plan\" box. It is sent straight away, one email per family, and nobody can switch it off. The response gains `announcement`: { announcement_id, recipients, emailed, pending, announced_at }, null when not announcing. Reuse the same announcement_id to retry or to finish a send that left `pending` above zero: nobody is emailed twice. A new id announces the plan again, on purpose. `announce: true` without an id is 400 `invalid_params` before anything is saved; an id already used for another plan is 409 `submission_conflict`; a saved plan whose email failed is 502 `announcement_failed` with the plan's id in `error.details` (retry with that id, so a plan you just created is not created again); an `id` that matches no plan is 404 `not_found`.",
+        "list_membership_plans adds `last_announcement` to each plan: its most recent announcement ({ announcement_id, announced_at, recipients, emailed, times }), or null if it was never announced.",
+      ],
+    },
     {
       version: "25",
       // Purely additive: five new actions. Nothing that worked before changes.
@@ -1051,7 +1062,7 @@ export const AGENT_MANIFEST: {
       name: "save_membership_plan",
       method: "POST",
       summary:
-        "Create or update a membership plan. Pass id to update an existing plan in place; omit it to create a new one. A plan may set starts_on/ends_on (a fixed date range) OR duration_days (a rolling window from payment) but never both — sending both is refused. Setting up a new training period is a new plan with its own price and dates, not a second date range on an existing one. NOTE: if the latest dated plan ends within 30 days and nothing is defined after it, the manager dashboard notifies managers — set the next one before then.",
+        "Create or update a membership plan, and optionally email every member about it. Pass id to update an existing plan in place; omit it to create a new one. A plan may set starts_on/ends_on (a fixed date range) OR duration_days (a rolling window from payment) but never both — sending both is refused. Setting up a new training period is a new plan with its own price and dates, not a second date range on an existing one. NOTE: if the latest dated plan ends within 30 days and nothing is defined after it, the manager dashboard notifies managers — set the next one before then.",
       params: [
         {
           name: "id",
@@ -1113,6 +1124,18 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "YYYY-MM-DD, the LAST day of training (inclusive) — must be on or after starts_on. A membership bought for this plan covers this whole day.",
+        },
+        {
+          name: "announce",
+          required: false,
+          description:
+            "true to email every member about this plan once it is saved: everyone with an approved waiver, one email per family (to the parent, naming the children), with the plan's dates, price and a link to buy it. Sent immediately, and nobody can turn it off. IRREVERSIBLE and outward-facing: confirm with the manager first, saying how many people it reaches. Requires announcement_id.",
+        },
+        {
+          name: "announcement_id",
+          required: false,
+          description:
+            "A UUID you mint for this announcement, required with announce: true. Reuse it to retry or to finish sending (response announcement.pending > 0); the same id never emails anyone twice. A new id announces the plan again.",
         },
       ],
     },

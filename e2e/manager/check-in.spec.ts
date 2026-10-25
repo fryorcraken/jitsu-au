@@ -79,6 +79,9 @@ test("a membership blocked from deletion by a check-in can be freed by moving it
     .from("membership_plans")
     .select("id")
     .eq("kind", "period")
+    // The CURRENT semester: the seed also carries next semester's plan, which
+    // has not started, so it would cover no class today.
+    .order("starts_on", { ascending: true })
     .limit(1)
     .single();
   if (!periodPlan) throw new Error("no seeded period plan to arrange Membership A on");
@@ -263,6 +266,9 @@ test("a manager raises a membership after the trial, checks the person in, and p
     .from("membership_plans")
     .select("id, code, name")
     .eq("kind", "period")
+    // The CURRENT semester: the seed also carries next semester's plan, which
+    // has not started, so it would cover no class today.
+    .order("starts_on", { ascending: true })
     .limit(1)
     .single();
   if (!periodPlan) throw new Error("no seeded period plan");

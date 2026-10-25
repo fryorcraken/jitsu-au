@@ -27,7 +27,9 @@ read state, and nothing can dismiss it. An **activity item** is something that
 happened, stored as a row in `notifications`, unread until somebody looks at it.
 They share one badge, and nothing else. The **email switches**
 (`notification_preferences`) govern the inbox only: every activity item is
-written whether or not the person wants it emailed.
+written whether or not the person wants it emailed. One kind has no switch at
+all, a membership plan a manager announced, because it is about the person's
+own membership rather than news about the club (see "A plan is announced").
 
 ## Rules
 
@@ -54,10 +56,11 @@ written whether or not the person wants it emailed.
    reply to a comment a manager has hidden notifies nobody: its author is being
    moderated, and telling them their hidden comment got a reply would undo that
    quietly.
-8. **A reply is instant; everything else is a daily summary.** You said
-   something and somebody answered, which is worth an interruption. Thread
-   activity, announcements and moderation alerts batch, so a busy thread cannot
-   produce ten emails in an afternoon.
+8. **A reply is instant, and so is a plan a manager announces; everything else
+   is a daily summary.** You said something and somebody answered, which is
+   worth an interruption, and a manager who presses "Save and email" means
+   now. Thread activity, blog announcements and moderation alerts batch, so a
+   busy thread cannot produce ten emails in an afternoon.
 9. **Announcements are off until somebody opts in.** They are the only kind that
    would reach a person who did nothing to ask for it. Everything else is on by
    default. A NULL column means "never chose", which is why the preference
@@ -615,6 +618,78 @@ also why `blog_posts` needs no `announced_at` column: `published_at` is
 deliberately never cleared (`resolvePublishedAt` in `src/lib/blog.functions.ts`)
 so it could not have carried "has this been announced".
 
+### A plan is announced
+
+On `/manager/membership-plans`, every plan card and the "Add a plan" form have
+an **"Email all members about this plan"** tick box beside Save. The manager
+agent API does the same through `save_membership_plan` with `announce: true`
+(`docs/manager-agent-api.md`). Both go through `announceMembershipPlan` in
+`src/lib/plan-announcement.server.ts`; the rules are in
+`src/lib/plan-announcement.ts`.
+
+- **Who.** Everybody whose account is active, which means a manager has
+  approved one of their waivers, resolved to the inbox the club writes to and
+  de-duplicated. Leads (interest form only) have no person record and are never
+  reached. Applicants (waiver still pending) are left out, because their login
+  is locked and the email links to a signed-in page. That rule is ONE function,
+  `announcementAudience`, so when "left the club" exists it is a one-line change
+  there.
+- **One family, one email.** A household is one row and one email, on the
+  parent, naming the children it is for. A parent who does not train still gets
+  it for their active children. So the count a manager sees is the number of
+  emails.
+- **What it says.** The plan's name, its dates (or how it runs), its price with
+  both rates where there is a student price, a line on yearly insurance naming
+  whoever in that inbox has no current cover (only when the club has an active
+  insurance plan, picked the way checkout picks it, and the plan is not the
+  trial or the insurance itself), and a link to the plan on `/membership`. Template: `email-templates/membership-plan-open.tsx`.
+- **No switch.** `membership_plan_open` is the one kind in
+  `UNSWITCHABLE_NOTIFICATION_KINDS`: it is a membership email, like an invoice,
+  so `notification_preferences` is never even read for it, and it does not ride
+  the `new_blog_post` switch, which is off by default. The email says so at the
+  bottom. That list is closed and pinned by a test, so another kind can only
+  lose its switch by somebody editing that test on purpose.
+- **Immediately, then the digest.** The rows are written first (cheap, and the
+  unique index makes them idempotent), then emailed straight away by
+  `sendPendingNotifications`: ten at a time, at most 150 per request,
+  `emailed_at` stamped only on a successful send. The deploy target is
+  Cloudflare, where unawaited work may never run, so the request waits for the
+  sends. Anything left (a failed send, the part past 150, a missing API key) is
+  still pending, so the screen says how many went and offers "Send the rest
+  now", and otherwise the next morning's digest sends them under a
+  "Membership" heading. A stalled one shows up as the stalled-digest attention
+  item like any other pending row. A row for somebody who has left the audience
+  since it was written is stamped rather than sent, so the digest does not mail
+  them either. The email's link opens the plan's own card on `/membership`; the
+  page scrolls to it once the plans have loaded. It is a query parameter
+  rather than a `#fragment` so it survives a signed-out member going through
+  sign-in first.
+- **A club of 500.** About 250 to 400 inboxes once families fold. The first
+  request sends 150 and reports the rest pending; the manager presses "Send the
+  rest now" once or twice (or an agent repeats the call with the same id), or
+  the morning digest finishes it. Nobody is emailed twice either way.
+- **Announcing again.** Allowed, on purpose: the manager may want to re-send
+  after a price change. Each announcement is its own subject: its
+  `subject_id` is the id the screen (or agent) minted, and the plan is named by
+  the row's `href`, `/membership?plan=<id>`, which is also the link the email
+  opens. A retried save or a double click reuses the same id, so the unique
+  index absorbs it and nobody gets a second copy; a fresh tick is a fresh id.
+- **Nothing edited, nothing saved.** Ticking the box on a plan nobody has
+  changed asks "Email 84 people about Semester 1 2027?" and sends without
+  saving, so announcing can never write a stale copy of the plan back.
+- **Save first, then send.** The screen saves the plan, then announces, as two
+  calls it reports separately. A failed send says the plan is saved and the
+  email did not go, with a retry that announces again without saving again, so
+  a new plan is never created twice.
+- **The confirm.** Before anything is saved, the app's own dialog asks with the
+  real number: "Save and email 84 people about Semester 1 2027? This can't be
+  undone."
+- **Afterwards** the card says "Announced on 3 Nov to 84 people" (or "Last
+  announced..." once it has gone more than once), read back from the rows by
+  `announcementSummaries`.
+- **No eligibility rule.** Any plan can be announced, on sale or not, the trial
+  included. The club owner chose that over guarding it.
+
 ### Turning email off
 
 The switches are on `/notifications` for somebody signed in, and at
@@ -764,3 +839,6 @@ Two consequences worth knowing:
 | The key's typed RPC wrapper                      | `notificationDigestKey` in `src/lib/supabase-rpc.ts`                          |
 | The stalled-digest item                          | `digestStalledNotifications` in `src/lib/validation.ts`                       |
 | Email templates                                  | `src/lib/email-templates/comment-reply.tsx`, `notification-digest.tsx`        |
+| Announcing a plan (rules, then I/O)              | `src/lib/plan-announcement.ts`, `plan-announcement.server.ts`                 |
+| The plan email                                   | `src/lib/email-templates/membership-plan-open.tsx`                            |
+| The tick box, confirm and retry                  | `src/hooks/use-plan-announcement.tsx`                                         |

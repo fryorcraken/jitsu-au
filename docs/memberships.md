@@ -73,6 +73,20 @@ than this year's without touching anyone who already bought this year's.
 Managers add, price and date plans on `/manager/membership-plans`; "Duplicate"
 on an existing plan starts a new one pre-filled, with the dates cleared.
 
+**Opening a new semester** is therefore: Duplicate last semester's plan, set
+its code, dates and price, tick **"Email all members about this plan"** beside
+the Save button, and press Save. The app asks first, with the number of emails
+it is about to send ("Save and email 84 people about Semester 1 2027? This
+can't be undone."), saves the plan, then emails every member with an approved
+waiver straight away: one email per family, with the dates, both prices, a line
+on insurance for whoever needs it, and a link to buy the plan on `/membership`.
+The card then reads "Announced on 3 Nov to 84 people". Nobody can switch this
+email off, and a plan can be announced again with a fresh tick (after a price
+change, say). If the plan saves but the email fails, the card says so and the
+retry sends the email without saving the plan again. The full rules, including
+who counts as a member for this, are in `docs/notifications.md`, "A plan is
+announced".
+
 **The public pricing page (`/pricing`) is hand-written copy, not driven by
 this catalogue.** It used to read the live plan list, but that breaks once
 more than one dated plan can be on sale at once (this training period and the
@@ -685,14 +699,14 @@ things to somebody about to transfer money.
 
 ## Manager screens & the manager agent API
 
-| Manager UI                        | Manager agent actions                            | What it does                                   |
-| --------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
-| `/manager/membership-plans`       | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan. |
-| `/manager/memberships`            | `list_invoices` / `edit_invoice`                 | See and correct invoices.                      |
-| both membership screens           | `edit_invoice` (`status`) / `delete_invoice`     | Cancel from any state; delete a junk invoice.  |
-| `/manager/users/<id>`             | `create_membership`                              | Raise a membership for a person.               |
-| both membership screens           | `edit_invoice` (`starts_on`)                     | Correct the day yearly cover began.            |
-| `/manager/users/<id>` (check-ins) | none                                             | Move a check-in to another membership.         |
+| Manager UI                        | Manager agent actions                            | What it does                                                                              |
+| --------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `/manager/membership-plans`       | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan; email every member about one (`announce`). |
+| `/manager/memberships`            | `list_invoices` / `edit_invoice`                 | See and correct invoices.                                                                 |
+| both membership screens           | `edit_invoice` (`status`) / `delete_invoice`     | Cancel from any state; delete a junk invoice.                                             |
+| `/manager/users/<id>`             | `create_membership`                              | Raise a membership for a person.                                                          |
+| both membership screens           | `edit_invoice` (`starts_on`)                     | Correct the day yearly cover began.                                                       |
+| `/manager/users/<id>` (check-ins) | none                                             | Move a check-in to another membership.                                                    |
 
 Moving a check-in is the one row with no agent equivalent: the API has no
 check-in actions at all, and adding the first one is a wider decision than this
