@@ -13,6 +13,7 @@ import {
   deleteInvoiceSchema,
   markInvoicePaidSchema,
   editInvoiceSchema,
+  getAgentUserSchema,
   agentGetWaiverTemplateSchema,
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
@@ -45,6 +46,7 @@ import {
   diffInvoicePatch,
   invoiceEditAudit,
   projectAgentKbArticle,
+  projectAgentUser,
   projectAgentWaiverTemplate,
   projectInvoice,
   reconciledEditBlockers,
@@ -70,6 +72,8 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { ClubUserNotFoundError, loadClubUser } from "@/lib/club-user.functions";
+import { codeOfConductSummary } from "@/lib/code-of-conduct";
 import {
   deleteKbSection,
   listKbSections,
@@ -446,6 +450,14 @@ async function handleListUsers(params: unknown) {
     // rebuilt the household from what came back would then confidently report a
     // parent as having none.
     dependants: u.user_id ? (dependantsByGuardian.get(u.user_id) ?? []) : [],
+    // The cheap headline fields the person page leads with. Anything more about
+    // one person (their profile, waivers, attendance) is `get_user`, which is
+    // that page's own read: this listing covers everybody at once, and is no
+    // place for 200 people's medical notes and addresses.
+    phone: u.phone,
+    // Null means not verified. For a dependant this is the state of the
+    // guardian's address, because `email` is the guardian's address.
+    email_confirmed_at: u.email_confirmed_at,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,
@@ -456,7 +468,88 @@ async function handleListUsers(params: unknown) {
 
   if (status) users = users.filter((u) => u.lifecycle_status === status);
   const capped = users.slice(0, limit ?? 200);
-  return { count: capped.length, total: users.length, users: capped };
+
+  // The code-of-conduct acceptances of the people being returned, read after
+  // the page is cut, so each row's summary is the person page's own rule
+  // (`codeOfConductSummary`). Scoped to these ids, and PAGED: PostgREST caps a
+  // response (1000 rows by default) without an error, and signing again is
+  // unlimited, so a capped read could drop somebody's only agreement and report
+  // them as unsigned. Ordered by id so the pages cannot overlap or skip.
+  const ids = capped.map((u) => u.user_id).filter((id): id is string => Boolean(id));
+  const acceptances: {
+    user_id: string;
+    version: number;
+    accepted_at: string;
+    signature_name: string;
+  }[] = [];
+  const ACCEPTANCES_PAGE = 1000;
+  for (let from = 0; ids.length; from += ACCEPTANCES_PAGE) {
+    const { data, error: cocErr } = await db
+      .from("code_of_conduct_acceptances")
+      .select("user_id, version, accepted_at, signature_name")
+      .in("user_id", ids)
+      .order("id", { ascending: true })
+      .range(from, from + ACCEPTANCES_PAGE - 1);
+    // Not degraded to "unsigned" the way the person page degrades it: that page
+    // has a manager reading it and a server log behind it, and an agent has
+    // neither. `unsigned` for a person who signed is a confident wrong answer.
+    if (cocErr) throw new AgentError(500, "db_error", cocErr.message);
+    acceptances.push(...(data ?? []));
+    if (!data || data.length < ACCEPTANCES_PAGE) break;
+  }
+  // Newest first, which is the order `codeOfConductSummary` reads them in.
+  acceptances.sort((a, b) => Date.parse(b.accepted_at) - Date.parse(a.accepted_at));
+  const acceptancesByUser = new Map<
+    string,
+    { version: number; accepted_at: string; signature_name: string }[]
+  >();
+  for (const a of acceptances) {
+    const list = acceptancesByUser.get(a.user_id) ?? [];
+    list.push(a);
+    acceptancesByUser.set(a.user_id, list);
+  }
+
+  return {
+    count: capped.length,
+    total: users.length,
+    users: capped.map((u) => ({
+      ...u,
+      // A lead has no person record and cannot sign, so it reads as unsigned,
+      // which is true.
+      code_of_conduct: codeOfConductSummary(u.user_id ? acceptancesByUser.get(u.user_id) : null),
+    })),
+  };
+}
+
+// ---- action: get_user ----
+/**
+ * One person, as the manager person page shows them: that page's own read
+ * (`loadClubUser`), projected by `projectAgentUser`. No query of its own, on
+ * purpose. The page and this action used to be built separately and drifted.
+ */
+async function handleGetUser(params: unknown) {
+  const { user_id } = getAgentUserSchema.parse(params ?? {});
+  const db = await adminClient();
+  let read: Awaited<ReturnType<typeof loadClubUser>>;
+  try {
+    read = await loadClubUser(db, user_id);
+  } catch (e) {
+    if (e instanceof ClubUserNotFoundError) {
+      throw new AgentError(
+        404,
+        "not_found",
+        "No person has that user_id. A lead (registered interest only) has no person record: list_users reports one with user_id null.",
+      );
+    }
+    // Every other throw from the read is a failed query.
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+  // The page degrades these two to "no email" and "not signed yet" so a manager
+  // can still approve somebody. An agent would act on the guess instead.
+  if (read.degraded.length) {
+    throw new AgentError(500, "db_error", `get_user could not read: ${read.degraded.join(", ")}`);
+  }
+  return projectAgentUser(read);
 }
 
 // ---- action: list_invoices ----
@@ -1470,6 +1563,8 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
   switch (action) {
     case "list_users":
       return handleListUsers(params);
+    case "get_user":
+      return handleGetUser(params);
     case "list_invoices":
       return handleListInvoices(params);
     case "create_membership":

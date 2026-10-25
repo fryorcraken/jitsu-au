@@ -431,6 +431,16 @@ Core tables:
   manager-only RLS. The API's action contract and its four sync points:
   `docs/manager-agent-api.md`.
 
+> [!IMPORTANT]
+> **A manager screen and the manager agent API report the same thing.** A
+> manager **read** shown on a manager screen is reported by the API from the
+> **same function** (pull it out of the `createServerFn` handler into a plain
+> function taking the client, as `loadClubUser` is for the person page and
+> `get_user`), never from a second query set in `manager-agent-actions.ts`. A
+> manager **write** is either exposed on the API or listed in
+> `docs/manager-agent-api.md` as deliberately screen-only, with the reason. The knowledge base was the first
+> place this held; the person page drifted for want of it.
+
 Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
 is via short-lived signed URLs, and `storage.objects` carries explicit
 owner/manager policies (`20260727120000_waiver_storage_policies.sql`).

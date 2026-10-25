@@ -2796,6 +2796,7 @@ export const matchTransactionToItemInvoiceSchema = z
 /** Actions the manager agent endpoint accepts. Order mirrors AGENT_MANIFEST. */
 export const managerAgentActions = [
   "list_users",
+  "get_user",
   "list_invoices",
   "create_membership",
   "edit_invoice",
@@ -2940,6 +2941,14 @@ export const listAgentUsersSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
 });
 export type ListAgentUsersInput = z.infer<typeof listAgentUsersSchema>;
+
+/**
+ * `get_user` params: one person, by the id `list_users` reports. `.strict()` so
+ * a caller that sends `id` (the invoice actions' name for a key) is told so,
+ * rather than having it stripped and being refused for a missing `user_id`.
+ */
+export const getAgentUserSchema = z.object({ user_id: z.string().uuid() }).strict();
+export type GetAgentUserInput = z.infer<typeof getAgentUserSchema>;
 
 /** `list_invoices` params — optional membership-status filter + result cap. */
 export const listAgentInvoicesSchema = z.object({
