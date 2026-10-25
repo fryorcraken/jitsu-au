@@ -344,6 +344,20 @@ in the Lovable UI that no pull request ever shows
 (`20261023120000_profile_archive.sql`). Why archiving is not erasure:
 `docs/erasing-personal-data.md`.
 
+**No client can write this table, and no rule says otherwise.** `profiles` has
+two read policies (a person reads their own row, a manager reads all) and no
+write policy at all. Every write, including a member editing their own details
+on `/account`, goes through a service-role server function that checks who is
+asking and which fields they may send (`updateMyProfile`). There used to be two
+UPDATE policies as well, "Users can update their own profile" and "Managers can
+update profiles", from the table's first migration. Nothing used them, and they
+would have come alive the moment anybody granted a client role `UPDATE`,
+letting a member rewrite every column of their own row, the household link
+included, past every server check (the trap described under "Client grants"
+above). `20261025000000_profiles_drop_unreachable_update_policies.sql` dropped
+them, and `supabase-lint.yml` fails any pull request whose migrations add a
+client write policy back.
+
 **Households.** `guardian_user_id` is the ONLY thing that marks a dependant, and
 it is a real person record in this table — unlike `guardian_name` /
 `guardian_email` below, which are contact details promoted from a waiver and

@@ -138,3 +138,26 @@ jobs:
             -o "$RUNNER_TEMP/grants.csv"
           python3 supabase/lint/check-client-grants.py "$RUNNER_TEMP/grants.csv" \
             | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # profiles holds every person's household link, date of birth, medical
+      # notes and archive mark, and every write to it goes through a
+      # service-role server function. A client write POLICY there is a trap
+      # rather than a feature: it does nothing until somebody grants a client
+      # role a write privilege (by hand in the Lovable UI, say, which no pull
+      # request shows), and then it lets a member rewrite their own row past
+      # every check the server applies. The grants step above catches the
+      # grant only when it arrives in a migration, so this pins the policy
+      # side too. 20261025000000 dropped the last two; see docs/database.md.
+      - name: Nothing lets a client write profiles
+        if: ${{ !cancelled() }}
+        run: |
+          policies=$(psql "$DB_URL" -v ON_ERROR_STOP=1 --tuples-only --no-align \
+            -c "SELECT string_agg(format('%s (%s)', policyname, cmd), ', ') \
+                  FROM pg_policies \
+                 WHERE schemaname = 'public' AND tablename = 'profiles' \
+                   AND cmd IN ('INSERT', 'UPDATE', 'DELETE', 'ALL')")
+          if [ -n "$policies" ]; then
+            echo "::error::profiles has client write policies: $policies. Writes to profiles go through service-role server functions only; drop the policy (docs/database.md, profiles)."
+            exit 1
+          fi
+          echo "profiles has no client write policy."
