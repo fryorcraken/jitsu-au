@@ -58,8 +58,9 @@ one: `GRANT UPDATE (col) ON t TO authenticated` writes `pg_attribute.attacl` and
 leaves `pg_class.relacl` empty, so a table this check reported as fully closed
 could hand a member the one column that matters. `profiles.archived_at` is the
 case that made it worth closing: a member able to write it could restore
-themselves, or archive somebody else, through an owner-update RLS policy that
-exists today but is unreachable only because no grant reaches it.
+themselves. (profiles has had no client write policy since 20261025000000, so
+a column grant there would open nothing on its own today, but the next table
+with an owner-update policy is exactly as exposed as profiles was.)
 
 Read `pg_class.relacl` and `pg_attribute.attacl`, NOT
 `information_schema.role_table_grants`, for two

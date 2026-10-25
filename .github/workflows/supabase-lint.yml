@@ -1,6 +1,6 @@
 name: Supabase lint
 
-# Applies every migration to a throwaway local Postgres, then checks it three
+# Applies every migration to a throwaway local Postgres, then checks it four
 # ways:
 #   1. `supabase db lint` (plpgsql_check) — PL/pgSQL function errors.
 #   2. The Security/Performance Advisors (Splinter) — the same checks as the
@@ -8,6 +8,11 @@ name: Supabase lint
 #      supabase/lint/ for the vendored query and the gating policy.
 #   3. Client grants — what `anon` and `authenticated` end up holding once every
 #      migration has run, against supabase/lint/client-grants-expected.txt.
+#   4. Client write policies on `profiles` — there must be none
+#      (supabase/lint/profiles-write-policies.sql). A write grant on that table
+#      is caught by (3), but only when it arrives in a migration; a grant made
+#      by hand in the Lovable UI would bring any write policy back to life, so
+#      the policies themselves are pinned too.
 #
 # (3) is the same checker that is run BY HAND against the live database, asking
 # a different question here: not "does production match the expected set" but
@@ -139,25 +144,16 @@ jobs:
           python3 supabase/lint/check-client-grants.py "$RUNNER_TEMP/grants.csv" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # profiles holds every person's household link, date of birth, medical
-      # notes and archive mark, and every write to it goes through a
-      # service-role server function. A client write POLICY there is a trap
-      # rather than a feature: it does nothing until somebody grants a client
-      # role a write privilege (by hand in the Lovable UI, say, which no pull
-      # request shows), and then it lets a member rewrite their own row past
-      # every check the server applies. The grants step above catches the
-      # grant only when it arrives in a migration, so this pins the policy
-      # side too. 20261025000000 dropped the last two; see docs/database.md.
+      # (4) in the header. The query and its reasoning live in the file, so the
+      # by-hand live run in supabase/lint/README.md uses the same one.
       - name: Nothing lets a client write profiles
         if: ${{ !cancelled() }}
         run: |
-          policies=$(psql "$DB_URL" -v ON_ERROR_STOP=1 --tuples-only --no-align \
-            -c "SELECT string_agg(format('%s (%s)', policyname, cmd), ', ') \
-                  FROM pg_policies \
-                 WHERE schemaname = 'public' AND tablename = 'profiles' \
-                   AND cmd IN ('INSERT', 'UPDATE', 'DELETE', 'ALL')")
+          policies=$(psql "$DB_URL" -v ON_ERROR_STOP=1 --csv --tuples-only --quiet \
+            -f supabase/lint/profiles-write-policies.sql)
           if [ -n "$policies" ]; then
-            echo "::error::profiles has client write policies: $policies. Writes to profiles go through service-role server functions only; drop the policy (docs/database.md, profiles)."
+            echo "::error::profiles has client write policies, which let a member rewrite their own row past the server's checks once any write grant appears: $policies"
+            echo "Drop them; writes to profiles go through service-role server functions only (docs/database.md, profiles)."
             exit 1
           fi
           echo "profiles has no client write policy."

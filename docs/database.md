@@ -355,8 +355,11 @@ would have come alive the moment anybody granted a client role `UPDATE`,
 letting a member rewrite every column of their own row, the household link
 included, past every server check (the trap described under "Client grants"
 above). `20261025000000_profiles_drop_unreachable_update_policies.sql` dropped
-them, and `supabase-lint.yml` fails any pull request whose migrations add a
-client write policy back.
+them, and `supabase/lint/profiles-write-policies.sql` must return no rows: CI
+runs it on every `supabase/**` pull request, and `supabase/lint/README.md` has
+it run by hand against the live database. A write grant on its own now opens no
+write; a `SELECT` grant would still expose rows through the two read policies,
+which is why `profiles` stays in the grants check too.
 
 **Households.** `guardian_user_id` is the ONLY thing that marks a dependant, and
 it is a real person record in this table — unlike `guardian_name` /
@@ -476,8 +479,9 @@ which is what "who are this person's dependants" reads.
   The trigger only fires on INSERT, so auth users predating it had no row at
   all until `20260802093000` backfilled them.
 
-**RLS:** owner reads/updates own row (`auth.uid() = user_id`); managers
-read/update all; no public insert path.
+**RLS:** owner reads own row (`auth.uid() = user_id`); managers read all. No
+write policy of any kind for a client role: every insert and update is a
+service-role server function (see "No client can write this table" above).
 
 ### Service-role auth lookups
 

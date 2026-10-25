@@ -21,9 +21,12 @@
 -- already happened here twice, with calendar RSVPs and feed tokens.
 --
 -- With both gone, profiles has no write policy for any client role, so RLS
--- refuses every client write even if a grant appears: a grant alone no longer
--- opens anything. The archive columns keep their own trigger
--- (20261023120000) on top of this.
+-- refuses every client INSERT, UPDATE and DELETE even if a write grant
+-- appears. That is about writes only: a SELECT grant would still expose rows
+-- through the two read policies kept below, and TRUNCATE is not governed by
+-- RLS at all, so the grants check (supabase/lint/client-grants.sql) still
+-- matters here. The archive columns keep their own trigger (20261023120000)
+-- on top of this.
 --
 -- Nothing changes for anybody: no code path uses these policies. The two
 -- SELECT policies stay; reading your own record is not a hazard, and they are
@@ -34,3 +37,25 @@
 
 DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Managers can update profiles" ON public.profiles;
+
+-- Fail loudly rather than record a no-op as applied: DROP POLICY IF EXISTS is
+-- silent when a policy goes by another name, and Lovable has re-emitted SQL
+-- under its own names before. The same test as
+-- supabase/lint/profiles-write-policies.sql.
+DO $$
+DECLARE
+  remaining text;
+BEGIN
+  SELECT string_agg(format('%s (%s)', policyname, cmd), ', ')
+    INTO remaining
+    FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename = 'profiles'
+     AND cmd IN ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+     AND permissive = 'PERMISSIVE'
+     AND roles && ARRAY['anon', 'authenticated', 'public']::name[];
+  IF remaining IS NOT NULL THEN
+    RAISE EXCEPTION 'profiles still has client write policies: %', remaining;
+  END IF;
+END
+$$;
