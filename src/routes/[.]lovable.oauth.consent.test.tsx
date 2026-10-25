@@ -10,6 +10,8 @@ const getAuthorizationDetails = vi.fn();
 const approveAuthorization = vi.fn();
 const denyAuthorization = vi.fn();
 const rpc = vi.fn();
+const getSession = vi.fn();
+const signOut = vi.fn();
 const invalidate = vi.fn();
 
 vi.mock("@tanstack/react-router", () => ({
@@ -26,7 +28,8 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     auth: {
-      getSession: vi.fn(),
+      getSession: (...a: unknown[]) => getSession(...a),
+      signOut: (...a: unknown[]) => signOut(...a),
       oauth: {
         getAuthorizationDetails: (...a: unknown[]) => getAuthorizationDetails(...a),
         approveAuthorization: (...a: unknown[]) => approveAuthorization(...a),
@@ -70,6 +73,9 @@ function renderWith(data: Loaded) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getSession.mockResolvedValue({
+    data: { session: { user: { id: "u1", email: "manager@example.com" } } },
+  });
 });
 
 describe("consent loader", () => {
@@ -80,13 +86,31 @@ describe("consent loader", () => {
     expect(getAuthorizationDetails).not.toHaveBeenCalled();
   });
 
-  it("sends an already-approved assistant straight back", async () => {
+  it("sends an already-approved assistant straight back to a manager", async () => {
     getAuthorizationDetails.mockResolvedValue({
       data: { redirect_url: "https://claude.ai/cb?code=x" },
       error: null,
     });
+    rpc.mockResolvedValue({ data: true, error: null });
     await expect(route.loader({ deps: { authorizationId: "auth-1" } })).rejects.toEqual({
       redirect: { href: "https://claude.ai/cb?code=x" },
+    });
+  });
+
+  // The shortcut used to run before the role check, so somebody who approved
+  // an assistant as a member, or as a manager since demoted, was handed
+  // straight back with a fresh code.
+  it("never passes a non-manager back to an assistant they approved earlier", async () => {
+    getAuthorizationDetails.mockResolvedValue({
+      data: { redirect_url: "https://claude.ai/cb?code=x" },
+      error: null,
+    });
+    rpc.mockResolvedValue({ data: false, error: null });
+    await expect(route.loader({ deps: { authorizationId: "auth-1" } })).resolves.toEqual({
+      state: "not-manager",
+      clientName: "An assistant",
+      email: "manager@example.com",
+      canCancel: false,
     });
   });
 
@@ -107,6 +131,8 @@ describe("consent loader", () => {
     rpc.mockResolvedValue({ data: false, error: null });
     await expect(route.loader({ deps: { authorizationId: "auth-1" } })).resolves.toMatchObject({
       state: "not-manager",
+      clientName: "Claude",
+      canCancel: true,
     });
   });
 
@@ -129,14 +155,53 @@ describe("consent screen", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
 
-  it("offers a non-manager only the way to cancel", async () => {
+  it("refuses to approve when it cannot say where access goes", () => {
+    renderWith({
+      state: "ready",
+      clientName: "Claude Code",
+      email: "manager@example.com",
+      target: { kind: "unknown" },
+    });
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+  });
+
+  it("offers a non-manager no Approve, only cancelling or switching login", async () => {
     denyAuthorization.mockResolvedValue({ data: { redirect_url: "" }, error: null });
-    renderWith({ state: "not-manager", clientName: "Claude", email: "member@example.com" });
+    renderWith({
+      state: "not-manager",
+      clientName: "Claude",
+      email: "member@example.com",
+      canCancel: true,
+    });
+    expect(screen.getByRole("button", { name: "Use a different login" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Cancel the request" }));
     expect(denyAuthorization).toHaveBeenCalledWith("auth-1", { skipBrowserRedirect: true });
     // No redirect came back, so the failure stays on screen.
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+  });
+
+  it("has nothing to cancel on a request that was already approved", () => {
+    renderWith({
+      state: "not-manager",
+      clientName: "An assistant",
+      email: "member@example.com",
+      canCancel: false,
+    });
+    expect(screen.queryByRole("button", { name: "Cancel the request" })).not.toBeInTheDocument();
+  });
+
+  it("signs out before sending somebody to sign in with another login", async () => {
+    signOut.mockResolvedValue({ error: null });
+    renderWith({
+      state: "not-manager",
+      clientName: "Claude",
+      email: "member@example.com",
+      canCancel: true,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Use a different login" }));
+    expect(signOut).toHaveBeenCalled();
   });
 
   it("offers a retry when the request could not be opened", async () => {

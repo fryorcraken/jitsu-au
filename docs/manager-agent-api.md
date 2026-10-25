@@ -71,16 +71,26 @@ the same code, not a second implementation.
     URL scheme; `src/lib/oauth-consent.ts`). Assistants register themselves, so
     the client _name_ can be anything; the redirect address is the one thing a
     lookalike cannot borrow.
-  - It **never offers Approve to a non-manager.** The tools would refuse them,
-    but the sign-in would still have been handed over. They get "Cancel the
-    request", which denies it so the assistant hears back.
+  - It **never offers Approve to a non-manager**, and never passes one back
+    to an assistant they approved earlier (the role check runs before the
+    "already approved" shortcut). They get "Use a different login" and, where
+    there is still a request to deny, "Cancel the request". This is a guard in
+    the page, **not a server rule**: the OAuth server would still approve a
+    member who called it directly. What holds regardless is the tools
+    refusing them. Closing that fully needs a Supabase Auth hook and so a
+    database change; it has not been made.
+  - It **won't approve a destination it can't name** (an unparseable redirect
+    address, or a `javascript:` / `data:` / `file:` one): Approve is disabled.
 - **Disconnecting:** `/manager/api-tokens` lists the manager's own connected
   assistants (`supabase.auth.oauth.listGrants`) with a Remove button
   (`revokeGrant`). That deletes the assistant's sessions and refresh tokens, so
   it cannot sign back in without asking again; an access token it already holds
   stays valid until it expires (the project's JWT lifetime, normally an hour),
   because both the SDK and PostgREST verify it locally. Losing the manager role
-  cuts the tools off at once regardless, since every call re-checks it.
+  cuts the tools off at once regardless, since every call re-checks it. It
+  does **not** remove the assistant's grant, and the list lives on a
+  manager-only page, so a demoted manager's assistant keeps a member-level
+  sign-in until somebody revokes it (a known gap, not handled yet).
 - **Three tools:** `club_manifest` (returns `AGENT_MANIFEST`), `club_read`
   (only `list_*` / `get_*` actions, marked read-only so an assistant may run it
   without asking) and `club_change` (everything else, marked destructive). The
@@ -91,8 +101,8 @@ the same code, not a second implementation.
   `.lovable/mcp/manifest.json`), commit it, and republish; the published site
   keeps serving the old tool list until then. Lovable's commit pipeline does
   this for its own commits but not for anyone else's, so
-  `src/lib/mcp/actions.test.ts` fails when the committed manifest and the
-  action split disagree.
+  `src/lib/mcp/actions.test.ts` fails when the committed manifest disagrees
+  with the action split or with a tool's title, description or annotations.
 
 ## Actions
 

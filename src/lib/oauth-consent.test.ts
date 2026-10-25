@@ -30,6 +30,8 @@ describe("describeRedirectTarget", () => {
       "http://127.0.0.1:33418/",
       "http://[::1]:8080/cb",
       "http://app.localhost/cb",
+      "http://localhost.:8080/cb",
+      "http://[::ffff:127.0.0.1]:3000/cb",
     ]) {
       expect(describeRedirectTarget(uri)).toEqual({ kind: "this-computer" });
     }

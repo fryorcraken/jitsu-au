@@ -11,7 +11,10 @@
 //   names it (src/lib/oauth-consent.ts).
 // - A member being talked into it. The tools refuse non-managers anyway, but
 //   the sign-in would still be handed over, so a non-manager is never offered
-//   Approve at all.
+//   Approve, and is never passed back to an assistant they approved earlier.
+//   This is a guard in the page, not a server rule: the OAuth server itself
+//   would still approve a member who called it directly. The tools refusing
+//   them is what holds regardless.
 import { createFileRoute, Link, redirect, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -49,20 +52,36 @@ export const Route = createFileRoute("/.lovable/oauth/consent")({
   loaderDeps: ({ search }) => ({ authorizationId: search.authorization_id }),
   loader: async ({ deps }) => {
     if (!deps.authorizationId) return { state: "missing" as const };
+    const { data: sessionData } = await supabase.auth.getSession();
+    const user = sessionData.session?.user;
+    if (!user) return { state: "missing" as const };
     const { data, error } = await supabase.auth.oauth.getAuthorizationDetails(deps.authorizationId);
     if (error) throw error;
     if (!data) return { state: "missing" as const };
-    // Already approved before: go straight back to the assistant.
-    if (!("authorization_id" in data)) throw redirect({ href: data.redirect_url });
-    const clientName = data.client.name || "An assistant";
+    // The role check runs BEFORE the already-approved shortcut below. An
+    // assistant this person approved earlier (as a member before this page
+    // refused them, or as a manager who has since lost the role) comes back as
+    // a ready-made redirect carrying a fresh code, and following it would hand
+    // their sign-in over without them ever seeing this page.
     const { data: isManager, error: roleError } = await supabase.rpc("has_role", {
-      _user_id: data.user.id,
+      _user_id: user.id,
       _role: "manager",
     });
     if (roleError) throw roleError;
+    const pending = "authorization_id" in data;
     if (!isManager) {
-      return { state: "not-manager" as const, clientName, email: data.user.email };
+      return {
+        state: "not-manager" as const,
+        clientName: (pending && data.client.name) || "An assistant",
+        email: user.email ?? "",
+        // An already-approved request has nothing left to deny: not following
+        // its redirect is what keeps the code from the assistant.
+        canCancel: pending,
+      };
     }
+    // Already approved before: go straight back to the assistant.
+    if (!pending) throw redirect({ href: data.redirect_url });
+    const clientName = data.client.name || "An assistant";
     return {
       state: "ready" as const,
       clientName,
@@ -143,14 +162,18 @@ function TargetLine({ target }: { target: RedirectTarget }) {
         </>
       );
     case "unknown":
-      return <>We can't tell where access will be sent.</>;
+      return (
+        <strong className="text-destructive">
+          We can't tell where access would be sent, so this can't be approved.
+        </strong>
+      );
   }
 }
 
 function Consent() {
   const details = Route.useLoaderData();
   const { authorization_id } = Route.useSearch();
-  const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
+  const [busy, setBusy] = useState<"approve" | "deny" | "switch" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (details.state === "missing") {
@@ -184,6 +207,15 @@ function Consent() {
     window.location.href = data.redirect_url;
   }
 
+  // Signs out and comes straight back here, so the sign-in page picks up the
+  // same request for the other login while it is still live.
+  async function switchAccount() {
+    setBusy("switch");
+    const here = `${window.location.pathname}${window.location.search}`;
+    await supabase.auth.signOut();
+    window.location.href = `/auth?redirect=${encodeURIComponent(here)}`;
+  }
+
   const failure = error && (
     <p role="alert" className="text-sm text-destructive">
       {error}
@@ -198,13 +230,20 @@ function Consent() {
           signed in as <strong>{details.email}</strong>, which isn't a manager account.
         </p>
         <p className="text-sm text-muted-foreground">
-          If you manage the club with a different login, sign out, then start connecting again from
-          your assistant and sign in with that one.
+          If you manage the club with a different login, switch to it here and you'll come back to
+          this request.
         </p>
         {failure}
-        <Button variant="outline" disabled={busy !== null} onClick={() => decide(false)}>
-          {busy === "deny" ? "Cancelling..." : "Cancel the request"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={busy !== null} onClick={switchAccount}>
+            {busy === "switch" ? "Signing out..." : "Use a different login"}
+          </Button>
+          {details.canCancel && (
+            <Button variant="outline" disabled={busy !== null} onClick={() => decide(false)}>
+              {busy === "deny" ? "Cancelling..." : "Cancel the request"}
+            </Button>
+          )}
+        </div>
       </ConsentShell>
     );
   }
@@ -230,7 +269,10 @@ function Consent() {
       </p>
       {failure}
       <div className="flex flex-wrap gap-2">
-        <Button disabled={busy !== null} onClick={() => decide(true)}>
+        <Button
+          disabled={busy !== null || details.target.kind === "unknown"}
+          onClick={() => decide(true)}
+        >
           {busy === "approve" ? "Connecting..." : "Approve"}
         </Button>
         <Button variant="outline" disabled={busy !== null} onClick={() => decide(false)}>

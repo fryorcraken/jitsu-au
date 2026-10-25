@@ -87,39 +87,50 @@ function ApiTokensPage() {
       .finally(() => setLoading(false));
   }, [fetchTokens]);
 
-  const loadGrants = useCallback(() => {
+  // Resolves to the fresh list, or null when it could not be read, so a failed
+  // removal can check what actually happened before saying anything.
+  const loadGrants = useCallback(async (): Promise<OAuthGrant[] | null> => {
     setGrantsLoading(true);
-    supabase.auth.oauth
-      .listGrants()
-      .then(({ data, error }) => {
-        if (error) throw error;
-        setGrants(data ?? []);
-        setGrantsError(null);
-      })
-      .catch((e) => setGrantsError(describeLoadError(e, "Could not load connected assistants")))
-      .finally(() => setGrantsLoading(false));
+    try {
+      const { data, error } = await supabase.auth.oauth.listGrants();
+      if (error) throw error;
+      const fresh = data ?? [];
+      setGrants(fresh);
+      setGrantsError(null);
+      // The list is the truth now; an earlier failed removal may since have
+      // gone through, so its message no longer describes anything.
+      setRemoveError(null);
+      return fresh;
+    } catch (e) {
+      setGrantsError(describeLoadError(e, "Could not load connected assistants"));
+      return null;
+    } finally {
+      setGrantsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     if (!isManager) return;
     load();
-    loadGrants();
+    void loadGrants();
   }, [isManager, load, loadGrants]);
 
   // No confirm: reconnecting is one sign-in away, so this just happens.
   async function onRemoveGrant(grant: OAuthGrant) {
+    const name = grant.client.name || "The assistant";
     setRemoving(grant.client.id);
     setRemoveError(null);
     const { error } = await supabase.auth.oauth.revokeGrant({ clientId: grant.client.id });
+    // Re-read either way. After an error that also settles what happened: if
+    // the row is gone (removed from another tab, say) it worked.
+    const fresh = await loadGrants();
     setRemoving(null);
-    if (error) {
-      setRemoveError(
-        `${grant.client.name || "That assistant"} is still connected: we could not reach the club's sign-in. Try again.`,
-      );
+    if (error && !(fresh && !fresh.some((g) => g.client.id === grant.client.id))) {
+      const why = describeLoadError(error, "The club's sign-in did not answer").replace(/\.$/, "");
+      setRemoveError(`${name} may still be connected. ${why}. Check the list and try again.`);
       return;
     }
-    toast.success(`${grant.client.name || "Assistant"} removed`);
-    loadGrants();
+    toast.success(`${name} removed`);
   }
 
   async function onCreate() {
@@ -327,7 +338,7 @@ function ApiTokensPage() {
                 what="Connected assistants"
                 message={grantsError}
                 hint="This is not the same as having none, so an assistant you approved earlier may well still be connected."
-                onRetry={loadGrants}
+                onRetry={() => void loadGrants()}
               />
             ) : grants.length === 0 ? (
               <p className="text-sm text-muted-foreground">No assistants connected.</p>

@@ -17,16 +17,21 @@ export type RedirectTarget =
   | { kind: "website"; host: string }
   /** A custom scheme an installed app registers (`cursor:`, `vscode:`). */
   | { kind: "app"; scheme: string }
-  /** Something we could not parse. The page says so rather than guessing. */
+  /** Something we could not parse, or a scheme no real app uses. Approve is disabled. */
   | { kind: "unknown" };
 
 const LOOPBACK_HOSTS = new Set(["localhost", "[::1]"]);
 
-function isLoopback(hostname: string): boolean {
+function isLoopback(rawHostname: string): boolean {
+  // A trailing dot names the same host ("localhost." is localhost).
+  const hostname = rawHostname.replace(/\.$/, "");
   return (
     LOOPBACK_HOSTS.has(hostname) ||
     hostname.endsWith(".localhost") ||
-    /^127(\.\d{1,3}){3}$/.test(hostname)
+    /^127(\.\d{1,3}){3}$/.test(hostname) ||
+    // 127.x.x.x written as an IPv4-mapped IPv6 address, which the URL parser
+    // normalises to hex: [::ffff:127.0.0.1] becomes [::ffff:7f00:1].
+    /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(hostname)
   );
 }
 

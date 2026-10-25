@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { managerAgentActions } from "@/lib/validation";
 import { CHANGE_ACTIONS, READ_ACTIONS, isReadAction } from "./actions";
+import manifestTool from "./tools/manifest";
+import readTool from "./tools/read";
+import changeTool from "./tools/change";
 
 describe("MCP action split", () => {
   it("covers every manager agent action exactly once", () => {
@@ -36,14 +39,19 @@ describe("MCP action split", () => {
 // tool list, and it is only rewritten by Lovable's own commit pipeline. An
 // action added from anywhere else would leave the published `club_read` /
 // `club_change` enums without it, so an assistant could never call it, while
-// every other check stayed green.
+// every other check stayed green. The same goes for a reworded tool, whose old
+// description would keep steering assistants. What this does not compare is
+// the params' JSON Schema, beyond the action lists.
 describe("published MCP manifest", () => {
   type ManifestTool = {
     name: string;
+    title?: string;
+    description?: string;
+    annotations?: Record<string, unknown>;
     inputSchema: { properties?: { action?: { enum?: string[] } } };
   };
   const manifest = JSON.parse(
-    readFileSync(join(process.cwd(), ".lovable/mcp/manifest.json"), "utf8"),
+    readFileSync(join(import.meta.dirname, "../../../.lovable/mcp/manifest.json"), "utf8"),
   ) as { mcp: { tools: ManifestTool[] } };
   const actionsOf = (name: string) =>
     manifest.mcp.tools.find((t) => t.name === name)?.inputSchema.properties?.action?.enum;
@@ -55,6 +63,24 @@ describe("published MCP manifest", () => {
       "club_manifest",
       "club_read",
     ]);
+  });
+
+  it("publishes each tool as the code defines it", () => {
+    for (const tool of [manifestTool, readTool, changeTool]) {
+      const published = manifest.mcp.tools.find((t) => t.name === tool.name);
+      expect(
+        {
+          title: published?.title,
+          description: published?.description,
+          annotations: published?.annotations,
+        },
+        `${tool.name} in the manifest ${stale}`,
+      ).toEqual({
+        title: tool.title,
+        description: tool.description,
+        annotations: tool.annotations,
+      });
+    }
   });
 
   it("publishes exactly the actions the code splits into each tool", () => {
