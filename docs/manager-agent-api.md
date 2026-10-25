@@ -60,6 +60,27 @@ the same code, not a second implementation.
   service-role code, and the acting user is always the token's subject. The
   "minted token is the only credential `/api/manager/agent` accepts" rule above
   still holds: that endpoint is unchanged.
+- **What approving hands over is a full sign-in, not just the tools.** The
+  access token is an ordinary Supabase session token for the manager, so it
+  also works against the database directly, with everything that manager's RLS
+  allows. A minted token reaches only the whitelisted actions. The consent page
+  and `/manager/api-tokens` both say so, and two guards on the consent page
+  follow from it:
+  - It names **where the approval is sent** (the client's registered
+    `redirect_uri`: a host, "this computer" for a loopback address, or an app's
+    URL scheme; `src/lib/oauth-consent.ts`). Assistants register themselves, so
+    the client _name_ can be anything; the redirect address is the one thing a
+    lookalike cannot borrow.
+  - It **never offers Approve to a non-manager.** The tools would refuse them,
+    but the sign-in would still have been handed over. They get "Cancel the
+    request", which denies it so the assistant hears back.
+- **Disconnecting:** `/manager/api-tokens` lists the manager's own connected
+  assistants (`supabase.auth.oauth.listGrants`) with a Remove button
+  (`revokeGrant`). That deletes the assistant's sessions and refresh tokens, so
+  it cannot sign back in without asking again; an access token it already holds
+  stays valid until it expires (the project's JWT lifetime, normally an hour),
+  because both the SDK and PostgREST verify it locally. Losing the manager role
+  cuts the tools off at once regardless, since every call re-checks it.
 - **Three tools:** `club_manifest` (returns `AGENT_MANIFEST`), `club_read`
   (only `list_*` / `get_*` actions, marked read-only so an assistant may run it
   without asking) and `club_change` (everything else, marked destructive). The
