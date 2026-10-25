@@ -1478,6 +1478,12 @@ source of the sidebar order, the index page and the previous/next links, so it
 is the path a new member reads through. Seeded as 10/20/30 so a section can be
 slotted between two others without renumbering.
 
+**RLS:** enabled, with **no policies**, and no grant to `anon` or
+`authenticated`. Every read and write goes through server code on the service
+role (`listKnowledgeBase`, `kb-admin.ts`), so the table is default-deny for
+every client role. It once carried a signed-in SELECT policy that the missing
+grant made unreachable; it was dropped in October 2026.
+
 ### `kb_articles` — an article's identity, and where it sits
 
 `id` PK, `slug` (**unique**, CHECK'd to lowercase kebab-case so it never needs

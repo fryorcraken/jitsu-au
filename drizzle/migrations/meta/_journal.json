@@ -8,6 +8,13 @@
       "when": 1791724038326,
       "tag": "0000_kb_sections_signed_in_predicate",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792901696392,
+      "tag": "0001_kb_sections_drop_unreachable_policy",
+      "breakpoints": true
     }
   ]
 }
