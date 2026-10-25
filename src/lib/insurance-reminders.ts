@@ -82,7 +82,11 @@ function alreadyRenewed(m: InsuranceCover, theirs: readonly InsuranceCover[]): b
   return theirs.some(
     (o) =>
       o.id !== m.id &&
-      (o.status === "active" || o.status === "pending") &&
+      // Active only, as the spec says. `pending` is a leftover status nothing
+      // writes any more, and an invoice parked there is a promise rather than
+      // cover (`resolveInsuranceCover` reads it the same way), so it must not
+      // be able to silence the reminders about the cover somebody really has.
+      o.status === "active" &&
       o.ends_at != null &&
       new Date(o.ends_at).getTime() > end,
   );
@@ -172,8 +176,11 @@ function endPhrase(
  * the reader themselves, and a nameless child must never read as the parent.
  */
 export function reminderNameFor(name: string | null | undefined): string {
-  return (name ?? "").trim() || "Your family member";
+  return (name ?? "").trim() || FAMILY_MEMBER;
 }
+
+/** The fallback name, capitalised for the start of a sentence. */
+const FAMILY_MEMBER = "Your family member";
 
 /**
  * The title frozen onto a notification row. Dated rather than "today", because
@@ -206,7 +213,11 @@ export type ReminderPerson = { userId: string; name: string | null };
 
 /** "you", "Bea", "you and Bea", "Bea, Cy and Di". The reader always comes first. */
 function whoList(people: readonly ReminderPerson[]): string {
-  const names = people.map((p) => subjectVoice(p.name).who);
+  // Mid-sentence, so the fallback loses its capital: "for you and your family
+  // member", never "for you and Your family member".
+  const names = people.map((p) =>
+    p.name === FAMILY_MEMBER ? "your family member" : subjectVoice(p.name).who,
+  );
   if (names.length <= 1) return names[0] ?? "you";
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }

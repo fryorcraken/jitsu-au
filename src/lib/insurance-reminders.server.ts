@@ -258,15 +258,23 @@ export async function sendInsuranceReminders(
   // answers "I already renewed" reaches a person (send-email.server.ts).
   const replyTo = await clubReplyTo(db);
 
-  for (const g of [...groups.values()].slice(0, SEND_BATCH)) {
+  // Most urgent first: the earliest end day leads, so when a backlog is bigger
+  // than one run's batch, an "ended" reminder (owed for only 3 days) goes out
+  // before an "ending soon" one that still has days to spare.
+  const ordered = [...groups.values()].sort((a, b) => a.endDay.localeCompare(b.endDay));
+  let attempted = 0;
+  for (const g of ordered) {
+    if (attempted >= SEND_BATCH) break;
     try {
       const to = contacts.deliveryEmail(g.contactId);
       if (!to) {
         // Left pending: every person has an address, so a null is a failed
-        // lookup, and the next run tries again.
+        // lookup, and the next run tries again. It does not take a place in
+        // the batch, or one family's broken lookup could crowd out the rest.
         console.error("[insurance] no address resolved for a recipient; leaving rows pending");
         continue;
       }
+      attempted += 1;
       const copy = insuranceReminderCopy({
         kind: g.kind,
         endDay: g.endDay,

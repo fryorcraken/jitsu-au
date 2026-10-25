@@ -283,6 +283,62 @@ describe("sendInsuranceReminders", () => {
   });
 });
 
+describe("sendInsuranceReminders, with more owed than one run sends", () => {
+  beforeEach(() => {
+    sendLovableEmail.mockClear();
+    sendLovableEmail.mockImplementation(async () => ({}));
+    process.env.LOVABLE_API_KEY = "test-key";
+  });
+
+  it("sends the most urgent first, and a lookup that fails takes no place in the batch", async () => {
+    const { sendInsuranceReminders } = await import("./insurance-reminders.server");
+    // 25 people on their own accounts, each ending on a different day inside
+    // the 14-day window, plus one ended today whose address will not resolve.
+    const people = Array.from({ length: 25 }, (_, i) => `p${String(i).padStart(2, "0")}`);
+    const day = (i: number) => `2027-03-${String(3 + Math.floor(i / 2)).padStart(2, "0")}`;
+    const tables = {
+      membership_plans: [{ id: "plan-ins", kind: "insurance", code: "cover-2027" }],
+      profiles: [
+        ...people.map((id) => ({ user_id: id, guardian_user_id: null, first_name: id })),
+        { user_id: "lost", guardian_user_id: null, first_name: "Lost" },
+      ] as Row[],
+      // Listed latest-first and with the unreachable one at the front, so a
+      // batch taken in arrival order would get both wrong.
+      memberships: [
+        // Ended on 2 March, today: the most urgent of all, and unreachable.
+        {
+          id: "m-lost",
+          user_id: "lost",
+          plan_id: "plan-ins",
+          status: "active",
+          ends_at: ends("2027-03-02"),
+        },
+        ...people
+          .map((id, i) => ({
+            id: `m-${id}`,
+            user_id: id,
+            plan_id: "plan-ins",
+            status: "active",
+            ends_at: ends(day(i)),
+          }))
+          .reverse(),
+      ] as Row[],
+      notifications: [] as Row[],
+    };
+    const emails = Object.fromEntries(people.map((id) => [id, `${id}@example.com`]));
+
+    const run = await sendInsuranceReminders(fakeDb(tables, emails), NOW);
+
+    // A full batch of 20 still went out, the unreachable family aside.
+    expect(run.sent).toBe(20);
+    const to = sendLovableEmail.mock.calls.map(([p]) => p.to);
+    // The earliest end days first: the 20 sent are the first 20 people.
+    expect(to.sort()).toEqual(people.slice(0, 20).map((id) => `${id}@example.com`));
+    // The unreachable one and the five beyond the batch stay owed.
+    expect(tables.notifications.filter((r) => r.emailed_at === null)).toHaveLength(6);
+  });
+});
+
 describe("loadInsuranceReminderStates", () => {
   it("reports the latest reminder sent and whether one is owed, for insurance rows only", async () => {
     const { sendInsuranceReminders, loadInsuranceReminderStates } =

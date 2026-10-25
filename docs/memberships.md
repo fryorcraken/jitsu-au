@@ -382,7 +382,7 @@ their own rather than in the morning summary. See `docs/notifications.md`.
 2. Withdraw pending rows nobody is owed any more (they renewed, a manager
    cancelled, the window passed). Deleted rather than stamped, so `emailed_at`
    on one of these rows only ever means the email went out.
-3. Send what is pending, at most 20 emails a run, stamping `emailed_at` only on
+3. Send what is pending, at most 20 emails a run and the earliest end day first, stamping `emailed_at` only on
    a successful send. A failure stays pending and goes on the next run, and
    rows that sit unsent are what the stalled-email attention item watches.
 

@@ -129,6 +129,11 @@ describe("insuranceRemindersDue: who is left out", () => {
     expect(kindAt(cover(), now, [cancelled, sooner, strangers])).toBe("insurance_ending_soon");
   });
 
+  it("does not count a 'pending' invoice as a renewal: it is a promise, not cover", () => {
+    const pending = cover({ id: "m2", status: "pending", ends_at: endsOn("2028-03-12") });
+    expect(kindAt(cover(), now, [pending])).toBe("insurance_ending_soon");
+  });
+
   it("skips a row with no person or no end date", () => {
     expect(kindAt(cover({ user_id: null }), now)).toBeNull();
     expect(kindAt(cover({ ends_at: null }), now)).toBeNull();
@@ -203,6 +208,18 @@ describe("insuranceReminderCopy", () => {
     });
     expect(copy.subject).toBe("Your family member's club insurance ends on 12 March");
     expect(copy.renewHref).toBe("/membership?for=bea");
+  });
+
+  it("keeps the fallback name lower case mid-sentence", () => {
+    const copy = insuranceReminderCopy({
+      ...base,
+      kind: "insurance_ending_soon",
+      people: [
+        { userId: "ada", name: null },
+        { userId: "bea", name: reminderNameFor("") },
+      ],
+    });
+    expect(copy.subject).toBe("Club insurance for you and your family member ends on 12 March");
   });
 
   it("names everybody in one email when several end the same day, the reader first", () => {

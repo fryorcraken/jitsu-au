@@ -4,6 +4,7 @@
 // answers "who is this person": their profile, their memberships, and every
 // waiver they ever submitted with the full frozen submission so a manager can
 // read what was signed without leaving the page.
+import type { InsuranceReminderState } from "@/lib/insurance-reminders";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -332,7 +333,14 @@ export const getClubUser = createServerFn({ method: "POST" })
     // "14-day reminder sent 26 Feb" on a yearly insurance row: the same
     // projection the memberships list and the agent API report.
     const { loadInsuranceReminderStates } = await import("@/lib/insurance-reminders.server");
-    const insuranceReminders = await loadInsuranceReminderStates(admin, membershipRows);
+    // Degrades to no reminder lines rather than failing the person's page, the
+    // same call `listMemberships` makes.
+    const insuranceReminders = await loadInsuranceReminderStates(admin, membershipRows).catch(
+      (e) => {
+        console.error("[getClubUser] could not read insurance reminder state:", e);
+        return new Map<string, InsuranceReminderState>();
+      },
+    );
 
     return {
       // Only the derived headline fields, not the whole aggregate. Its
