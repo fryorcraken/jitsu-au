@@ -372,7 +372,10 @@ export async function sendAccountActivatedEmail({
     });
     return { sent: true, skipped: false };
   } catch (e) {
-    console.error(`[waiver-email] failed to email activated member ${memberEmail}:`, e);
+    console.error(
+      `[waiver-email] failed to email the activation notice for waiver ${waiverId}:`,
+      e,
+    );
     return { sent: false, skipped: false };
   }
 }
