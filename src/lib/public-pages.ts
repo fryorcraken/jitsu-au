@@ -65,4 +65,8 @@ export const PUBLIC_NOINDEX_PATHS = [
   "/thank-you",
   "/app",
   "/email-settings",
+  // Where an assistant sends a manager to approve its MCP connection. Opened
+  // without a request it says there is nothing to approve, which is the screen
+  // a stranger who finds the URL actually sees.
+  "/.lovable/oauth/consent",
 ];

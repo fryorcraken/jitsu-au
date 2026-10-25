@@ -60,13 +60,49 @@ the same code, not a second implementation.
   service-role code, and the acting user is always the token's subject. The
   "minted token is the only credential `/api/manager/agent` accepts" rule above
   still holds: that endpoint is unchanged.
+- **What approving hands over is a full sign-in, not just the tools.** The
+  access token is an ordinary Supabase session token for the manager, so it
+  also works against the database directly, with everything that manager's RLS
+  allows. A minted token reaches only the whitelisted actions. The consent page
+  and `/manager/api-tokens` both say so, and two guards on the consent page
+  follow from it:
+  - It names **where the approval is sent** (the client's registered
+    `redirect_uri`: a host, "this computer" for a loopback address, or an app's
+    URL scheme; `src/lib/oauth-consent.ts`). Assistants register themselves, so
+    the client _name_ can be anything; the redirect address is the one thing a
+    lookalike cannot borrow.
+  - It **never offers Approve to a non-manager**, and never passes one back
+    to an assistant they approved earlier (the role check runs before the
+    "already approved" shortcut). They get "Use a different login" and, where
+    there is still a request to deny, "Cancel the request". This is a guard in
+    the page, **not a server rule**: the OAuth server would still approve a
+    member who called it directly. What holds regardless is the tools
+    refusing them. Closing that fully needs a Supabase Auth hook and so a
+    database change; it has not been made.
+  - It **won't approve a destination it can't name** (an unparseable redirect
+    address, or a `javascript:` / `data:` / `file:` one): Approve is disabled.
+- **Disconnecting:** `/manager/api-tokens` lists the manager's own connected
+  assistants (`supabase.auth.oauth.listGrants`) with a Remove button
+  (`revokeGrant`). That deletes the assistant's sessions and refresh tokens, so
+  it cannot sign back in without asking again; an access token it already holds
+  stays valid until it expires (the project's JWT lifetime, normally an hour),
+  because both the SDK and PostgREST verify it locally. Losing the manager role
+  cuts the tools off at once regardless, since every call re-checks it. It
+  does **not** remove the assistant's grant, and the list lives on a
+  manager-only page, so a demoted manager's assistant keeps a member-level
+  sign-in until somebody revokes it (a known gap, not handled yet).
 - **Three tools:** `club_manifest` (returns `AGENT_MANIFEST`), `club_read`
   (only `list_*` / `get_*` actions, marked read-only so an assistant may run it
   without asking) and `club_change` (everything else, marked destructive). The
   split is `src/lib/mcp/actions.ts`; a new action lands on the change side
   unless its name says it reads.
-- **After changing a tool,** regenerate the MCP manifest and republish; the
-  published site keeps serving the old tool list until then.
+- **After changing a tool or adding an action,** regenerate the MCP manifest
+  (`bunx lovable-mcp-extract-manifest`, which rewrites
+  `.lovable/mcp/manifest.json`), commit it, and republish; the published site
+  keeps serving the old tool list until then. Lovable's commit pipeline does
+  this for its own commits but not for anyone else's, so
+  `src/lib/mcp/actions.test.ts` fails when the committed manifest disagrees
+  with the action split or with a tool's title, description or annotations.
 
 ## Actions
 

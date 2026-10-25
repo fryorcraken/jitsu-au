@@ -1097,7 +1097,10 @@ button labels, empty states and error text just as much as to marketing pages.
    land the preparatory refactor before it (see "Make the change easy, then make
    the easy change"). Reuse the existing seam rather than adding a second one.
 3. Don't hand-edit generated files: `routeTree.gen.ts`, the Supabase
-   `integrations/supabase/*` clients/types, or `components/ui/*` primitives.
+   `integrations/supabase/*` clients/types, `components/ui/*` primitives, or
+   the MCP server's generated routes and manifest (`src/routes/mcp.ts`,
+   `src/routes/[.well-known]/oauth-protected-resource.ts`,
+   `.lovable/mcp/manifest.json`; see `docs/manager-agent-api.md`, "MCP server").
    That list is exhaustive — **every other file is normal, editable source**,
    including Lovable-scaffolded code (`src/integrations/lovable/*`,
    `src/lib/*.functions.ts`, connector/Drive helpers). There is no broad
