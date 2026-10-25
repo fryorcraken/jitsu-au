@@ -34,9 +34,9 @@
 --      owner-update RLS policy from 20260723000000 still exists, unreachable
 --      only because no grant reaches it. A later grant (table-level, or
 --      `GRANT UPDATE (...)` on chosen columns) would make it live, which is
---      why check-client-grants.py now reads column ACLs and PUBLIC grants as
---      well as table ones: such a grant fails supabase-lint.yml on the pull
---      request that adds it.
+--      why supabase/lint/client-grants.sql now reads column, PUBLIC and
+--      inherited grants as well as table ones: such a grant fails
+--      supabase-lint.yml on the pull request that adds it.
 --   2. The trigger below, for the grant that never reaches a pull request: one
 --      made by hand in the Lovable UI produces no commit, so no CI sees it. It
 --      refuses any change to these two columns made for anon or authenticated,
@@ -51,18 +51,33 @@ ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS archived_by UUID;
 
 -- Asserted separately rather than inline on ADD COLUMN, which skips the whole
--- clause, foreign key included, when the column already exists.
-ALTER TABLE public.profiles
-  DROP CONSTRAINT IF EXISTS profiles_archived_by_fkey;
-ALTER TABLE public.profiles
-  ADD CONSTRAINT profiles_archived_by_fkey
-    FOREIGN KEY (archived_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+-- clause, foreign key included, when the column already exists. Added only
+-- when missing, rather than dropped and re-added, so applying this file again
+-- (or a Lovable re-emission of it) does not lock and rescan profiles for
+-- nothing.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'public.profiles'::regclass
+       AND conname = 'profiles_archived_by_fkey'
+  ) THEN
+    ALTER TABLE public.profiles
+      ADD CONSTRAINT profiles_archived_by_fkey
+        FOREIGN KEY (archived_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+  END IF;
 
-ALTER TABLE public.profiles
-  DROP CONSTRAINT IF EXISTS profiles_archived_by_needs_archived_at;
-ALTER TABLE public.profiles
-  ADD CONSTRAINT profiles_archived_by_needs_archived_at
-    CHECK (archived_by IS NULL OR archived_at IS NOT NULL);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'public.profiles'::regclass
+       AND conname = 'profiles_archived_by_needs_archived_at'
+  ) THEN
+    ALTER TABLE public.profiles
+      ADD CONSTRAINT profiles_archived_by_needs_archived_at
+        CHECK (archived_by IS NULL OR archived_at IS NOT NULL);
+  END IF;
+END
+$$;
 
 COMMENT ON COLUMN public.profiles.archived_at IS
   'When a manager marked this person as having left the club. NULL = not archived. Reversible; deletes nothing and blocks no sign-in. Never writable as anon or authenticated (trigger profiles_guard_archive).';
@@ -90,15 +105,23 @@ RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = ''
 AS $$
-DECLARE
-  jwt_role text := nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role';
 BEGIN
-  IF (current_user IN ('anon', 'authenticated') OR jwt_role IN ('anon', 'authenticated'))
-     AND (
-       (TG_OP = 'INSERT' AND (NEW.archived_at IS NOT NULL OR NEW.archived_by IS NOT NULL))
-       OR (TG_OP = 'UPDATE' AND (NEW.archived_at IS DISTINCT FROM OLD.archived_at
-                                 OR NEW.archived_by IS DISTINCT FROM OLD.archived_by))
-     ) THEN
+  -- Nothing to guard unless an archive column is being set or changed, which
+  -- is almost never: every other write leaves without reading anything else.
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.archived_at IS NULL AND NEW.archived_by IS NULL THEN
+      RETURN NEW;
+    END IF;
+  ELSIF NEW.archived_at IS NOT DISTINCT FROM OLD.archived_at
+    AND NEW.archived_by IS NOT DISTINCT FROM OLD.archived_by THEN
+    RETURN NEW;
+  END IF;
+
+  -- The claims are parsed only here, so a malformed setting can only ever get
+  -- in the way of an archive write, never of an ordinary one.
+  IF current_user IN ('anon', 'authenticated')
+     OR nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'
+        IN ('anon', 'authenticated') THEN
     RAISE EXCEPTION 'profiles.archived_at and archived_by are written by the club''s server only'
       USING ERRCODE = '42501';
   END IF;

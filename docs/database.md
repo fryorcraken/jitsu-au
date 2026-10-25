@@ -332,10 +332,10 @@ phase: `deriveLifecycleStatus` does not read it, so nothing that filters on phas
 changes meaning. The constraint holds one direction only, because an archive
 date whose archiver has since been deleted is exactly what `SET NULL` produces.
 No client role can write either column, and two locks say so. The grants:
-`profiles` holds no table privilege for `anon` or `authenticated` (verified live
-on 2026-09-01; its column ACLs are checked by the CI replay but have not yet
-been read live), and `check-client-grants.py` reads column and `PUBLIC` grants
-as well as table ones, so a later `GRANT UPDATE (archived_at)` fails CI. And the
+`profiles` holds no privilege for `anon` or `authenticated`, and the grants
+check (`supabase/lint/client-grants.sql`, whose live-run record is in
+`supabase/lint/README.md`) reads column, `PUBLIC` and inherited grants as well
+as table ones, so a later `GRANT UPDATE (archived_at)` fails CI. And the
 `profiles_guard_archive` trigger, which refuses any change to either column made
 for `anon` or `authenticated` (as the session role, or as the role in the
 request's JWT, which still names the caller inside a `SECURITY DEFINER`

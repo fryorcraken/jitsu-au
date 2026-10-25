@@ -130,7 +130,8 @@ other. Sequence, in order:
    `INSERT INTO supabase_migrations.schema_migrations (version, name, statements)`
    with `version` = the file's timestamp prefix, `name` = the rest of the stem.
 5. Verify the object actually exists (`information_schema.columns`, `pg_proc`,
-   `pg_policies`, `information_schema.role_table_grants`) and reload PostgREST:
+   `pg_policies`), check grants with `supabase/lint/client-grants.sql` (never
+   `information_schema.role_table_grants`, see above), and reload PostgREST:
    `NOTIFY pgrst, 'reload schema'`.
 6. Merge — and only then merge code that depends on it (see sequencing, below).
 

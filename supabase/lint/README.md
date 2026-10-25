@@ -139,7 +139,9 @@ table grants only. Nothing in the migrations makes a column or PUBLIC grant,
 so a `table(column)` or `PUBLIC` row from the first live run is a finding to
 investigate (a grant made by hand in the Lovable UI, most likely), not an
 artefact of the new query. The same query also reports any grant to `PUBLIC`,
-which both client roles inherit and a join on `pg_roles` used to drop.
+or to a role `anon` or `authenticated` is a member of, since both reach the
+client roles without naming them, and it reads views, materialized views,
+partitioned and foreign tables as well as plain tables.
 
 ```sh
 python3 supabase/lint/check-client-grants.py grants.csv
