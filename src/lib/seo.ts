@@ -25,11 +25,6 @@ import { SITE_ORIGIN, isProductionHost } from "./site-origin";
 import trainingAsset from "../assets/training1.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
-// The site's address lives in its own dependency-free module so the email
-// senders and the calendar feed can read it without loading this one's page
-// list and image assets. Re-exported so SEO callers keep one import.
-export { PRODUCTION_HOSTS, SITE_HOST, SITE_ORIGIN, isProductionHost } from "./site-origin";
-
 /**
  * The image social platforms show when someone shares a link to the site.
  *

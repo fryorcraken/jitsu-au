@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
-  SITE_HOST,
-  SITE_ORIGIN,
   PUBLIC_PAGES,
   CRAWLER_DISALLOW,
   CLUB_LOGO_URL,
@@ -15,8 +13,8 @@ import {
   buildRobotsTxt,
   buildSitemapXml,
   canonicalUrl,
-  isProductionHost,
 } from "./seo";
+import { SITE_HOST, SITE_ORIGIN, isProductionHost } from "./site-origin";
 import { PUBLIC_NOINDEX_PATHS } from "./public-pages";
 import { Route as RootRoute } from "@/routes/__root";
 import { Route as AboutRoute } from "@/routes/about";
@@ -559,19 +557,22 @@ describe("sitemap coverage of the route files", () => {
   // The test above only reaches pages in the sitemap. A noindex page with a
   // canonical (/waiver, /thank-you, /email-settings) is just as wrong pointing
   // at a retired host, so every canonical in every route file has to be built
-  // by canonicalUrl, the one place that knows the origin. Matched on the
-  // object rather than one line, so a reformatted or reordered link is still
-  // seen: any `rel: "canonical"` whose href is not canonicalUrl(...) fails.
+  // by canonicalUrl, the one place that knows the origin. Found by its
+  // `rel: "canonical"` alone, so a canonical written any other way (a literal,
+  // a template string, the keys the other way round) fails here rather than
+  // going unseen.
   it("builds every canonical in the route files with canonicalUrl, noindex pages included", () => {
     const canonicalLinks = routeFiles.flatMap(({ path, source }) =>
-      [...source.matchAll(/\{[^{}]*rel:\s*"canonical"[^{}]*\}/g)].map((m) => ({
+      [...source.matchAll(/rel:\s*"canonical"/g)].map((m) => ({
         path,
-        link: m[0],
+        link: source.slice(m.index, m.index + 120),
       })),
     );
     expect(canonicalLinks.length).toBeGreaterThan(PUBLIC_PAGES.length);
     for (const { path, link } of canonicalLinks) {
-      expect(link, `${path} spells its canonical by hand`).toMatch(/href:\s*canonicalUrl\(/);
+      expect(link, `${path}: write it as { rel: "canonical", href: canonicalUrl("...") }`).toMatch(
+        /^rel:\s*"canonical",\s*href:\s*canonicalUrl\(/,
+      );
     }
   });
 
@@ -608,65 +609,143 @@ describe("sitemap coverage of the route files", () => {
 // that way), and a canonical pointing at a redirect tells a search engine the
 // real page is one that does not exist. The address belongs in SITE_ORIGIN.
 //
-// So any mention of the bare domain in code fails, written as a URL or as copy
-// ("Sign in at jitsu.au"). What is left out, and why:
+// So any mention of the bare domain fails, in any case, written as a URL or as
+// copy ("Sign in at jitsu.au"), in every text file under the scanned folders.
+// What is left out, and why:
 //   - the subdomains and addresses that stay on it on purpose
 //     (`notify.jitsu.au`, `dependant.jitsu.au`, calendar UIDs `<id>@jitsu.au`):
 //     the pattern needs the name not to follow a dot, `@` or word character;
-//   - comments, where the old name is history rather than a link;
+//   - comments, where the old name is history rather than a link. They are
+//     blanked by file type before the scan, so a `#` or `*` that starts a line
+//     of markdown copy is still read, and a comment at the end of a line of
+//     code is still skipped;
 //   - tests, where URLs are input data rather than anything a person follows;
-//   - PRODUCTION_HOSTS, which lists jitsu.au so a crawler can read its redirect.
+//   - the exact lines in ALLOWED, each of which names the old domain on purpose.
 describe("the old domain", () => {
-  const OLD_DOMAIN = /(^|[^\w.@-])(www\.)?jitsu\.au(?![\w-])/;
-  const COMMENT = /^\s*(\/\/|\/\*|\*|#|<!--)/;
+  const OLD_DOMAIN = /(^|[^\w.@-])(www\.)?jitsu\.au(?![\w-])/i;
   const ALLOWED = new Set([
+    // Listed so a crawler can still read jitsu.au's redirect.
     'src/lib/site-origin.ts: "jitsu.au",',
     'src/lib/site-origin.ts: "www.jitsu.au",',
+    // The agent skill's warning not to use it.
+    ".claude/skills/uts-manager-agent/SKILL.md: host the site is served from, never `jitsu.au`: that domain now redirects, and",
   ]);
   const ROOT = join(import.meta.dirname, "..", "..");
   const SCANNED = ["src", "public", "scripts", "e2e", ".claude/skills"];
+  const BINARY = /\.(png|jpe?g|gif|webp|ico|woff2?|ttf|otf|pdf|zip)$/i;
+  const TEST_FILE = /\.(test|spec)\.[a-z]+$/;
 
-  function codeFiles(dir: string): string[] {
+  function textFiles(dir: string): string[] {
     const found: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== "node_modules") found.push(...codeFiles(path));
-      } else if (
-        /\.(tsx?|m?js|cjs|html|webmanifest|sh|py)$/.test(entry.name) &&
-        !/\.(test|spec)\.[a-z]+$/.test(entry.name)
-      ) {
+        if (entry.name !== "node_modules") found.push(...textFiles(path));
+      } else if (!BINARY.test(entry.name) && !TEST_FILE.test(entry.name)) {
         found.push(path);
       }
     }
     return found;
   }
 
-  const mentions = (text: string) => !COMMENT.test(text) && OLD_DOMAIN.test(text);
+  // Comments replaced by spaces, newlines kept, so line numbers still match.
+  const blank = (text: string) => text.replace(/[^\n]/g, " ");
 
-  it("is never mentioned in code, as a link or as copy", () => {
-    const offenders = SCANNED.flatMap((dir) => codeFiles(join(ROOT, dir)))
-      .flatMap((file) =>
-        readFileSync(file, "utf8")
-          .split("\n")
-          .map((text, i) => ({ file: relative(ROOT, file), line: i + 1, text: text.trim() })),
-      )
-      .filter(({ file, text }) => mentions(text) && !ALLOWED.has(`${file}: ${text}`))
-      .map(({ file, line, text }) => `${file}:${line}: ${text}`);
+  function withoutComments(file: string, source: string): string {
+    if (/\.(tsx?|[cm]?js)$/.test(file)) return withoutCodeComments(source);
+    if (/\.html$/.test(file)) return source.replace(/<!--[\s\S]*?-->/g, blank);
+    // Shell, Python, config and `_headers`: a `#` at the start of a line or
+    // after whitespace. Markdown, JSON and the manifest have no comments.
+    if (/\.(sh|py|toml|ya?ml|txt)$/.test(file) || !/\.[^/]+$/.test(file)) {
+      return source.replace(
+        /(^|\s)#[^\n]*/gm,
+        (m, lead: string) => lead + blank(m.slice(lead.length)),
+      );
+    }
+    return source;
+  }
+
+  // Strings and template literals are kept whole, so a `//` or `/*` inside one
+  // (a URL, a markdown bullet) is never read as a comment. A `//` counts only
+  // where code can put one: at the start of a line, after whitespace or after
+  // punctuation, never straight after `:` as in `https://`.
+  function withoutCodeComments(source: string): string {
+    let out = "";
+    let i = 0;
+    while (i < source.length) {
+      const c = source[i];
+      const next = source[i + 1];
+      if (c === "/" && next === "*") {
+        const end = source.indexOf("*/", i + 2);
+        const stop = end === -1 ? source.length : end + 2;
+        out += blank(source.slice(i, stop));
+        i = stop;
+      } else if (c === "/" && next === "/" && (i === 0 || /[\s;,{}()[\]]/.test(source[i - 1]))) {
+        const end = source.indexOf("\n", i);
+        const stop = end === -1 ? source.length : end;
+        out += blank(source.slice(i, stop));
+        i = stop;
+      } else if (c === '"' || c === "'" || c === "`") {
+        let j = i + 1;
+        while (j < source.length && source[j] !== c && (c === "`" || source[j] !== "\n")) {
+          j += source[j] === "\\" ? 2 : 1;
+        }
+        out += source.slice(i, j + 1);
+        i = j + 1;
+      } else {
+        out += c;
+        i += 1;
+      }
+    }
+    return out;
+  }
+
+  function offendersIn(file: string, source: string): string[] {
+    const original = source.split("\n");
+    return withoutComments(file, source)
+      .split("\n")
+      .flatMap((text, i) =>
+        OLD_DOMAIN.test(text) && !ALLOWED.has(`${file}: ${original[i].trim()}`)
+          ? [`${file}:${i + 1}: ${original[i].trim()}`]
+          : [],
+      );
+  }
+
+  it("is never mentioned in the code, copy or served files", () => {
+    const offenders = SCANNED.flatMap((dir) => textFiles(join(ROOT, dir))).flatMap((path) =>
+      offendersIn(relative(ROOT, path), readFileSync(path, "utf8")),
+    );
     expect(offenders).toEqual([]);
   });
 
-  it("catches the domain however it is written, and leaves what stays on it alone", () => {
-    expect(mentions('const SITE_URL = "https://jitsu.au";')).toBe(true);
-    expect(mentions("Sign in at jitsu.au/account")).toBe(true);
-    expect(mentions("Sign in at www.jitsu.au/account")).toBe(true);
-    expect(mentions("Visit jitsu.au.")).toBe(true);
-    expect(mentions("Visit jitsu.au")).toBe(true);
-    expect(mentions("https://utsjitsu.com.au/account")).toBe(false);
-    expect(mentions("x@dependant.jitsu.au")).toBe(false);
-    expect(mentions("noreply@notify.jitsu.au")).toBe(false);
-    expect(mentions("uid: `${e.id}@jitsu.au`,")).toBe(false);
-    expect(mentions('"uts-jitsu.auth.remember"')).toBe(false);
-    expect(mentions("// jitsu.au used to be the address")).toBe(false);
+  const caught = (file: string, source: string) => offendersIn(file, source).length > 0;
+
+  it("catches the domain however it is written", () => {
+    expect(caught("a.ts", 'const SITE_URL = "https://jitsu.au";')).toBe(true);
+    expect(caught("a.ts", '"Sign in at jitsu.au/account"')).toBe(true);
+    expect(caught("a.ts", '"Sign in at www.jitsu.au/account"')).toBe(true);
+    expect(caught("a.ts", '"Visit jitsu.au."')).toBe(true);
+    expect(caught("a.ts", '"Jitsu.au is where you sign in"')).toBe(true);
+    expect(caught("a.tsx", "<p>Go to https://jitsu.au/account</p>")).toBe(true);
+    // Markdown copy inside a template literal, which a line-start check took for a comment.
+    expect(caught("a.ts", "const prompt = `\n* Sign in at jitsu.au\n# Visit jitsu.au\n`;")).toBe(
+      true,
+    );
+    expect(caught("SKILL.md", "Set UTS_MANAGER_API_URL=https://jitsu.au")).toBe(true);
+    expect(caught("public/_headers", "Link: <https://jitsu.au/>")).toBe(true);
+  });
+
+  it("leaves what stays on the domain, and comments, alone", () => {
+    expect(caught("a.ts", '"https://utsjitsu.com.au/account"')).toBe(false);
+    expect(caught("a.ts", '"x@dependant.jitsu.au"')).toBe(false);
+    expect(caught("a.ts", '"noreply@notify.jitsu.au"')).toBe(false);
+    expect(caught("a.ts", "uid: `${e.id}@jitsu.au`,")).toBe(false);
+    expect(caught("a.ts", '"uts-jitsu.auth.remember"')).toBe(false);
+    expect(caught("a.ts", "// jitsu.au used to be the address")).toBe(false);
+    expect(caught("a.ts", "uid: x, // was jitsu.au")).toBe(false);
+    expect(caught("a.ts", "/*\n jitsu.au, in a block with no leading star\n*/")).toBe(false);
+    expect(caught("a.tsx", "{/* jitsu.au */}")).toBe(false);
+    expect(caught("a.sh", "# the old jitsu.au")).toBe(false);
+    expect(caught("a.html", "<!-- jitsu.au -->")).toBe(false);
   });
 });
