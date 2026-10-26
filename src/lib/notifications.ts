@@ -19,48 +19,18 @@ export const notificationKinds = [
   "new_blog_post",
   "blog_comment",
   "kb_comment",
+  "membership_plan_open",
   "insurance_ending_soon",
   "insurance_ended",
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
-
-/**
- * The kinds the email switches do NOT govern: messages about somebody's
- * membership rather than about a conversation, the same way an invoice is.
- * Nobody can turn them off, and they are sent the moment they are written
- * rather than folded into the morning summary, so the digest never reads them.
- *
- * A closed list on purpose. Adding a kind here takes away a choice people have
- * today, so it is a product decision each time, made in this one place, and
- * `notifications.test.ts` pins the list so it cannot grow by accident.
- * Everything not listed keeps its switch.
- */
-export const unswitchableNotificationKinds = [
-  // Yearly insurance ending: docs/memberships.md, "When yearly insurance ends".
-  "insurance_ending_soon",
-  "insurance_ended",
-] as const satisfies readonly NotificationKind[];
-export type UnswitchableNotificationKind = (typeof unswitchableNotificationKinds)[number];
-export type SwitchableNotificationKind = Exclude<NotificationKind, UnswitchableNotificationKind>;
-
-/** Whether a kind ignores the email switches. */
-export function isUnswitchable(kind: NotificationKind): kind is UnswitchableNotificationKind {
-  return (unswitchableNotificationKinds as readonly NotificationKind[]).includes(kind);
-}
-
-/**
- * The kinds the daily summary sweeps: everything with a switch. An unswitchable
- * row has its own sender, and the digest has no section for it, so reading one
- * here would stamp it as "nothing they wanted" and it would never go out.
- */
-export const digestNotificationKinds: readonly SwitchableNotificationKind[] =
-  notificationKinds.filter((k): k is SwitchableNotificationKind => !isUnswitchable(k));
 
 /** The things a notification can be about. Matches the `subject_type` CHECK. */
 export const notificationSubjectTypes = [
   "blog_comment",
   "kb_annotation",
   "blog_post",
+  "membership_plan_announcement",
   "membership",
 ] as const;
 export type NotificationSubjectType = (typeof notificationSubjectTypes)[number];
@@ -79,14 +49,47 @@ export const emailPreferenceKeys = [
 ] as const;
 export type EmailPreferenceKey = (typeof emailPreferenceKeys)[number];
 
-/** The switch that governs whether a given kind is emailed. */
-export const preferenceForKind: Record<SwitchableNotificationKind, EmailPreferenceKey> = {
+/**
+ * The switch that governs whether a given kind is emailed, or `null` for a kind
+ * nobody can switch off.
+ *
+ * `null` is not "default on". It means the email is part of something the
+ * person has with the club rather than news about the club, the way an invoice
+ * is, so no setting may stop it. Every kind that is null here has to be listed
+ * in `UNSWITCHABLE_NOTIFICATION_KINDS` too, and a test holds the two together:
+ * an announcement that quietly lost its switch would reach every inbox the club
+ * has with no way to stop it, so it has to be a deliberate edit in two places
+ * rather than a missing key in one.
+ */
+export const preferenceForKind: Record<NotificationKind, EmailPreferenceKey | null> = {
   reply: "reply_to_me",
   thread_activity: "thread_activity",
   new_blog_post: "new_blog_post",
   blog_comment: "manager_comment_alerts",
   kb_comment: "manager_comment_alerts",
+  // A plan a manager announced to every member (`plan-announcement.ts`). It is
+  // about the person's own membership, like an invoice, so it is not the
+  // `new_blog_post` announcement switch, which is off by default and would
+  // stop it reaching almost anybody.
+  membership_plan_open: null,
+  // Yearly insurance ending (`insurance-reminders.ts`, docs/memberships.md,
+  // "When yearly insurance ends"). About the person's own cover, so nobody
+  // can turn it off either.
+  insurance_ending_soon: null,
+  insurance_ended: null,
 };
+
+/** The closed list of kinds no switch governs. See `preferenceForKind`. */
+export const UNSWITCHABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = [
+  "membership_plan_open",
+  "insurance_ending_soon",
+  "insurance_ended",
+];
+
+/** Whether a person's switches have any say over emailing this kind. */
+export function isSwitchableKind(kind: NotificationKind): boolean {
+  return preferenceForKind[kind] !== null;
+}
 
 /**
  * What somebody gets before they have touched anything.
@@ -147,10 +150,9 @@ export function shouldEmail(
   kind: NotificationKind,
   opts: { isManager?: boolean } = {},
 ): boolean {
-  // No switch to consult: these are about somebody's membership, and the club
-  // sends them whatever the preferences say.
-  if (isUnswitchable(kind)) return true;
   const key = preferenceForKind[kind];
+  // No switch governs it, so nothing the person has set can stop it.
+  if (key === null) return true;
   // A manager alert reaching somebody who is no longer a manager is a leak of
   // moderation traffic, so the role is re-checked at send time rather than
   // trusted from whenever the row was written.
@@ -186,6 +188,7 @@ export function badgeCount(
 
 /** A digest email, grouped so each section can have its own heading. */
 export type DigestSections = {
+  membership: NotificationItem[];
   replies: NotificationItem[];
   threads: NotificationItem[];
   posts: NotificationItem[];
@@ -208,6 +211,11 @@ export function digestSections(
 ): DigestSections {
   const allowed = rows.filter((r) => shouldEmail(prefs, r.kind, opts));
   return {
+    // First, because it is about the person's own membership. These reach the
+    // digest only when their own email did not go: the plan announcement's
+    // immediate send (`plan-announcement.server.ts`), or an insurance reminder
+    // the morning run could not send (`insurance-reminders.server.ts`).
+    membership: allowed.filter((r) => !isSwitchableKind(r.kind)),
     replies: allowed.filter((r) => r.kind === "reply"),
     threads: allowed.filter((r) => r.kind === "thread_activity"),
     posts: allowed.filter((r) => r.kind === "new_blog_post"),
@@ -269,6 +277,7 @@ export function mergeHouseholdItems(rows: DigestCandidate[]): NotificationItem[]
 /** Whether a digest has anything in it. An empty one is not sent. */
 export function hasDigestContent(sections: DigestSections): boolean {
   return (
+    sections.membership.length > 0 ||
     sections.replies.length > 0 ||
     sections.threads.length > 0 ||
     sections.posts.length > 0 ||
@@ -279,6 +288,7 @@ export function hasDigestContent(sections: DigestSections): boolean {
 /** How many items a digest covers, for the subject line and the logs. */
 export function digestItemCount(sections: DigestSections): number {
   return (
+    sections.membership.length +
     sections.replies.length +
     sections.threads.length +
     sections.posts.length +

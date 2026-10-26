@@ -57,10 +57,12 @@ requests, the CI logs, and the screenshot artifacts.
     run **2026-09-04**: **76 migration files, 2 reported unapplied**, both then
     allowlisted as already-live re-emissions (see below), so the next run
     reports 0 and lists them separately. Also
-    **18 client grants live, 18 expected, 0 unexpected** as of **2026-09-01**. So
-    `supabase/lint/client-grants-expected.txt` is verified against production as
-    of that date, not just against the migration files, and `profiles` still
-    holds nothing for `anon` or `authenticated`. It goes stale the moment
+    **18 client grants live, 18 expected, 0 unexpected** as of **2026-10-25**,
+    read with the query that also sees column, `PUBLIC` and inherited grants,
+    and none of those exist. So `supabase/lint/client-grants-expected.txt` is
+    verified against production as of that date, not just against the
+    migration files, and `profiles` holds no privilege at all for `anon` or
+    `authenticated`. It goes stale the moment
     anyone changes a grant by hand in the Lovable UI, which produces no commit
     and no signal — so re-run them after applying a migration and before a
     release. Nothing does it for you.
@@ -196,6 +198,7 @@ src/
       account.tsx         Member account page
       manager.waivers.tsx        Manager: list signed waivers
       manager.waiver-template.tsx Manager: edit waiver template
+      manager.code-of-conduct.tsx Manager: edit the code of conduct
     lovable/email/auth/   Lovable auth-email webhook + preview routes
     app.tsx               Installed-app launch screen (PWA start_url; see docs/pwa.md)
     index.tsx, about.tsx, classes.tsx, pricing.tsx, instructors.tsx,
@@ -397,9 +400,12 @@ Core tables:
 - `waiver_templates` — versioned markdown templates; a partial unique index
   enforces exactly one `is_current = true`. Body uses `{{placeholder}}` tokens.
   Manager-only insert/update.
-- `code_of_conduct_acceptances` — who agreed to the club's house rules, and to
-  which version. The document itself lives in the repo (`src/lib/code-of-conduct.ts`),
-  not in a table: no template editor, no PDF, no approval. Signing it is never a
+- `code_of_conduct_versions` / `code_of_conduct_acceptances` — the club's
+  house rules, in numbered versions with one live (edited at
+  `/manager/code-of-conduct` or through the manager agent API, like the waiver
+  template), and who agreed to which version. A save only puts people out of
+  date when the manager asks everybody to agree again (`asks_reagreement`), so
+  a typo fix re-prompts nobody. No PDF, no approval, and signing it is never a
   gate on anything. Product flows: `docs/code-of-conduct.md`.
 - `kb_sections` / `kb_articles` / `kb_article_versions` / `kb_annotations` /
   `kb_article_reads` — the **knowledge base**: versioned markdown pages served at
@@ -430,6 +436,16 @@ Core tables:
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix,
   manager-only RLS. The API's action contract and its four sync points:
   `docs/manager-agent-api.md`.
+
+> [!IMPORTANT]
+> **A manager screen and the manager agent API report the same thing.** A
+> manager **read** shown on a manager screen is reported by the API from the
+> **same function** (pull it out of the `createServerFn` handler into a plain
+> function taking the client, as `loadClubUser` is for the person page and
+> `get_user`), never from a second query set in `manager-agent-actions.ts`. A
+> manager **write** is either exposed on the API or listed in
+> `docs/manager-agent-api.md` as deliberately screen-only, with the reason. The knowledge base was the first
+> place this held; the person page drifted for want of it.
 
 Signed waiver PDFs are stored in the Supabase Storage **`waivers`** bucket; access
 is via short-lived signed URLs, and `storage.objects` carries explicit
@@ -1081,7 +1097,10 @@ button labels, empty states and error text just as much as to marketing pages.
    land the preparatory refactor before it (see "Make the change easy, then make
    the easy change"). Reuse the existing seam rather than adding a second one.
 3. Don't hand-edit generated files: `routeTree.gen.ts`, the Supabase
-   `integrations/supabase/*` clients/types, or `components/ui/*` primitives.
+   `integrations/supabase/*` clients/types, `components/ui/*` primitives, or
+   the MCP server's generated routes and manifest (`src/routes/mcp.ts`,
+   `src/routes/[.well-known]/oauth-protected-resource.ts`,
+   `.lovable/mcp/manifest.json`; see `docs/manager-agent-api.md`, "MCP server").
    That list is exhaustive — **every other file is normal, editable source**,
    including Lovable-scaffolded code (`src/integrations/lovable/*`,
    `src/lib/*.functions.ts`, connector/Drive helpers). There is no broad

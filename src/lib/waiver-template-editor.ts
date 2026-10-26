@@ -1,40 +1,10 @@
 // Decisions the waiver-template editor makes, kept out of the component so they
 // are unit-testable — same reason `waiver-approval.ts` exists. No React, no
-// toasts, no server calls. The refusal type lives here too, so the screen and
-// the manager agent API describe a rejected template change the same way.
+// toasts, no server calls. What is true of every versioned document (the
+// refusal type, how a version is labelled) lives in `document-versions.ts`;
+// what is here is the waiver's own: acknowledgements and the media-consent rule.
 import type { AcknowledgementDef } from "./validation";
 import { MEDIA_ACK_ID } from "./waiver-acknowledgements";
-
-/**
- * Why a template change could not be made.
- *
- * One class carrying a reason rather than three classes, because the callers
- * that care all branch on the same three cases: the editor screen shows the
- * message either way, and the agent API turns the reason into a status code an
- * agent can act on (change the request / it is gone / try again).
- *
- * `not_published` is the one a message alone cannot carry. It means the club's
- * live waiver is not what the caller asked for, and when `version` is set it
- * means that version WAS written and is simply not live — so repeating the save
- * files a second numbered draft, while publishing that version finishes the job.
- * Getting that distinction wrong is how an outage (`/waiver` refusing to render
- * for everyone) gets reported as "your request was invalid" and abandoned.
- */
-export class WaiverTemplateError extends Error {
-  constructor(
-    message: string,
-    readonly reason: "not_found" | "invalid" | "not_published",
-    /**
-     * The version that exists but is not live. Undefined when nothing was
-     * written at all, which is the difference between "retry this call" and
-     * "publish the version you already have".
-     */
-    readonly version?: number,
-  ) {
-    super(message);
-    this.name = "WaiverTemplateError";
-  }
-}
 
 /** What the editor holds right now, and what a stored version holds. */
 export type TemplateDraft = {
@@ -92,25 +62,6 @@ export function isDirty(draft: TemplateDraft, stored: TemplateDraft | null): boo
  */
 export function hasMediaAcknowledgement(acks: AcknowledgementDef[]): boolean {
   return acks.some((a) => a.id === MEDIA_ACK_ID && a.label.trim().length > 0);
-}
-
-/**
- * How a version is labelled in the list.
- *
- * "Draft" is only honest for a version that has never been live. One that WAS
- * live is a superseded legal document, possibly with signatures against it, and
- * calling it a draft on the screen where a manager picks what the club stands
- * behind invites treating a rollback as publishing something unfinished. We
- * cannot tell from the row itself, so age against the live version stands in:
- * anything older than what is live has had its turn.
- */
-export function versionLabel(
-  version: { version: number; is_current: boolean },
-  liveVersion: number | null,
-): "Live" | "Previous" | "Draft" {
-  if (version.is_current) return "Live";
-  if (liveVersion !== null && version.version < liveVersion) return "Previous";
-  return "Draft";
 }
 
 /**

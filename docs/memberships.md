@@ -73,6 +73,20 @@ than this year's without touching anyone who already bought this year's.
 Managers add, price and date plans on `/manager/membership-plans`; "Duplicate"
 on an existing plan starts a new one pre-filled, with the dates cleared.
 
+**Opening a new semester** is therefore: Duplicate last semester's plan, set
+its code, dates and price, tick **"Email all members about this plan"** beside
+the Save button, and press Save. The app asks first, with the number of emails
+it is about to send ("Save and email 84 people about Semester 1 2027? This
+can't be undone."), saves the plan, then emails every member with an approved
+waiver straight away: one email per family, with the dates, both prices, a line
+on insurance for whoever needs it, and a link to buy the plan on `/membership`.
+The card then reads "Announced on 3 Nov to 84 people". Nobody can switch this
+email off, and a plan can be announced again with a fresh tick (after a price
+change, say). If the plan saves but the email fails, the card says so and the
+retry sends the email without saving the plan again. The full rules, including
+who counts as a member for this, are in `docs/notifications.md`, "A plan is
+announced".
+
 **The public pricing page (`/pricing`) is hand-written copy, not driven by
 this catalogue.** It used to read the live plan list, but that breaks once
 more than one dated plan can be on sale at once (this training period and the
@@ -382,11 +396,14 @@ their own rather than in the morning summary. See `docs/notifications.md`.
 2. Withdraw pending rows nobody is owed any more (they renewed, a manager
    cancelled, the window passed). Deleted rather than stamped, so `emailed_at`
    on one of these rows only ever means the email went out.
-3. Send what is pending, at most 20 emails a run and the earliest end day first, stamping `emailed_at` only on
-   a successful send. A failure stays pending and goes on the next run, and
-   rows that sit unsent are what the stalled-email attention item watches.
+3. Send what is pending, at most 20 emails a run and the earliest end day
+   first, stamping `emailed_at` only on a successful send. Anything that run
+   did not send goes in the morning summary straight after, under
+   "Membership"; a row with no address it could resolve stays pending for the
+   next morning, and rows that sit unsent are what the stalled-email attention
+   item watches.
 
-Until `20261024000000_notification_insurance_reminders.sql` is applied the
+Until `20261026000000_notification_insurance_reminders.sql` is applied the
 database refuses these kinds, so the writes are logged and nothing is sent.
 
 **What managers see.**
@@ -775,15 +792,15 @@ things to somebody about to transfer money.
 
 ## Manager screens & the manager agent API
 
-| Manager UI                        | Manager agent actions                                 | What it does                                   |
-| --------------------------------- | ----------------------------------------------------- | ---------------------------------------------- |
-| `/manager/membership-plans`       | `list_membership_plans` / `save_membership_plan`      | Add, price, date, retire, or duplicate a plan. |
-| `/manager/memberships`            | `list_invoices` / `edit_invoice`                      | See and correct invoices.                      |
-| both membership screens           | `edit_invoice` (`status`) / `delete_invoice`          | Cancel from any state; delete a junk invoice.  |
-| `/manager/users/<id>`             | `create_membership`                                   | Raise a membership for a person.               |
-| both membership screens           | `edit_invoice` (`starts_on`)                          | Correct the day yearly cover began.            |
-| both membership screens           | `list_invoices` / `list_users` (`insurance_reminder`) | See which insurance reminder went out.         |
-| `/manager/users/<id>` (check-ins) | none                                                  | Move a check-in to another membership.         |
+| Manager UI                        | Manager agent actions                                              | What it does                                                                              |
+| --------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `/manager/membership-plans`       | `list_membership_plans` / `save_membership_plan`                   | Add, price, date, retire, or duplicate a plan; email every member about one (`announce`). |
+| `/manager/memberships`            | `list_invoices` / `edit_invoice`                                   | See and correct invoices.                                                                 |
+| both membership screens           | `edit_invoice` (`status`) / `delete_invoice`                       | Cancel from any state; delete a junk invoice.                                             |
+| `/manager/users/<id>`             | `create_membership`                                                | Raise a membership for a person.                                                          |
+| both membership screens           | `edit_invoice` (`starts_on`)                                       | Correct the day yearly cover began.                                                       |
+| both membership screens           | `list_invoices` / `list_users` / `get_user` (`insurance_reminder`) | See which insurance reminder went out.                                                    |
+| `/manager/users/<id>` (check-ins) | none                                                               | Move a check-in to another membership.                                                    |
 
 Moving a check-in is the one row with no agent equivalent: the API has no
 check-in actions at all, and adding the first one is a wider decision than this

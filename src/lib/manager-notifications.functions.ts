@@ -35,7 +35,7 @@ import {
   waiverApprovalNotifications,
 } from "@/lib/validation";
 import type { ManagerNotification } from "@/lib/validation";
-import { digestNotificationKinds } from "@/lib/notifications";
+import { isSwitchableKind, notificationKinds } from "@/lib/notifications";
 import type { MembershipClient, MembershipPlanRow } from "@/lib/membership-types";
 import { listMembershipPlanRows } from "@/lib/membership.functions";
 import { countUnreadContactMessages } from "@/lib/contact-messages.functions";
@@ -114,15 +114,16 @@ export async function digestBacklogNotifications(
   // preference suppressed, so a single working run leaves evidence here even if
   // it sent no mail. No evidence plus an ageing backlog is the real thing.
   //
-  // Only kinds the SUMMARY sends count as that evidence. The insurance
-  // reminders are stamped by the same morning request just before the summary
-  // runs, so counting them would let a reminder going out hide a summary that
-  // failed straight after it. Their unsent rows still count in the backlog
-  // above, so a reminder stuck unsent raises this item too.
+  // Only kinds with a switch count as that evidence. The unswitchable ones are
+  // stamped by sends of their own: the insurance reminders by the same morning
+  // request just before the summary runs, a plan announcement the moment it is
+  // saved. Counting them would let one of those hide a summary that failed.
+  // Their unsent rows still count in the backlog above, so a reminder stuck
+  // unsent raises this item too.
   const { count: emailedRecently, error: recentError } = await admin
     .from("notifications")
     .select("id", { count: "exact", head: true })
-    .in("kind", [...digestNotificationKinds])
+    .in("kind", notificationKinds.filter(isSwitchableKind))
     .gte("emailed_at", cutoff);
   if (recentError) {
     console.error("[notifications] could not check for recent digest sends:", recentError);

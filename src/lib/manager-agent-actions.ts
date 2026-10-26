@@ -13,7 +13,11 @@ import {
   deleteInvoiceSchema,
   markInvoicePaidSchema,
   editInvoiceSchema,
+  getAgentUserSchema,
   agentGetWaiverTemplateSchema,
+  agentGetCodeOfConductSchema,
+  agentPublishCodeOfConductSchema,
+  agentSaveCodeOfConductSchema,
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
   deleteKbSectionSchema,
@@ -26,6 +30,7 @@ import {
   nameWithPreferred,
   paperWaiverUploadSchema,
   savePlanSchema,
+  agentPlanAnnounceSchema,
   saveKbArticleSchema,
   saveKbSectionSchema,
   createItemInvoiceSchema,
@@ -34,6 +39,10 @@ import {
   recordIdSchema,
   saveChargeItemSchema,
   agentResendEmailSchema,
+  agentDeleteBlogPostSchema,
+  agentGetBlogPostSchema,
+  agentSaveBlogPostSchema,
+  agentUploadBlogImageSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -44,7 +53,11 @@ import {
   classifyAction,
   diffInvoicePatch,
   invoiceEditAudit,
+  projectAgentCodeOfConductVersion,
+  mergeAgentBlogPostEdit,
+  projectAgentBlogPost,
   projectAgentKbArticle,
+  projectAgentUser,
   projectAgentWaiverTemplate,
   projectInvoice,
   reconciledEditBlockers,
@@ -70,6 +83,23 @@ import type {
   ClubUserWaiver,
 } from "@/lib/club-users";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { ClubUserNotFoundError, loadClubUser } from "@/lib/club-user.functions";
+import {
+  codeOfConductStandard,
+  codeOfConductSummary,
+  countReprompted,
+  standardAfterPublishing,
+  standardAfterSaving,
+} from "@/lib/code-of-conduct";
+import {
+  highestAcceptedVersions,
+  listCodeOfConductVersionFlags,
+  listCodeOfConductVersionSummaries,
+  loadCodeOfConductStandard,
+  loadCodeOfConductVersion,
+  promoteCodeOfConductVersion,
+  saveCodeOfConductVersion,
+} from "@/lib/code-of-conduct.functions";
 import {
   deleteKbSection,
   listKbSections,
@@ -81,7 +111,7 @@ import {
   saveKbSection,
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
-import { WaiverTemplateError } from "@/lib/waiver-template-editor";
+import { DocumentVersionError } from "@/lib/document-versions";
 import {
   filePaperWaiver,
   listWaiverTemplateRows,
@@ -121,6 +151,26 @@ import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email"
 import { loadClubSettings } from "@/lib/club-settings.functions";
 import { ResendNotSentError, resendEmail } from "@/lib/email-resend.functions";
 import type { ResendRefusal } from "@/lib/email-resend";
+import {
+  BlogPostChangedError,
+  BlogPostNotFoundError,
+  BlogSlugError,
+  BlogSlugTakenError,
+  createBlogPostRow,
+  deleteBlogPostRow,
+  listBlogPostRows,
+  loadBlogPostRow,
+  storeBlogImage,
+  updateBlogPostRow,
+} from "@/lib/blog.functions";
+import {
+  BlogImageError,
+  blogImageFileName,
+  blogImageMarkdown,
+  fetchBlogImage,
+  sniffBlogImageType,
+} from "@/lib/blog-image";
+import { decodeBase64 } from "@/lib/waiver-scan";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -462,6 +512,14 @@ async function handleListUsers(params: unknown) {
     // rebuilt the household from what came back would then confidently report a
     // parent as having none.
     dependants: u.user_id ? (dependantsByGuardian.get(u.user_id) ?? []) : [],
+    // The cheap headline fields the person page leads with. Anything more about
+    // one person (their profile, waivers, attendance) is `get_user`, which is
+    // that page's own read: this listing covers everybody at once, and is no
+    // place for 200 people's medical notes and addresses.
+    phone: u.phone,
+    // Null means not verified. For a dependant this is the state of the
+    // guardian's address, because `email` is the guardian's address.
+    email_confirmed_at: u.email_confirmed_at,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
     sessions_attended: u.sessions_attended,
@@ -473,7 +531,105 @@ async function handleListUsers(params: unknown) {
 
   if (status) users = users.filter((u) => u.lifecycle_status === status);
   const capped = users.slice(0, limit ?? 200);
-  return { count: capped.length, total: users.length, users: capped };
+
+  // The code-of-conduct acceptances of the people being returned, read after
+  // the page is cut, so each row's summary is the person page's own rule
+  // (`codeOfConductSummary`). Scoped to these ids, and PAGED: PostgREST caps a
+  // response (1000 rows by default) without an error, and signing again is
+  // unlimited, so a capped read could drop somebody's only agreement and report
+  // them as unsigned. Ordered by id so the pages cannot overlap or skip.
+  const ids = capped.map((u) => u.user_id).filter((id): id is string => Boolean(id));
+  const readAcceptances = async () => {
+    const rows: {
+      user_id: string;
+      version: number;
+      accepted_at: string;
+      signature_name: string;
+    }[] = [];
+    const ACCEPTANCES_PAGE = 1000;
+    for (let from = 0; ids.length; from += ACCEPTANCES_PAGE) {
+      const { data, error: cocErr } = await db
+        .from("code_of_conduct_acceptances")
+        .select("user_id, version, accepted_at, signature_name")
+        .in("user_id", ids)
+        .order("id", { ascending: true })
+        .range(from, from + ACCEPTANCES_PAGE - 1);
+      // Not degraded to "unsigned" the way the person page degrades it: that
+      // page has a manager reading it and a server log behind it, and an agent
+      // has neither. `unsigned` for a person who signed is a confident wrong
+      // answer.
+      if (cocErr) throw new AgentError(500, "db_error", cocErr.message);
+      rows.push(...(data ?? []));
+      if (!data || data.length < ACCEPTANCES_PAGE) break;
+    }
+    // Newest first, which is the order `codeOfConductSummary` reads them in.
+    return rows.sort((a, b) => Date.parse(b.accepted_at) - Date.parse(a.accepted_at));
+  };
+  // What the state is measured against: the live version, and the version it
+  // requires people to have agreed to. Read alongside the acceptances.
+  const [standardRead, acceptances] = await Promise.all([
+    loadCodeOfConductStandard(db).then(
+      (standard) => ({ standard, error: null }),
+      (e: unknown) => ({ standard: null, error: e instanceof Error ? e.message : String(e) }),
+    ),
+    readAcceptances(),
+  ]);
+  if (!standardRead.standard) throw new AgentError(500, "db_error", standardRead.error ?? "");
+  const standard = standardRead.standard;
+  const acceptancesByUser = new Map<
+    string,
+    { version: number; accepted_at: string; signature_name: string }[]
+  >();
+  for (const a of acceptances) {
+    const list = acceptancesByUser.get(a.user_id) ?? [];
+    list.push(a);
+    acceptancesByUser.set(a.user_id, list);
+  }
+
+  return {
+    count: capped.length,
+    total: users.length,
+    users: capped.map((u) => ({
+      ...u,
+      // A lead has no person record and cannot sign, so it reads as unsigned,
+      // which is true.
+      code_of_conduct: codeOfConductSummary(
+        u.user_id ? acceptancesByUser.get(u.user_id) : null,
+        standard,
+      ),
+    })),
+  };
+}
+
+// ---- action: get_user ----
+/**
+ * One person, as the manager person page shows them: that page's own read
+ * (`loadClubUser`), projected by `projectAgentUser`. No query of its own, on
+ * purpose. The page and this action used to be built separately and drifted.
+ */
+async function handleGetUser(params: unknown) {
+  const { user_id } = getAgentUserSchema.parse(params ?? {});
+  const db = await adminClient();
+  let read: Awaited<ReturnType<typeof loadClubUser>>;
+  try {
+    read = await loadClubUser(db, user_id);
+  } catch (e) {
+    if (e instanceof ClubUserNotFoundError) {
+      throw new AgentError(
+        404,
+        "not_found",
+        "No person has that user_id. A lead (registered interest only) has no person record: list_users reports one with user_id null.",
+      );
+    }
+    // Every other throw from the read is a failed query.
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+  // The page degrades these two to "no email" and "not signed yet" so a manager
+  // can still approve somebody. An agent would act on the guess instead.
+  if (read.degraded.length) {
+    throw new AgentError(500, "db_error", `get_user could not read: ${read.degraded.join(", ")}`);
+  }
+  return projectAgentUser(read);
 }
 
 // ---- action: list_invoices ----
@@ -907,21 +1063,69 @@ async function handleDeleteInvoice(params: unknown, actingAs: string) {
 // ---- action: list_membership_plans ----
 async function handleListMembershipPlans() {
   const db = await adminClient();
-  const plans = await listMembershipPlanRows(db);
-  return { count: plans.length, plans: plans.map(projectAgentMembershipPlan) };
+  const { loadAnnouncementSummaries } = await import("@/lib/plan-announcement.server");
+  const [plans, announcements] = await Promise.all([
+    listMembershipPlanRows(db),
+    loadAnnouncementSummaries(db),
+  ]);
+  return {
+    count: plans.length,
+    plans: plans.map((p) => ({
+      ...projectAgentMembershipPlan(p),
+      // The same "Announced on..." the plan's card shows, or null if never.
+      last_announcement: announcements.get(p.id) ?? null,
+    })),
+  };
 }
 
 // ---- action: save_membership_plan ----
-async function handleSaveMembershipPlan(params: unknown) {
+//
+// With `announce: true` this is the screen's "Email all members about this
+// plan" box: save first, then announce through the same
+// `announceMembershipPlan` the screen's server function calls. The two can
+// fail separately, and a failed announcement says the plan IS saved, so the
+// agent retries the announcement (same `announcement_id`) rather than the
+// whole save, exactly like the screen's retry button.
+async function handleSaveMembershipPlan(params: unknown, actingAs: string) {
   const input = savePlanSchema.parse(params);
+  const { announce, announcement_id } = agentPlanAnnounceSchema.parse(params);
   const db = await adminClient();
+  let saved: { ok: true; id: string };
   try {
-    return await saveMembershipPlanRow(db, input);
+    saved = await saveMembershipPlanRow(db, input);
   } catch (e) {
     throw new AgentError(
       422,
       "save_membership_plan_failed",
       e instanceof Error ? e.message : "Could not save the membership plan.",
+    );
+  }
+  if (!announce || !announcement_id) return { ...saved, announcement: null };
+
+  const { announceMembershipPlan, PlanAnnouncementError } =
+    await import("@/lib/plan-announcement.server");
+  try {
+    const announcement = await announceMembershipPlan(db, {
+      planId: saved.id,
+      announcementId: announcement_id,
+      actorId: actingAs,
+    });
+    return { ...saved, announcement };
+  } catch (e) {
+    if (e instanceof PlanAnnouncementError && e.code === "submission_conflict")
+      throw new AgentError(409, "submission_conflict", e.message, { id: saved.id });
+    // An update naming an id that matches no plan writes nothing and does not
+    // fail, so this is where it surfaces. Nothing was saved, and nothing will
+    // be by retrying.
+    if (e instanceof PlanAnnouncementError && e.code === "plan_not_found")
+      throw new AgentError(404, "not_found", "No membership plan has that id.");
+    throw new AgentError(
+      502,
+      "announcement_failed",
+      `The plan was saved, but the email to members did not go out (${
+        e instanceof Error ? e.message : "unknown error"
+      }). Call again with id set to error.details.id and the same announcement_id to finish it: nobody is emailed twice.`,
+      { id: saved.id, announcement_id },
     );
   }
 }
@@ -1083,7 +1287,7 @@ async function handleListWaiverTemplates() {
 const TEMPLATE_RETRY_AFTER_SECONDS = 5;
 
 /**
- * Turn a refused template change into the right status code.
+ * Turn a refused change to a versioned document into the right status code.
  *
  * The distinction that matters is retryable vs not. SKILL.md tells agents that a
  * 4xx means the request itself has to change, so reporting "nobody can sign
@@ -1092,13 +1296,17 @@ const TEMPLATE_RETRY_AFTER_SECONDS = 5;
  * version when one was written — repeating the save would file a second draft,
  * where publishing that version finishes the job.
  */
-function templateFailure(e: unknown, refusedCode: string): AgentError {
-  if (e instanceof WaiverTemplateError) {
+function templateFailure(
+  e: unknown,
+  refusedCode: string,
+  notPublishedCode = "waiver_template_not_published",
+): AgentError {
+  if (e instanceof DocumentVersionError) {
     if (e.reason === "not_found") return new AgentError(404, "not_found", e.message);
     if (e.reason === "invalid") return new AgentError(422, refusedCode, e.message);
     return new AgentError(
       503,
-      "waiver_template_not_published",
+      notPublishedCode,
       e.message,
       e.version === undefined ? undefined : { version: e.version, published: false },
       TEMPLATE_RETRY_AFTER_SECONDS,
@@ -1205,6 +1413,175 @@ async function handlePublishWaiverTemplate(params: unknown) {
     return { version, published: true as const };
   } catch (e) {
     throw templateFailure(e, "publish_waiver_template_failed");
+  }
+}
+
+// ---- The code of conduct: the same four actions as the waiver ----
+//
+// Version-keyed, saving publishes, an omitted field is carried over from
+// `base_version` (default the live one), and refusals are classified the same
+// way. What is the code of conduct's own is `asks_reagreement`, and the
+// `reprompted` count a save reports: how many people it put out of date.
+
+const NO_LIVE_CODE_OF_CONDUCT =
+  "There is no live code of conduct, so nobody can read it or agree to it. Make one live with publish_code_of_conduct.";
+
+/** Every stored version, which one is live, and what the club asks of people. */
+async function handleListCodeOfConductVersions() {
+  const db = await adminClient();
+  const versions = await listCodeOfConductVersionSummaries(db);
+  const standard = codeOfConductStandard(versions);
+  return {
+    count: versions.length,
+    // Null is not a tidy empty state: nobody can read or agree to the rules.
+    live_version: standard.current_version,
+    // Anyone whose highest agreement is below this is out of date.
+    required_version: standard.required_version,
+    versions: versions.map((v) => projectAgentCodeOfConductVersion(v, standard.current_version)),
+  };
+}
+
+async function handleGetCodeOfConduct(params: unknown) {
+  const input = agentGetCodeOfConductSchema.parse(params ?? {});
+  const db = await adminClient();
+  const found = await loadCodeOfConductVersion(db, input.version);
+  if (!found) {
+    throw new AgentError(
+      404,
+      "not_found",
+      input.version === undefined
+        ? NO_LIVE_CODE_OF_CONDUCT
+        : `No code of conduct version ${input.version}.`,
+    );
+  }
+  return {
+    code_of_conduct: {
+      version: found.version,
+      title: found.title,
+      body_md: found.body_md,
+      asks_reagreement: found.asks_reagreement,
+      is_current: found.is_current,
+      created_at: found.created_at,
+    },
+  };
+}
+
+async function handleSaveCodeOfConduct(params: unknown, actingAs: string) {
+  const input = agentSaveCodeOfConductSchema.parse(params ?? {});
+  const db = await adminClient();
+
+  // Read only when needed: a caller sending both title and body has described
+  // a whole version, and a club with nothing live must be able to publish its
+  // way out through this API.
+  const needsBase = input.title === undefined || input.body_md === undefined;
+  let base: Awaited<ReturnType<typeof loadCodeOfConductVersion>> = null;
+  if (needsBase || input.base_version !== undefined) {
+    base = await loadCodeOfConductVersion(db, input.base_version);
+    if (!base) {
+      throw new AgentError(
+        404,
+        "not_found",
+        input.base_version === undefined
+          ? `${NO_LIVE_CODE_OF_CONDUCT} To write one from scratch instead, send title and body_md together.`
+          : `No code of conduct version ${input.base_version}.`,
+      );
+    }
+  }
+
+  // Counted BEFORE the save, against the versions as they stand, so the reply
+  // can say how many people this put out of date. Counted on every save, not
+  // only one that asks: a save made while nothing is live inherits the newest
+  // version's requirement and can re-prompt people without asking anything. A
+  // failed count fails the call before anything is written rather than
+  // reporting a number nobody checked.
+  //
+  // The save then works from these same flags, so the count and the stored
+  // requirement describe one snapshot rather than two reads apart.
+  let reprompted: number;
+  let versions: Awaited<ReturnType<typeof listCodeOfConductVersionFlags>>;
+  try {
+    let highest: number[];
+    [versions, highest] = await Promise.all([
+      listCodeOfConductVersionFlags(db),
+      highestAcceptedVersions(db),
+    ]);
+    reprompted = countReprompted(
+      highest,
+      codeOfConductStandard(versions),
+      standardAfterSaving(versions, input.asks_reagreement),
+    );
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    const saved = await saveCodeOfConductVersion(
+      db,
+      {
+        title: input.title ?? base!.title,
+        body_md: input.body_md ?? base!.body_md,
+        asks_reagreement: input.asks_reagreement,
+        client_submission_id: input.client_submission_id,
+      },
+      actingAs,
+      versions,
+    );
+    return {
+      version: saved.version,
+      based_on: base?.version ?? null,
+      is_current: saved.is_current,
+      asks_reagreement: input.asks_reagreement,
+      // True when this client_submission_id had already written a version:
+      // nothing new was written, and `reprompted` describes no new change.
+      already_saved: saved.already_saved,
+      reprompted: saved.already_saved ? 0 : reprompted,
+      url: "/code-of-conduct",
+    };
+  } catch (e) {
+    throw templateFailure(e, "save_code_of_conduct_failed", "code_of_conduct_not_published");
+  }
+}
+
+async function handlePublishCodeOfConduct(params: unknown) {
+  const input = agentPublishCodeOfConductSchema.parse(params);
+  const db = await adminClient();
+  const target = await loadCodeOfConductVersion(db, input.version);
+  if (!target) {
+    throw new AgentError(404, "not_found", `No code of conduct version ${input.version}.`);
+  }
+  // Read before promoting so the reply can say whether this call changed
+  // anything: a retry reporting "published" for a no-op reads as a second change.
+  if (target.is_current) return { version: target.version, published: false as const };
+  // How many people this publish puts out of date, counted before it, as the
+  // editor counts it for its confirm and as `save_code_of_conduct` reports it.
+  // A failed count fails the call before anything changes, rather than
+  // publishing and reporting a number nobody checked.
+  let reprompted: number;
+  try {
+    const [versions, highest] = await Promise.all([
+      listCodeOfConductVersionFlags(db),
+      highestAcceptedVersions(db),
+    ]);
+    reprompted = countReprompted(
+      highest,
+      codeOfConductStandard(versions),
+      standardAfterPublishing(versions, target.version),
+    );
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+  try {
+    const { version } = await promoteCodeOfConductVersion(db, target.id);
+    return {
+      version,
+      published: true as const,
+      // Who is now out of date is decided by this, so a rollback that undoes an
+      // ask says so here.
+      required_version: target.required_version,
+      reprompted,
+    };
+  } catch (e) {
+    throw templateFailure(e, "publish_code_of_conduct_failed", "code_of_conduct_not_published");
   }
 }
 
@@ -1488,10 +1865,201 @@ async function handleResendEmail(params: unknown, actingAs: string) {
   };
 }
 
+// ---- the blog ----
+//
+// Every write goes through the plain functions in blog.functions.ts that the
+// manager's blog editor also calls, so slug and excerpt resolution, the
+// publish date rule and the announcement are the editor's own. What is the
+// agent's alone is in `mergeAgentBlogPostEdit` (an omitted field keeps its
+// stored value) and in blog-image.ts (an image by address, and a type read off
+// the bytes rather than taken on trust).
+
+const NO_SUCH_POST = "No such post.";
+
+/** A shared blog writer's failure, in the endpoint's envelope. */
+function blogAgentError(e: unknown, code: string, fallback: string): unknown {
+  if (e instanceof AgentError) return e;
+  if (e instanceof BlogPostNotFoundError) return new AgentError(404, "not_found", NO_SUCH_POST);
+  if (e instanceof BlogSlugError) return new AgentError(422, code, e.message);
+  // A create that would have doubled a post. On a retry the post it names is
+  // the one the first attempt filed, so this is "already done", not a fault.
+  if (e instanceof BlogSlugTakenError) {
+    return new AgentError(
+      409,
+      "slug_taken",
+      `${e.message} If that is the post you were creating (a retry), it is already saved: read it with get_blog_post. If it is a different post, send a slug of your own.`,
+      { id: e.existingId, slug: e.slug },
+    );
+  }
+  if (e instanceof BlogPostChangedError) {
+    return new AgentError(
+      409,
+      "post_changed",
+      "The post was saved by somebody else after this change was read, and nothing was written. Read it again with get_blog_post and make the change on what is there now.",
+    );
+  }
+  // Anything else is a database or storage error's own text, which names
+  // tables and buckets: it stays in the server log (see errorResponse).
+  return new AgentError(500, "db_error", e instanceof Error ? e.message : fallback);
+}
+
+// ---- action: list_blog_posts ----
+async function handleListBlogPosts() {
+  const db = await adminClient();
+  let rows: Awaited<ReturnType<typeof listBlogPostRows>>;
+  try {
+    rows = await listBlogPostRows(db);
+  } catch (e) {
+    throw blogAgentError(e, "list_blog_posts_failed", "Could not list the posts.");
+  }
+  return { count: rows.length, posts: rows.map(projectAgentBlogPost) };
+}
+
+// ---- action: get_blog_post ----
+async function handleGetBlogPost(params: unknown) {
+  const input = agentGetBlogPostSchema.parse(params);
+  const db = await adminClient();
+  try {
+    const row = await loadBlogPostRow(db, input.id ? { id: input.id } : { slug: input.slug! });
+    return {
+      post: {
+        ...projectAgentBlogPost(row),
+        excerpt: row.excerpt,
+        body_md: row.body_md,
+        cover_image_path: row.cover_image_path,
+        cover_image_url: row.cover_image_url,
+      },
+    };
+  } catch (e) {
+    throw blogAgentError(e, "get_blog_post_failed", "Could not read the post.");
+  }
+}
+
+// ---- action: save_blog_post ----
+async function handleSaveBlogPost(params: unknown, actingAs: string) {
+  const input = agentSaveBlogPostSchema.parse(params);
+  const db = await adminClient();
+  let created: boolean;
+  let saved: Awaited<ReturnType<typeof createBlogPostRow>>;
+  try {
+    if (input.id) {
+      const stored = await loadBlogPostRow(db, { id: input.id });
+      saved = await updateBlogPostRow(db, mergeAgentBlogPostEdit(stored, input), actingAs, stored);
+      created = false;
+    } else {
+      // The schema refuses a new post without both; this narrows the types.
+      saved = await createBlogPostRow(
+        db,
+        {
+          title: input.title!,
+          body_md: input.body_md!,
+          slug: input.slug,
+          excerpt: input.excerpt,
+          cover_image_path: input.cover_image_path,
+          status: input.status ?? "draft",
+        },
+        actingAs,
+        { refuseTakenSlug: true },
+      );
+      created = true;
+    }
+  } catch (e) {
+    throw blogAgentError(e, "save_blog_post_failed", "Could not save the post.");
+  }
+  // Read back what was stored, for the projection. The write has landed by
+  // now, so a failed read must not come back as an error: a caller told a
+  // create failed retries it, and the retry files a second post.
+  const row = await loadBlogPostRow(db, { id: saved.id }).catch(() => null);
+  return {
+    created,
+    announced: saved.announced,
+    post: row
+      ? {
+          ...projectAgentBlogPost(row),
+          excerpt: row.excerpt,
+          cover_image_path: row.cover_image_path,
+          cover_image_url: row.cover_image_url,
+        }
+      : { id: saved.id, slug: saved.slug, status: saved.status, published_at: saved.published_at },
+  };
+}
+
+// ---- action: delete_blog_post ----
+async function handleDeleteBlogPost(params: unknown, actingAs: string) {
+  const input = agentDeleteBlogPostSchema.parse(params);
+  const db = await adminClient();
+  let deleted: boolean;
+  try {
+    ({ deleted } = await deleteBlogPostRow(db, input.id));
+  } catch (e) {
+    throw blogAgentError(e, "delete_blog_post_failed", "Could not delete the post.");
+  }
+  if (!deleted) throw new AgentError(404, "not_found", NO_SUCH_POST);
+  // console.info, not console.error: a manager tidying up is a normal event,
+  // and it has to be findable as one.
+  console.info(
+    "[agent.delete_blog_post] audit",
+    JSON.stringify({ postId: input.id, actor: actingAs }),
+  );
+  return { deleted: true, id: input.id };
+}
+
+// ---- action: upload_blog_image ----
+async function handleUploadBlogImage(params: unknown) {
+  const input = agentUploadBlogImageSchema.parse(params);
+  let bytes: Uint8Array;
+  let sourceUrl: string | undefined;
+  try {
+    if (input.url) {
+      const fetched = await fetchBlogImage(input.url);
+      bytes = fetched.bytes;
+      sourceUrl = fetched.finalUrl;
+    } else {
+      try {
+        bytes = decodeBase64(input.data!);
+      } catch {
+        throw new BlogImageError("rejected", "data is not valid base64.");
+      }
+    }
+  } catch (e) {
+    if (e instanceof BlogImageError) {
+      throw e.reason === "rejected"
+        ? new AgentError(422, "image_rejected", e.message)
+        : new AgentError(502, "image_fetch_failed", e.message);
+    }
+    throw e;
+  }
+  const type = sniffBlogImageType(bytes);
+  if (!type) {
+    throw new AgentError(
+      422,
+      "image_rejected",
+      "That is not a PNG, JPEG, WebP or GIF image. A post can only show those four.",
+    );
+  }
+  const name = blogImageFileName(type, input.name, sourceUrl ?? input.url);
+  const db = await adminClient();
+  let stored: { path: string; url: string };
+  try {
+    stored = await storeBlogImage(db, { post_id: input.post_id, name, type, bytes });
+  } catch (e) {
+    throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
+  }
+  return {
+    path: stored.path,
+    url: stored.url,
+    markdown: blogImageMarkdown(input.alt || name, stored.url),
+    type,
+    bytes: bytes.byteLength,
+  };
+}
+
 export async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
       return handleListUsers(params);
+    case "get_user":
+      return handleGetUser(params);
     case "list_invoices":
       return handleListInvoices(params);
     case "create_membership":
@@ -1512,10 +2080,18 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
       return handleSaveWaiverTemplate(params, actingAs);
     case "publish_waiver_template":
       return handlePublishWaiverTemplate(params);
+    case "list_code_of_conduct_versions":
+      return handleListCodeOfConductVersions();
+    case "get_code_of_conduct":
+      return handleGetCodeOfConduct(params);
+    case "save_code_of_conduct":
+      return handleSaveCodeOfConduct(params, actingAs);
+    case "publish_code_of_conduct":
+      return handlePublishCodeOfConduct(params);
     case "list_membership_plans":
       return handleListMembershipPlans();
     case "save_membership_plan":
-      return handleSaveMembershipPlan(params);
+      return handleSaveMembershipPlan(params, actingAs);
     case "list_kb_sections":
       return handleListKbSections();
     case "save_kb_section":
@@ -1550,5 +2126,15 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
       return handleGetClubSettings();
     case "resend_email":
       return handleResendEmail(params, actingAs);
+    case "list_blog_posts":
+      return handleListBlogPosts();
+    case "get_blog_post":
+      return handleGetBlogPost(params);
+    case "save_blog_post":
+      return handleSaveBlogPost(params, actingAs);
+    case "delete_blog_post":
+      return handleDeleteBlogPost(params, actingAs);
+    case "upload_blog_image":
+      return handleUploadBlogImage(params);
   }
 }

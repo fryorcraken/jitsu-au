@@ -15,12 +15,14 @@
 -- gets each reminder once per membership, however many times the job runs. No
 -- new column, no new table, no grant change, no policy change.
 --
--- The constraint names are the ones Postgres generated for the inline CHECKs in
--- 20260806030000_notifications.sql, read from the live `pg_constraint` on
--- 2026-10-23 (SELECT only): `notifications_kind_check` and
--- `notifications_subject_type_check`, holding exactly the five kinds and three
--- subject types below. So this drops and recreates the same two constraints
--- with a longer list.
+-- EVERY VALUE IS LISTED, NOT JUST THE NEW ONES. A CHECK is replaced whole, so
+-- this has to carry everything the constraint accepts today, including
+-- `membership_plan_open` / `membership_plan_announcement` from
+-- 20261025120000_membership_plan_announcement_kind.sql. Read live on
+-- 2026-10-26 (pg_constraint, SELECT only): both constraints hold exactly the
+-- six kinds and four subject types below minus the three this adds, and that
+-- migration is in the ledger. It is dated after it for the same reason: a
+-- replay in file order must end with every value present.
 --
 -- SEQUENCING. Purely additive: every existing row still satisfies the wider
 -- check, and the code running today never writes the new values. So this goes
@@ -30,7 +32,7 @@
 --
 -- TYPES.TS. `kind` and `subject_type` are plain `text` there, so nothing needs
 -- regenerating for this.
-ALTER TABLE public.notifications DROP CONSTRAINT notifications_kind_check;
+ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_kind_check;
 ALTER TABLE public.notifications ADD CONSTRAINT notifications_kind_check CHECK (
   kind IN (
     'reply',
@@ -38,12 +40,19 @@ ALTER TABLE public.notifications ADD CONSTRAINT notifications_kind_check CHECK (
     'new_blog_post',
     'blog_comment',
     'kb_comment',
+    'membership_plan_open',
     'insurance_ending_soon',
     'insurance_ended'
   )
 );
 
-ALTER TABLE public.notifications DROP CONSTRAINT notifications_subject_type_check;
+ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_subject_type_check;
 ALTER TABLE public.notifications ADD CONSTRAINT notifications_subject_type_check CHECK (
-  subject_type IN ('blog_comment', 'kb_annotation', 'blog_post', 'membership')
+  subject_type IN (
+    'blog_comment',
+    'kb_annotation',
+    'blog_post',
+    'membership_plan_announcement',
+    'membership'
+  )
 );

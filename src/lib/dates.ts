@@ -32,6 +32,23 @@ export function formatDateOnly(value: string | null | undefined): string {
   return parts ? `${parts[3]}/${parts[2]}/${parts[1]}` : value;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * A `DATE` column written out for a sentence: `2 Mar 2027`, or `2 Mar` without
+ * the year. Parsed from its parts for the same reason as `formatDateOnly`.
+ */
+export function formatDateOnlyWords(
+  value: string | null | undefined,
+  opts: { year?: boolean } = {},
+): string {
+  if (!value) return EMPTY;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!parts) return value;
+  const day = `${Number(parts[3])} ${MONTHS[Number(parts[2]) - 1]}`;
+  return opts.year === false ? day : `${day} ${parts[1]}`;
+}
+
 /**
  * "14:32", "yesterday at 14:32", "12 Aug at 14:32".
  *
