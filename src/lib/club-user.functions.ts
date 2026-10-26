@@ -19,6 +19,7 @@ import {
 import { codeOfConductSummary } from "@/lib/code-of-conduct";
 import { loadCodeOfConductStandard } from "@/lib/code-of-conduct.functions";
 import type { MembershipClient } from "@/lib/membership-types";
+import type { InsuranceReminderState } from "@/lib/insurance-reminders";
 import { aggregateClubUsers, personLabelsById, type ClubUserEmail } from "@/lib/club-users";
 import { userEmails, userIdByEmail } from "@/lib/supabase-rpc";
 import { contactUserIdFor, isDependantUser } from "@/lib/household";
@@ -351,6 +352,18 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
     membershipRows.map((m) => m.id),
   );
 
+  // "14-day reminder sent 26 Feb" on a yearly insurance row: the same
+  // projection the memberships list and `list_invoices` report. A failed read
+  // shows no reminder lines on the page and is listed in `degraded`, which
+  // makes the API's `get_user` refuse rather than report no reminders.
+  const { loadInsuranceReminderStates } = await import("@/lib/insurance-reminders.server");
+  let remindersErr = false;
+  const insuranceReminders = await loadInsuranceReminderStates(admin, membershipRows).catch((e) => {
+    console.error("[getClubUser] could not read insurance reminder state:", e);
+    remindersErr = true;
+    return new Map<string, InsuranceReminderState>();
+  });
+
   return {
     /**
      * The lookups this read could not make, and filled with a guess instead.
@@ -370,6 +383,7 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
       ...(guardianProfile.error ? (["guardian"] as const) : []),
       ...(eventsErr ? (["checkin_classes"] as const) : []),
       ...(approverProfiles.error || approverEmails.error ? (["waiver_approvers"] as const) : []),
+      ...(remindersErr ? (["insurance_reminders"] as const) : []),
     ],
     // Only the derived headline fields, not the whole aggregate. Its
     // `uts_student_number` in particular falls back to a number captured on a
@@ -495,6 +509,7 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
       paid_at: m.paid_at,
       paid_reference: m.paid_reference,
       checkin_count: checkinCounts.get(m.id) ?? 0,
+      insurance_reminder: insuranceReminders.get(m.id) ?? null,
     })),
     // Their attendance, newest first. `membership_id` with no cover is what
     // the needs-attention flow fixes, and it can be fixed from here too;

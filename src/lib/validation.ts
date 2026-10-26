@@ -1690,7 +1690,7 @@ export type PlanWindow = {
 };
 
 /** `dateStr` (YYYY-MM-DD) plus `days` calendar days, as a new YYYY-MM-DD string. */
-function addCalendarDays(dateStr: string, days: number): string {
+export function addCalendarDays(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d) + days * 86_400_000);
   return `${String(dt.getUTCFullYear()).padStart(4, "0")}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
@@ -1835,6 +1835,15 @@ export function rescheduleMembershipStart(
 function dayNumber(dateStr: string): number {
   const [y, m, d] = dateStr.split("-").map(Number);
   return Date.UTC(y, m - 1, d);
+}
+
+/**
+ * Calendar days from `from` to `to` (both YYYY-MM-DD): positive when `to` is
+ * later. Counted on the calendar, not in milliseconds, so a daylight-saving
+ * change in between cannot make it a day out.
+ */
+export function calendarDaysBetween(from: string, to: string): number {
+  return Math.round((dayNumber(to) - dayNumber(from)) / 86_400_000);
 }
 
 /**
@@ -1995,7 +2004,8 @@ export type ManagerNotification = {
     | "unread_contact_messages"
     | "waivers_awaiting_approval"
     | "new_interest_registrations"
-    | "notification_digest_stalled";
+    | "notification_digest_stalled"
+    | "insurance_ending_soon";
   title: string;
   body: string;
 } & (
@@ -2320,6 +2330,7 @@ export function composeManagerNotifications(sources: {
   contactMessages: ManagerNotification[];
   digestStalled: ManagerNotification[];
   interestRegistrations: ManagerNotification[];
+  insuranceEnding: ManagerNotification[];
   membershipWindows: ManagerNotification[];
 }): ManagerNotification[] {
   return [
@@ -2327,7 +2338,36 @@ export function composeManagerNotifications(sources: {
     ...sources.contactMessages,
     ...sources.digestStalled,
     ...sources.interestRegistrations,
+    ...sources.insuranceEnding,
     ...sources.membershipWindows,
+  ];
+}
+
+/**
+ * "3 people's insurance ends in the next 14 days." News for the door, not work:
+ * each of them is emailed by the daily job, and the item is here so a manager
+ * can mention it when they next train. It clears as people renew or their end
+ * day passes, like every attention item.
+ *
+ * `people` counts PEOPLE, not memberships, and only those owed the "ending
+ * soon" reminder (`insuranceRemindersDue`), so somebody who has already renewed
+ * or whose cover a manager cancelled is not in it.
+ */
+export function insuranceEndingNotifications(people: number): ManagerNotification[] {
+  if (people <= 0) return [];
+  return [
+    {
+      type: "insurance_ending_soon",
+      title:
+        people === 1
+          ? "1 person's insurance ends in the next 14 days"
+          : `${people} people's insurance ends in the next 14 days`,
+      body: "Each of them is emailed 14 days before and again on the day. Mention it if you see them at training.",
+      // The memberships screen lists these people first, under their own
+      // heading, whenever there are any.
+      href: "/manager/memberships",
+      actionLabel: "See who",
+    },
   ];
 }
 

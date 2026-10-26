@@ -500,7 +500,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("26");
+    expect(AGENT_MANIFEST.version).toBe("27");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -525,6 +525,19 @@ describe("AGENT_MANIFEST", () => {
     const notes = AGENT_MANIFEST.changes.find((c) => c.version === "2")!.notes.join(" ");
     expect(notes).toMatch(/reconciled_invoice/);
     expect(notes).toMatch(/duplicate_waiver/);
+  });
+
+  it("announces the insurance reminder state the listings now carry", () => {
+    const entry = AGENT_MANIFEST.changes.find((c) => c.version === "27")!;
+    expect(entry.breaking).toBe(false);
+    const notes = entry.notes.join(" ");
+    expect(notes).toMatch(/insurance_reminder/);
+    expect(notes).toMatch(/ends_within_14_days/);
+    expect(notes).toMatch(/last_sent/);
+    for (const name of ["list_invoices", "list_users", "get_user"]) {
+      const spec = AGENT_MANIFEST.actions.find((a) => a.name === name)!;
+      expect(spec.summary).toMatch(/insurance_reminder/);
+    }
   });
 
   // #112 shipped a field whose MEANING changed with no manifest bump, no note

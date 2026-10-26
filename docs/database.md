@@ -1322,20 +1322,20 @@ clear by being fixed.
 
 ### `notifications`
 
-| Column         | Type          | Null | Notes                                                                                                                      |
-| -------------- | ------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- |
-| `id`           | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                               |
-| `user_id`      | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The recipient.                                                           |
-| `kind`         | `text`        | no   | `reply\|thread_activity\|new_blog_post\|blog_comment\|kb_comment\|membership_plan_open`.                                   |
-| `subject_type` | `text`        | no   | `blog_comment\|kb_annotation\|blog_post\|membership_plan_announcement`.                                                    |
-| `subject_id`   | `uuid`        | no   | What happened. **No FK**: it points at three tables (or at an announcement, which has none), and must outlive its subject. |
-| `actor_id`     | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who did it.                                                                |
-| `title`        | `text`        | no   | 1–200 chars. Frozen at write time.                                                                                         |
-| `body`         | `text`        | yes  | ≤ 500 chars. A preview of the comment (`commentPreview`).                                                                  |
-| `href`         | `text`        | no   | Site-relative (`CHECK href LIKE '/%'`); the sender prefixes the origin.                                                    |
-| `read_at`      | `timestamptz` | yes  | NULL = unread. Drives the badge.                                                                                           |
-| `emailed_at`   | `timestamptz` | yes  | NULL = not yet considered for email.                                                                                       |
-| `created_at`   | `timestamptz` | no   | Default `now()`.                                                                                                           |
+| Column         | Type          | Null | Notes                                                                                                                            |
+| -------------- | ------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                     |
+| `user_id`      | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The recipient.                                                                 |
+| `kind`         | `text`        | no   | `reply\|thread_activity\|new_blog_post\|blog_comment\|kb_comment\|membership_plan_open\|insurance_ending_soon\|insurance_ended`. |
+| `subject_type` | `text`        | no   | `blog_comment\|kb_annotation\|blog_post\|membership_plan_announcement\|membership`.                                              |
+| `subject_id`   | `uuid`        | no   | What happened. **No FK**: it points at four tables (or at an announcement, which has none), and must outlive its subject.        |
+| `actor_id`     | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who did it.                                                                      |
+| `title`        | `text`        | no   | 1–200 chars. Frozen at write time.                                                                                               |
+| `body`         | `text`        | yes  | ≤ 500 chars. A preview of the comment (`commentPreview`).                                                                        |
+| `href`         | `text`        | no   | Site-relative (`CHECK href LIKE '/%'`); the sender prefixes the origin.                                                          |
+| `read_at`      | `timestamptz` | yes  | NULL = unread. Drives the badge.                                                                                                 |
+| `emailed_at`   | `timestamptz` | yes  | NULL = not yet considered for email.                                                                                             |
+| `created_at`   | `timestamptz` | no   | Default `now()`.                                                                                                                 |
 
 `UNIQUE (user_id, kind, subject_id)`, plus indexes on `(user_id, created_at
 DESC)`, a partial `(user_id) WHERE read_at IS NULL` for the badge, and a partial
@@ -1355,7 +1355,18 @@ about is the `href` (`/membership?plan=<plan id>`), the same link the email
 opens; `announcementSummaries` in `src/lib/plan-announcement.ts` reads it back
 for the "Announced on..." line. One row per **inbox**, not per person: a family
 is one row on the parent, which is also why its count is the number of emails.
-It is the one kind no switch governs (`docs/notifications.md`).
+It has no email switch (`docs/notifications.md`), like the insurance reminders below.
+
+**The two insurance kinds** (`20261026000000_notification_insurance_reminders.sql`)
+have `subject_type = 'membership'` and `subject_id` = the yearly insurance
+membership. Their `user_id` is whoever READS the covered person's mail (the
+parent, for a child), unlike every other kind, where it is the person the row
+is about. A child has no login, so a row of theirs could never be seen in the
+app; the title names them instead. They have no switch in
+`notification_preferences`: the daily job sends them on its own, the summary
+never reads them, and one it could not send is retried the next morning. A row exists only while the reminder is or was owed, so
+`emailed_at` on one of these always means the email went out. See
+`docs/memberships.md`, "When yearly insurance ends".
 
 **Titles are frozen, not joined.** A notification is a record of a moment, the
 same call `waivers` makes about its person fields. Rendering from a live join

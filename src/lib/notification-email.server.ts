@@ -37,6 +37,7 @@ import { greetingName, stableCode, type PersonNameParts } from "@/lib/validation
 import { contactUserIdOf, deliveryEmailFor, loadHouseholdContacts } from "@/lib/household-email";
 import { SITE_ORIGIN } from "@/lib/seo";
 import { SITE_NAME } from "@/lib/email-sender";
+import { insuranceReminderKinds } from "@/lib/insurance-reminders";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -419,6 +420,12 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
     .from("notifications")
     .select("id, user_id, kind, subject_id, title, body, href, read_at, created_at")
     .is("emailed_at", null)
+    // Not the insurance reminders. They are sent by the same morning request
+    // just before this, under idempotency keys of their own, so one whose send
+    // was delivered but answered with an error must not go out again here
+    // under a different key. Whatever that run did not send, it retries the
+    // next morning itself (`insurance-reminders.server.ts`).
+    .not("kind", "in", `(${insuranceReminderKinds.join(",")})`)
     .order("created_at", { ascending: true })
     .limit(5000);
   if (error) throw new Error(error.message);

@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { InsuranceReminderState } from "@/lib/insurance-reminders";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   buildPaymentReference,
@@ -1482,6 +1483,17 @@ export const listMemberships = createServerFn({ method: "GET" })
       admin,
       (rows ?? []).map((r) => r.id),
     );
+    // Reminders about yearly insurance ending: the same projection the agent
+    // API's list_invoices reports. Lazy, because the module carries the email
+    // sender and this file ships to the client bundle.
+    const { loadInsuranceReminderStates } = await import("@/lib/insurance-reminders.server");
+    // Degrades to no reminder lines rather than failing the whole screen: a
+    // manager who came here for an invoice must not lose it to a reminder
+    // lookup. The agent API's listings keep failing loudly instead.
+    const reminders = await loadInsuranceReminderStates(admin, rows ?? []).catch((e) => {
+      console.error("[listMemberships] could not read insurance reminder state:", e);
+      return new Map<string, InsuranceReminderState>();
+    });
 
     return (rows ?? []).map((r) => ({
       ...projectMembership(r, planById.get(r.plan_id)),
@@ -1491,6 +1503,7 @@ export const listMemberships = createServerFn({ method: "GET" })
       // a member's own page reads too: it is the club's note about the money.
       paid_reference: r.paid_reference,
       checkin_count: checkinCounts.get(r.id) ?? 0,
+      insurance_reminder: reminders.get(r.id) ?? null,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
       member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
       // Null for the overwhelming majority: an account holder's address is
