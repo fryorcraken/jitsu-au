@@ -46,8 +46,8 @@ function fakeAdmin(results: QueryResult[]) {
           filters.push([`gte:${col}`, value]);
           return chain;
         },
-        in: (col: string, value: unknown) => {
-          filters.push([`in:${col}`, value]);
+        not: (col: string, op: string, value: unknown) => {
+          filters.push([`not.${op}:${col}`, value]);
           return chain;
         },
         order: () => chain,
@@ -122,10 +122,8 @@ describe("digestBacklogNotifications", () => {
     // summary, so one landing says nothing about the summary after it.
     const { admin, filters } = fakeAdmin([backlog(4), backlog(19)]);
     await digestBacklogNotifications(admin, NOW);
-    const kinds = filters.find(([f]) => f === "in:kind")?.[1] as string[];
-    expect(kinds).toContain("new_blog_post");
-    expect(kinds).not.toContain("insurance_ending_soon");
-    expect(kinds).not.toContain("insurance_ended");
+    const excluded = filters.find(([f]) => f === "not.in:kind")?.[1] as string;
+    expect(excluded).toBe("(insurance_ending_soon,insurance_ended)");
   });
 
   it("says nothing when a read fails, rather than crying wolf", async () => {

@@ -356,7 +356,8 @@ and nowhere else, so every surface that asks agrees:
   the `insurance_yearly` code, the same control the screens use.
 - **Unpaid cover is still reminded.** Cover is about dates, and an unpaid
   invoice is a separate problem the "How to pay" panel already shows.
-- **A cancelled one is not.** A manager ended it on purpose.
+- **Only active cover is.** A cancelled or expired one was ended on purpose by
+  a manager, and a leftover `pending` invoice is a promise rather than cover.
 - **Somebody who has already renewed is not.** That is another insurance
   membership of theirs, active, that ends later than this one, paid or not.
 - When "left the club" exists, the people who left drop out in that same
@@ -397,11 +398,11 @@ their own rather than in the morning summary. See `docs/notifications.md`.
    cancelled, the window passed). Deleted rather than stamped, so `emailed_at`
    on one of these rows only ever means the email went out.
 3. Send what is pending, at most 20 emails a run and the earliest end day
-   first, stamping `emailed_at` only on a successful send. Anything that run
-   did not send goes in the morning summary straight after, under
-   "Membership"; a row with no address it could resolve stays pending for the
-   next morning, and rows that sit unsent are what the stalled-email attention
-   item watches.
+   first, stamping `emailed_at` only on a successful send. Anything left over
+   or failed stays pending and goes on the next morning under the same
+   idempotency key, so a send that was delivered but answered with an error is
+   not delivered twice. The summary never sends these. Rows that sit unsent are
+   what the stalled-email attention item watches.
 
 Until `20261026000000_notification_insurance_reminders.sql` is applied the
 database refuses these kinds, so the writes are logged and nothing is sent.

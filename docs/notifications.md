@@ -624,11 +624,14 @@ and the two yearly insurance reminders, `insurance_ending_soon` and
 - **Nobody can turn them off.** `shouldEmail` answers yes for them without
   reading preferences, and the switches page offers nothing for them. Every kind
   with a switch still obeys it.
-- **Each is sent on its own first, and the summary is the fallback.** A plan
-  announcement goes out when the manager saves it; the insurance reminders go
-  out on the morning run, just before the summary. Any row of these kinds still
-  unsent when the summary runs is rendered in its "Membership" section, first,
-  rather than stamped as "nothing they wanted".
+- **Each is sent on its own.** A plan announcement goes out when the manager
+  saves it, and one still unsent when the summary runs is rendered in its
+  "Membership" section, first, rather than stamped as "nothing they wanted".
+  The insurance reminders go out on the morning run just before the summary,
+  and the summary never reads them: they carry idempotency keys of their own,
+  so a reminder whose send was delivered but answered with an error must not go
+  out again under the summary's key. Their own run retries them the next
+  morning instead.
 - **The insurance emails carry no settings link**, because a link to a page of
   switches would promise a choice that page does not offer.
 - **Adding a kind to the list takes a choice away from people**, so it is a
@@ -638,10 +641,11 @@ The insurance reminders are written and sent by the **same morning job** as the
 summary: `/api/notifications/digest` calls `sendInsuranceReminders` first, logs
 what it did, and carries on to the summary whatever happened. There is still one
 scheduler. The endpoint's response carries an `insurance` block beside the
-summary's counts. A reminder that run did not send (over its batch of 20, say)
-goes in that morning's summary instead; one with no address it could resolve
-stays unstamped, is retried the next morning, and counts toward the
-stalled-email attention item like any other unsent row.
+summary's counts. A reminder that run did not send (over its batch of 20, a failed
+send, an address it could not resolve) stays unstamped, is retried the next
+morning under the same key, and counts toward the stalled-email attention item
+like any other unsent row. The insurance stamps do not count as evidence the
+summary works, since they come from the same request just before it.
 
 ### A post goes live
 

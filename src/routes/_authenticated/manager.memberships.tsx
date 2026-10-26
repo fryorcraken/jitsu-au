@@ -184,7 +184,7 @@ function ManagerMembershipsPage() {
                       </td>
                       <td className="px-3 py-2">
                         {r.plan_name ?? "—"}
-                        {r.insurance_reminder && r.ends_at ? (
+                        {r.kind === "insurance" && r.ends_at ? (
                           <div className="text-xs text-muted-foreground">
                             Ends {formatDate(r.ends_at)}
                           </div>

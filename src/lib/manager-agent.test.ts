@@ -527,10 +527,6 @@ describe("AGENT_MANIFEST", () => {
     expect(notes).toMatch(/duplicate_waiver/);
   });
 
-  // #112 shipped a field whose MEANING changed with no manifest bump, no note
-  // and no doc, and the review caught it rather than a test. This is that test:
-  // a response field an agent is told to read has to be announced, or a client
-  // holding a cached manifest never learns it exists.
   it("announces the insurance reminder state the listings now carry", () => {
     const entry = AGENT_MANIFEST.changes.find((c) => c.version === "27")!;
     expect(entry.breaking).toBe(false);
@@ -544,6 +540,10 @@ describe("AGENT_MANIFEST", () => {
     }
   });
 
+  // #112 shipped a field whose MEANING changed with no manifest bump, no note
+  // and no doc, and the review caught it rather than a test. This is that test:
+  // a response field an agent is told to read has to be announced, or a client
+  // holding a cached manifest never learns it exists.
   it("announces the household fields list_users now carries", () => {
     const notes = AGENT_MANIFEST.changes.find((c) => c.version === "17")!.notes.join(" ");
     expect(notes).toMatch(/guardian_user_id/);

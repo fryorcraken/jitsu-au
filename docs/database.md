@@ -1363,8 +1363,8 @@ membership. Their `user_id` is whoever READS the covered person's mail (the
 parent, for a child), unlike every other kind, where it is the person the row
 is about. A child has no login, so a row of theirs could never be seen in the
 app; the title names them instead. They have no switch in
-`notification_preferences`: the daily job sends them on its own, and one it
-could not send falls into that morning's summary, as a plan announcement does. A row exists only while the reminder is or was owed, so
+`notification_preferences`: the daily job sends them on its own, the summary
+never reads them, and one it could not send is retried the next morning. A row exists only while the reminder is or was owed, so
 `emailed_at` on one of these always means the email went out. See
 `docs/memberships.md`, "When yearly insurance ends".
 

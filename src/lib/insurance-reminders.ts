@@ -119,9 +119,11 @@ export function insuranceRemindersDue(
 
   const due: DueInsuranceReminder[] = [];
   for (const c of covers) {
-    // A cancelled membership was ended on purpose by a manager, so it is owed
-    // nothing. One with no end date is not a year of cover at all.
-    if (!c.user_id || !c.ends_at || c.status === "cancelled") continue;
+    // Only ACTIVE cover is reminded about, the same test the renewal check
+    // uses. A cancelled or expired one was ended on purpose by a manager, and a
+    // leftover `pending` one is a promise rather than cover. One with no end
+    // date is not a year of cover at all.
+    if (!c.user_id || !c.ends_at || c.status !== "active") continue;
     const endDay = coverEndDay(c.ends_at);
     const daysLeft = calendarDaysBetween(today, endDay);
     const kind: InsuranceReminderKind | null =

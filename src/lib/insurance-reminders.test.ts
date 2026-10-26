@@ -117,6 +117,11 @@ describe("insuranceRemindersDue: who is left out", () => {
     expect(kindAt(cover({ status: "cancelled" }), now)).toBeNull();
   });
 
+  it("reminds only about active cover: not an expired row, not a leftover pending one", () => {
+    expect(kindAt(cover({ status: "expired" }), now)).toBeNull();
+    expect(kindAt(cover({ status: "pending" }), now)).toBeNull();
+  });
+
   it("skips somebody who already holds cover that runs past the end", () => {
     const renewal = cover({ id: "m2", ends_at: endsOn("2028-03-12") });
     expect(kindAt(cover(), now, [renewal])).toBeNull();

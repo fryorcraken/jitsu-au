@@ -79,9 +79,10 @@ async function insurancePlanIds(db: AdminClient): Promise<string[]> {
 }
 
 /**
- * Every insurance membership the reminder rules could need today: anything not
- * cancelled that ends on or after the oldest day an "ended" reminder may still
- * go out. That also covers the renewal check, since a renewal ends later.
+ * Every insurance membership the reminder rules could need today: the active
+ * ones that end on or after the oldest day an "ended" reminder may still go
+ * out. That also covers the renewal check, since a renewal is active and ends
+ * later.
  */
 export async function loadInsuranceCovers(db: AdminClient, now: Date): Promise<InsuranceCover[]> {
   const planIds = await insurancePlanIds(db);
@@ -91,7 +92,7 @@ export async function loadInsuranceCovers(db: AdminClient, now: Date): Promise<I
     .from("memberships")
     .select("id, user_id, status, ends_at")
     .in("plan_id", planIds)
-    .neq("status", "cancelled")
+    .eq("status", "active")
     .gte("ends_at", since);
   if (error) throw new Error(error.message);
   return data ?? [];

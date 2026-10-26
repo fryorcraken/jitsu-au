@@ -82,7 +82,16 @@ function fakeDb(pending: PendingRow[], fails: { emails?: boolean; prefs?: boolea
         return {
           select: () => ({
             is: () => ({
-              order: () => ({ limit: () => Promise.resolve({ data: pending, error: null }) }),
+              // The digest leaves the insurance reminders to their own sender.
+              not: (_c: string, _op: string, list: string) => ({
+                order: () => ({
+                  limit: () =>
+                    Promise.resolve({
+                      data: pending.filter((r) => !list.includes(r.kind)),
+                      error: null,
+                    }),
+                }),
+              }),
             }),
           }),
           update: () => ({
@@ -194,27 +203,25 @@ describe("sendDailyDigests, for a household", () => {
     expect(stamped.flat().sort()).toEqual(["n1", "n2", "n3", "n4"]);
   });
 
-  it("puts an insurance reminder its own send missed into the summary, under Membership", async () => {
+  it("leaves the insurance reminders to their own sender", async () => {
     const { sendDailyDigests } = await import("./notification-email.server");
-    // The reminders are sent on their own by the same morning run, just before
-    // the summary. One that run could not send (over its batch, say) must not
-    // be stamped here as "nothing they wanted": it has no switch, so it goes in
-    // the summary instead, the same fallback a plan announcement gets.
+    // They are sent by the same morning request just before this, under keys
+    // of their own. One whose send was delivered but answered with an error
+    // would otherwise go out a second time here, under the digest's key, which
+    // the provider cannot recognise as the same email. Whatever that run did
+    // not send, it retries itself the next morning.
     const reminder: PendingRow = {
       ...post("n9", PARENT, "membership-1"),
       kind: "insurance_ending_soon",
       title: "Bea's club insurance ends on 12 March",
       href: "/membership?for=child-a",
     };
-    const { db, stamped } = fakeDb([reminder]);
+    const { db, stamped } = fakeDb([post("n1", PARENT), reminder]);
 
     const result = await sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"));
 
-    expect(result).toEqual({ considered: 1, recipients: 1, sent: 1 });
-    const [payload] = sendLovableEmail.mock.calls[0] as [SentEmail];
-    expect(payload.text).toMatch(/membership/i);
-    expect(payload.text).toContain("Bea's club insurance ends on 12 March");
-    expect(stamped.flat()).toEqual(["n9"]);
+    expect(result.considered).toBe(1);
+    expect(stamped.flat()).toEqual(["n1"]);
   });
 
   it("still sends a separate email to an unrelated household", async () => {
