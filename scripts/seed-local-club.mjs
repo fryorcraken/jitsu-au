@@ -39,7 +39,6 @@ import { fileURLToPath } from "node:url";
 
 import { createClient } from "@supabase/supabase-js";
 
-import { CODE_OF_CONDUCT_VERSION } from "../src/lib/code-of-conduct.ts";
 import { splitBlocks } from "../src/lib/kb.ts";
 import { isLocalSupabase } from "./local-supabase.ts";
 
@@ -101,6 +100,8 @@ const BLOG = { welcome: id(21), grading: id(22), draft: id(23) };
 const KB_ARTICLE = { welcome: id(41), etiquette: id(42) };
 const SERIES = id(51);
 const IMPORT_BATCH = id(71);
+/** The manager's own year of cover, ending inside the 14-day reminder window. */
+const ENDING_INSURANCE = id(81);
 
 /** Named so the annotation below can be anchored to one of its blocks. */
 const ETIQUETTE_BODY = [
@@ -388,7 +389,7 @@ const TEMPLATE_VERSION = currentTemplate.version;
 
 const plans = await select(
   "membership_plans",
-  "id, kind, name, public_price_cents, student_price_cents",
+  "id, code, kind, name, public_price_cents, student_price_cents",
 );
 /**
  * The plan of a given kind a manager would reach for, creating one when the
@@ -428,6 +429,26 @@ const PERIOD_PLAN = await planOf("period", {
   ends_on: on(120),
   sort_order: 2,
 });
+/**
+ * Next semester, set up and on sale but never announced: the plan the
+ * manager's "Email all members about this plan" flow is photographed on
+ * (e2e/manager/plan-announcement.spec.ts). Looked up by code rather than kind,
+ * because the semester above is the period plan every other spec reaches for.
+ */
+const NEXT_PLAN_CODE = "screenshot-next-semester";
+if (!plans.some((candidate) => candidate.code === NEXT_PLAN_CODE)) {
+  await insert("membership_plans", {
+    code: NEXT_PLAN_CODE,
+    name: "Next semester",
+    description: "Unlimited classes for the whole semester. Grading fee included.",
+    kind: "period",
+    public_price_cents: 46000,
+    student_price_cents: 25500,
+    starts_on: on(130),
+    ends_on: on(250),
+    sort_order: 3,
+  });
+}
 const INSURANCE_PLAN = await planOf("insurance");
 const TRIAL_PLAN = await planOf("trial");
 /** What this person actually paid, so the invoice on screen adds up. */
@@ -569,12 +590,26 @@ for (const waiverId of Object.values(waivers)) {
 }
 console.log(`[seed] waiver PDFs: ${Object.keys(waivers).length}`);
 
+// The code of conduct's version 1 is seeded by its migration
+// (20261023200000_code_of_conduct_versions.sql), with the text members agreed
+// to, so /code-of-conduct renders in the local stack and the acceptance below
+// names a version that exists. Checked rather than assumed: without it the
+// public page shows "not available" and every screenshot of it is of that.
+await attempt("checking the code of conduct's version 1", async () => {
+  const live = await select("code_of_conduct_versions", "version", (q) => q.eq("is_current", true));
+  if (live.length !== 1 || live[0].version !== 1) {
+    throw new Error(
+      "expected version 1 of the code of conduct to be live; was every migration applied?",
+    );
+  }
+});
+
 await insert("code_of_conduct_acceptances", {
   user_id: users.member,
   email: PERSONAS.member.email,
   full_name: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
   signature_name: `${PERSONAS.member.firstName} ${PERSONAS.member.lastName}`,
-  version: CODE_OF_CONDUCT_VERSION,
+  version: 1,
   accepted_at: at(-59),
 });
 
@@ -602,6 +637,24 @@ await insert("memberships", [
     paid_at: at(-58),
     starts_at: at(-58),
     ends_at: at(307),
+  },
+  // Yearly insurance ending in 10 days, so the gallery photographs the reminder
+  // state ("14-day reminder sent") on the manager screens and the "insurance
+  // ends in the next 14 days" attention item. On the MANAGER, deliberately:
+  // the member's own cover drives the insurance tick on /membership that the
+  // purchase specs walk, and the household spec deletes whatever the children
+  // hold. See docs/memberships.md, "When yearly insurance ends".
+  {
+    id: ENDING_INSURANCE,
+    user_id: users.manager,
+    plan_id: INSURANCE_PLAN.id,
+    status: "active",
+    price_cents: priceOf(INSURANCE_PLAN, false),
+    payment_method: "bank_transfer",
+    payment_reference: "JITSU-000104",
+    paid_at: at(-355),
+    starts_at: at(-355),
+    ends_at: at(10),
   },
   {
     user_id: users.applicant,
@@ -874,6 +927,22 @@ await insert("notifications", [
     href: "/kb/mat-etiquette",
     created_at: at(-5),
     emailed_at: at(-4),
+  },
+  // The 14-day reminder for the cover above, already sent by the morning job.
+  {
+    user_id: users.manager,
+    kind: "insurance_ending_soon",
+    subject_type: "membership",
+    subject_id: ENDING_INSURANCE,
+    // The title the morning job writes (`insuranceReminderTitle`).
+    title: `Your club insurance ends on ${new Date(at(10)).toLocaleDateString("en-AU", {
+      day: "numeric",
+      month: "long",
+      timeZone: "Australia/Sydney",
+    })}`,
+    href: "/membership",
+    created_at: at(-4, 22),
+    emailed_at: at(-4, 22),
   },
 ]);
 

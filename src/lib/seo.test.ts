@@ -447,9 +447,10 @@ function declaresNoindex(source: string): boolean {
 /** URL a route file serves, from its directory prefix and basename-without-extension. */
 function routePath(prefix: string, base: string): string {
   // "index" resolves to whatever its directory is, and a dot inside a route
-  // filename is a path separator ("manager.waivers" -> "/manager/waivers").
+  // filename is a path separator ("manager.waivers" -> "/manager/waivers"),
+  // except where `[.]` escapes one that belongs in the URL ("[.]lovable").
   if (base === "index") return prefix || "/";
-  return `${prefix}/${base.replace(/\./g, "/")}`;
+  return `${prefix}/${base.replace(/\./g, "/").replaceAll("[/]", ".")}`;
 }
 
 /**
@@ -494,6 +495,10 @@ describe("routePath", () => {
 
   it("reads a dot in the filename as a path separator", () => {
     expect(routePath("", "manager.waivers")).toBe("/manager/waivers");
+  });
+
+  it("keeps a dot the filename escapes with [.]", () => {
+    expect(routePath("", "[.]lovable.oauth.consent")).toBe("/.lovable/oauth/consent");
   });
 });
 

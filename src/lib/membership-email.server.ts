@@ -142,7 +142,11 @@ export async function sendMembershipPaymentEmail({
     });
     sent.push(memberEmail);
   } catch (e) {
-    console.error(`[membership-email] failed to email member ${memberEmail}:`, e);
+    // The address stays out of the log: the membership id is enough to find it.
+    console.error(
+      `[membership-email] failed to email the member for membership ${membershipId}:`,
+      e,
+    );
   }
 
   // Replying to the manager copy reaches whoever was sent the invoice: the
@@ -163,7 +167,10 @@ export async function sendMembershipPaymentEmail({
       });
       sent.push(to);
     } catch (e) {
-      console.error(`[membership-email] failed to email manager ${to}:`, e);
+      console.error(
+        `[membership-email] failed to email a manager for membership ${membershipId}:`,
+        e,
+      );
     }
   }
 
@@ -252,7 +259,10 @@ export async function sendMembershipPaidEmail({
     });
     return { sent: true, skipped: false };
   } catch (e) {
-    console.error(`[membership-email] failed to email member ${memberEmail}:`, e);
+    console.error(
+      `[membership-email] failed to email the paid receipt for membership ${membershipId}:`,
+      e,
+    );
     return { sent: false, skipped: false };
   }
 }
@@ -337,7 +347,7 @@ export async function sendItemInvoiceEmail({
     });
     return { sent: true, skipped: false };
   } catch (e) {
-    console.error(`[item-invoice-email] failed to email ${memberEmail}:`, e);
+    console.error(`[item-invoice-email] failed to email invoice ${invoiceId}:`, e);
     return { sent: false, skipped: false };
   }
 }

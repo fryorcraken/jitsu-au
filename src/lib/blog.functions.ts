@@ -7,6 +7,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   blogPostSchema,
   blogPostSlugSchema,
+  type BlogImageMimeType,
+  type BlogPostInput,
   type BlogPostStatus,
   deleteBlogPostSchema,
   getBlogPostForEditSchema,
@@ -57,6 +59,14 @@ function serverSupabase() {
   });
 }
 
+/** A title with nothing in it a web address can use, and no slug given instead. */
+export class BlogSlugError extends Error {
+  constructor() {
+    super("Could not turn that title into a URL. Set a URL slug by hand.");
+    this.name = "BlogSlugError";
+  }
+}
+
 /**
  * Resolve the slug a post will be saved under: the manager's own, or one
  * derived from the title and today's date (`defaultBlogSlug`), made unique
@@ -74,7 +84,7 @@ export async function resolvePostSlug(
 ): Promise<string> {
   const base = (provided || "").trim() || defaultBlogSlug(title, now);
   if (!base) {
-    throw new Error("Could not turn that title into a URL. Set a URL slug by hand.");
+    throw new BlogSlugError();
   }
   let query = admin.from("blog_posts").select("slug").ilike("slug", `${base}%`);
   if (excludeId) query = query.neq("id", excludeId);
@@ -175,63 +185,142 @@ export const getBlogPostBySlug = createServerFn({ method: "GET" })
   });
 
 // ---- Manager: authoring ----
+//
+// Each write is a plain function taking the service-role client, and the
+// server functions below are thin wrappers that check the caller is a manager
+// first. The manager agent API (src/lib/manager-agent-actions.ts) calls the
+// same functions, so a post saved by an agent and one saved on /manager/blog
+// are the same row written the same way: same slug and excerpt resolution,
+// same publish date rule, same announcement.
 
-export const listAllBlogPosts = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin
-      .from("blog_posts")
-      .select("id, slug, title, status, published_at, created_at, updated_at")
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  });
+type AdminClient = SupabaseClient<Database>;
 
-export const getBlogPostForEdit = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => getBlogPostForEditSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row, error } = await supabaseAdmin
+/** A post that was asked for by id or slug and is not there. */
+export class BlogPostNotFoundError extends Error {
+  constructor() {
+    super("That post no longer exists.");
+    this.name = "BlogPostNotFoundError";
+  }
+}
+
+/** Every post, any status, newest first. */
+export async function listBlogPostRows(admin: AdminClient) {
+  const { data, error } = await admin
+    .from("blog_posts")
+    .select("id, slug, title, status, published_at, created_at, updated_at")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/**
+ * A create that would have taken an address another post already has, when
+ * the caller asked for that to be refused rather than suffixed. Carries the
+ * post that holds it, which on a retried create is the one the first attempt
+ * filed.
+ */
+export class BlogSlugTakenError extends Error {
+  constructor(
+    readonly slug: string,
+    readonly existingId: string,
+  ) {
+    super(`A post already has the address /blog/${slug}.`);
+    this.name = "BlogSlugTakenError";
+  }
+}
+
+/** A guarded update whose post changed after the caller read it. */
+export class BlogPostChangedError extends Error {
+  constructor() {
+    super("The post changed after it was read.");
+    this.name = "BlogPostChangedError";
+  }
+}
+
+/** One post, any status, by id or by slug. Throws `BlogPostNotFoundError`. */
+export async function loadBlogPostRow(admin: AdminClient, key: { id: string } | { slug: string }) {
+  const query = admin.from("blog_posts").select("*");
+  const { data: row, error } = await (
+    "id" in key ? query.eq("id", key.id) : query.eq("slug", key.slug)
+  ).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!row) throw new BlogPostNotFoundError();
+  return { ...row, cover_image_url: coverImageUrl(admin, row.cover_image_path) };
+}
+
+/** What a save stored, including what the server resolved for the caller. */
+export type SavedBlogPost = {
+  id: string;
+  slug: string;
+  excerpt: string | null;
+  status: BlogPostStatus;
+  published_at: string | null;
+  /**
+   * True when this save took the post live for the FIRST time, which is when
+   * members are told. A republish after a trip back to draft also calls the
+   * announcement, but the unique index makes that a no-op, so it is not
+   * reported as one. Says the announcement was asked for, not that it was
+   * delivered: it is best-effort (`announcePost`).
+   */
+  announced: boolean;
+};
+
+/**
+ * `refuseTakenSlug` is for a caller that may retry a create it never heard
+ * back from (the manager agent API). The editor resolves a taken address to
+ * `-2`, `-3`, which is right for a person typing a second post with the same
+ * title; for a retry it files the same post twice and announces it twice. With
+ * the flag, an address already taken throws `BlogSlugTakenError` naming the
+ * post that has it instead.
+ */
+export async function createBlogPostRow(
+  admin: AdminClient,
+  data: BlogPostInput,
+  actorId: string,
+  opts: { refuseTakenSlug?: boolean } = {},
+): Promise<SavedBlogPost> {
+  if (opts.refuseTakenSlug) {
+    const base = (data.slug || "").trim() || defaultBlogSlug(data.title, new Date());
+    if (!base) throw new BlogSlugError();
+    const { data: holder, error: holderErr } = await admin
       .from("blog_posts")
-      .select("*")
-      .eq("id", data.id)
+      .select("id")
+      .eq("slug", base)
       .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!row) throw new Error("That post no longer exists.");
-    return { ...row, cover_image_url: coverImageUrl(supabaseAdmin, row.cover_image_path) };
-  });
-
-export const createBlogPost = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => blogPostSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    await requireManager(context);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const slug = await resolvePostSlug(supabaseAdmin, data.title, data.slug);
-    const { data: row, error } = await supabaseAdmin
-      .from("blog_posts")
-      .insert({
-        slug,
-        title: data.title,
-        excerpt: resolveExcerpt(data.excerpt, data.body_md),
-        body_md: data.body_md,
-        cover_image_path: data.cover_image_path || null,
-        status: data.status,
-        author_id: context.userId,
-        published_at: data.status === "published" ? new Date().toISOString() : null,
-      })
-      .select("id, slug")
-      .single();
-    if (error) throw new Error(error.message);
-    if (data.status === "published") {
-      await announcePost(row.id, row.slug, data.title, context.userId);
-    }
-    return row;
-  });
+    if (holderErr) throw new Error(holderErr.message);
+    if (holder) throw new BlogSlugTakenError(base, holder.id);
+  }
+  const slug = await resolvePostSlug(admin, data.title, data.slug);
+  const excerpt = resolveExcerpt(data.excerpt, data.body_md);
+  const publishedAt = data.status === "published" ? new Date().toISOString() : null;
+  const { data: row, error } = await admin
+    .from("blog_posts")
+    .insert({
+      slug,
+      title: data.title,
+      excerpt,
+      body_md: data.body_md,
+      cover_image_path: data.cover_image_path || null,
+      status: data.status,
+      author_id: actorId,
+      published_at: publishedAt,
+    })
+    .select("id, slug")
+    .single();
+  if (error) throw new Error(error.message);
+  const announced = data.status === "published";
+  if (announced) {
+    await announcePost(row.id, row.slug, data.title, actorId);
+  }
+  return {
+    id: row.id,
+    slug: row.slug,
+    excerpt,
+    status: data.status,
+    published_at: publishedAt,
+    announced,
+  };
+}
 
 /**
  * Tell everybody a post went live. Best-effort and swallowed: a post is
@@ -257,6 +346,161 @@ async function announcePost(
   }
 }
 
+/**
+ * `stored` is the row as a caller read it before deciding what to write (the
+ * manager agent API, which keeps omitted fields from it). Given, it is used in
+ * place of a second read, and the write only lands if the post has not been
+ * saved since: the caller is writing back fields it did not mean to change, so
+ * without the guard a save made in between would be quietly undone. Throws
+ * `BlogPostChangedError` then. The editor sends what is on screen and passes
+ * nothing.
+ */
+export async function updateBlogPostRow(
+  admin: AdminClient,
+  data: BlogPostInput & { id: string },
+  actorId: string,
+  stored?: { status: string; published_at: string | null; updated_at: string },
+): Promise<SavedBlogPost> {
+  let existing = stored;
+  if (!existing) {
+    const { data: row, error: existingErr } = await admin
+      .from("blog_posts")
+      .select("status, published_at, updated_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (existingErr) throw new Error(existingErr.message);
+    if (!row) throw new BlogPostNotFoundError();
+    existing = row;
+  }
+  const slug = await resolvePostSlug(admin, data.title, data.slug, data.id);
+  const publishedAt = resolvePublishedAt(
+    existing.published_at,
+    data.status,
+    new Date().toISOString(),
+  );
+  const excerpt = resolveExcerpt(data.excerpt, data.body_md);
+  let update = admin
+    .from("blog_posts")
+    .update({
+      slug,
+      title: data.title,
+      excerpt,
+      body_md: data.body_md,
+      cover_image_path: data.cover_image_path || null,
+      status: data.status,
+      published_at: publishedAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", data.id);
+  if (stored) update = update.eq("updated_at", stored.updated_at);
+  const { data: written, error } = await update.select("id");
+  if (error) throw new Error(error.message);
+  if (!(written ?? []).length) {
+    if (stored) throw new BlogPostChangedError();
+    throw new BlogPostNotFoundError();
+  }
+  // Announce on the transition INTO published, not on every save of a
+  // published post: editing a typo is not news. The unique index makes a
+  // repeat harmless anyway, so this is about not doing the work rather than
+  // about correctness.
+  const goesLive = data.status === "published" && existing.status !== "published";
+  if (goesLive) {
+    await announcePost(data.id, slug, data.title, actorId);
+  }
+  // Reported only when it reached anybody: on the first time live. A
+  // republish calls it again, but the unique index makes that a no-op, and
+  // `published_at` is stamped once and never cleared, so a null one is "never
+  // live before".
+  const announced = goesLive && existing.published_at === null;
+  return { id: data.id, slug, excerpt, status: data.status, published_at: publishedAt, announced };
+}
+
+/** Delete a post and, best-effort, its cover image. `deleted` is false when there was no such post. */
+export async function deleteBlogPostRow(
+  admin: AdminClient,
+  id: string,
+): Promise<{ deleted: boolean }> {
+  const { data: row } = await admin
+    .from("blog_posts")
+    .select("cover_image_path")
+    .eq("id", id)
+    .maybeSingle();
+  const { data: gone, error } = await admin.from("blog_posts").delete().eq("id", id).select("id");
+  if (error) throw new Error(error.message);
+  // Best-effort: the post row is gone either way, so a storage cleanup
+  // failure must not be reported as the delete having failed.
+  if (row?.cover_image_path && !(await blogImageInUse(admin, row.cover_image_path))) {
+    await admin.storage
+      .from(BUCKET)
+      .remove([row.cover_image_path])
+      .catch(() => {});
+  }
+  return { deleted: (gone ?? []).length > 0 };
+}
+
+/**
+ * Whether any remaining post shows this stored image, as its cover or in its
+ * body. The composer always uploaded a fresh cover, so a cover was only ever
+ * its own post's; the agent API can set any stored path as a cover, so one
+ * image may now be several posts'. Removing it with one of them would break
+ * the others for good. A failed check counts as in use: an orphaned file costs
+ * nothing, a deleted one cannot be brought back.
+ */
+async function blogImageInUse(admin: AdminClient, path: string): Promise<boolean> {
+  const [asCover, inBody] = await Promise.all([
+    admin.from("blog_posts").select("id").eq("cover_image_path", path).limit(1),
+    admin.from("blog_posts").select("id").ilike("body_md", `%${path}%`).limit(1),
+  ]);
+  if (asCover.error || inBody.error) return true;
+  return (asCover.data ?? []).length > 0 || (inBody.data ?? []).length > 0;
+}
+
+/**
+ * Put an image in the `blog-media` bucket and return its storage path (what
+ * `cover_image_path` takes) and its public address (what a Markdown image in
+ * the body points at).
+ */
+export async function storeBlogImage(
+  admin: AdminClient,
+  file: { post_id?: string; name: string; type: BlogImageMimeType; bytes: Uint8Array },
+): Promise<{ path: string; url: string }> {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${file.post_id || "drafts"}/${crypto.randomUUID()}-${safeName}`;
+  const { error } = await admin.storage
+    .from(BUCKET)
+    .upload(path, file.bytes, { contentType: file.type, upsert: false });
+  if (error) throw new Error(error.message);
+  const { data: pub } = admin.storage.from(BUCKET).getPublicUrl(path);
+  return { path, url: pub.publicUrl };
+}
+
+export const listAllBlogPosts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    return listBlogPostRows(supabaseAdmin);
+  });
+
+export const getBlogPostForEdit = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => getBlogPostForEditSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    return loadBlogPostRow(supabaseAdmin, { id: data.id });
+  });
+
+export const createBlogPost = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => blogPostSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const saved = await createBlogPostRow(supabaseAdmin, data, context.userId);
+    return { id: saved.id, slug: saved.slug };
+  });
+
 export const updateBlogPost = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => blogPostSchema.parse(d))
@@ -264,46 +508,12 @@ export const updateBlogPost = createServerFn({ method: "POST" })
     if (!data.id) throw new Error("Missing post id.");
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: existing, error: existingErr } = await supabaseAdmin
-      .from("blog_posts")
-      .select("status, published_at")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (existingErr) throw new Error(existingErr.message);
-    if (!existing) throw new Error("That post no longer exists.");
-    const slug = await resolvePostSlug(supabaseAdmin, data.title, data.slug, data.id);
-    const publishedAt = resolvePublishedAt(
-      existing.published_at,
-      data.status,
-      new Date().toISOString(),
-    );
-    const excerpt = resolveExcerpt(data.excerpt, data.body_md);
-    const { error } = await supabaseAdmin
-      .from("blog_posts")
-      .update({
-        slug,
-        title: data.title,
-        excerpt,
-        body_md: data.body_md,
-        cover_image_path: data.cover_image_path || null,
-        status: data.status,
-        published_at: publishedAt,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", data.id);
-    if (error) throw new Error(error.message);
-    // Announce on the transition INTO published, not on every save of a
-    // published post: editing a typo is not news. The unique index makes a
-    // repeat harmless anyway, so this is about not doing the work rather than
-    // about correctness.
-    if (data.status === "published" && existing.status !== "published") {
-      await announcePost(data.id, slug, data.title, context.userId);
-    }
+    const saved = await updateBlogPostRow(supabaseAdmin, { ...data, id: data.id }, context.userId);
     // `slug` and `excerpt` both come back because the server may have resolved
     // either one (a slug collision, or an excerpt derived from the body): the
     // edit page uses them as the new baseline so the form isn't left reading
     // as dirty, and showing something other than what was stored.
-    return { ok: true as const, slug, excerpt };
+    return { ok: true as const, slug: saved.slug, excerpt: saved.excerpt };
   });
 
 export const deleteBlogPost = createServerFn({ method: "POST" })
@@ -312,21 +522,7 @@ export const deleteBlogPost = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row } = await supabaseAdmin
-      .from("blog_posts")
-      .select("cover_image_path")
-      .eq("id", data.id)
-      .maybeSingle();
-    const { error } = await supabaseAdmin.from("blog_posts").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
-    // Best-effort: the post row is gone either way, so a storage cleanup
-    // failure must not be reported as the delete having failed.
-    if (row?.cover_image_path) {
-      await supabaseAdmin.storage
-        .from(BUCKET)
-        .remove([row.cover_image_path])
-        .catch(() => {});
-    }
+    await deleteBlogPostRow(supabaseAdmin, data.id);
     return { ok: true as const };
   });
 
@@ -336,13 +532,10 @@ export const uploadBlogImage = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const bytes = decodeBase64(data.data);
-    const safeName = data.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const path = `${data.post_id || "drafts"}/${crypto.randomUUID()}-${safeName}`;
-    const { error } = await supabaseAdmin.storage
-      .from(BUCKET)
-      .upload(path, bytes, { contentType: data.type, upsert: false });
-    if (error) throw new Error(error.message);
-    const { data: pub } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
-    return { path, url: pub.publicUrl };
+    return storeBlogImage(supabaseAdmin, {
+      post_id: data.post_id,
+      name: data.name,
+      type: data.type,
+      bytes: decodeBase64(data.data),
+    });
   });

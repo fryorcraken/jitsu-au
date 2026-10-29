@@ -85,6 +85,25 @@ export const Route = createFileRoute("/api/notifications/digest")({
         try {
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
           const { sendDailyDigests } = await import("@/lib/notification-email.server");
+          const { sendInsuranceReminders } = await import("@/lib/insurance-reminders.server");
+
+          // The insurance reminders first, on the same morning run rather than
+          // a scheduler of their own. They are sent on their own, outside the
+          // summary, and a failure here is logged and never stops the summary
+          // going out. docs/memberships.md, "When yearly insurance ends".
+          let insurance: Awaited<ReturnType<typeof sendInsuranceReminders>> | { error: string };
+          try {
+            insurance = await sendInsuranceReminders(supabaseAdmin);
+            console.log(
+              `[digest] insurance reminders: ${insurance.due} owed, ${insurance.written} new, ${insurance.withdrawn} withdrawn, ${insurance.sent} emails sent`,
+            );
+          } catch (e) {
+            console.error("[digest] insurance reminders failed:", e);
+            insurance = {
+              error: e instanceof Error ? e.message : "The insurance reminders failed.",
+            };
+          }
+
           const result = await sendDailyDigests(supabaseAdmin);
           // The only durable record that a run happened. The caller is pg_net,
           // which discards the response, so a run that mailed nobody is
@@ -93,7 +112,7 @@ export const Route = createFileRoute("/api/notifications/digest")({
           console.log(
             `[digest] considered ${result.considered} notifications for ${result.recipients} people, sent ${result.sent}`,
           );
-          return json({ ok: true, ...result }, 200);
+          return json({ ok: true, ...result, insurance }, 200);
         } catch (e) {
           const message = e instanceof Error ? e.message : "The digest failed.";
           console.error("[digest] run failed:", e);

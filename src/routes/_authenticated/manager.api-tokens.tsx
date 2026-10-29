@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { KeyRound } from "lucide-react";
+import type { OAuthGrant } from "@supabase/supabase-js";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
@@ -52,6 +54,13 @@ function ApiTokensPage() {
   const [creating, setCreating] = useState(false);
   // The raw token is shown exactly once, right after creation.
   const [freshToken, setFreshToken] = useState<{ label: string; token: string } | null>(null);
+  // Assistants connected over MCP. Read straight from the club's sign-in as the
+  // manager themselves, so it lists their own connections and nobody else's.
+  const [grants, setGrants] = useState<OAuthGrant[]>([]);
+  const [grantsLoading, setGrantsLoading] = useState(true);
+  const [grantsError, setGrantsError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const baseUrl = linkOrigin(typeof window !== "undefined" ? window.location.origin : null);
   const agentPrompt = useMemo(() => buildAgentPrompt({ baseUrl }), [baseUrl]);
@@ -78,10 +87,51 @@ function ApiTokensPage() {
       .finally(() => setLoading(false));
   }, [fetchTokens]);
 
+  // Resolves to the fresh list, or null when it could not be read, so a failed
+  // removal can check what actually happened before saying anything.
+  const loadGrants = useCallback(async (): Promise<OAuthGrant[] | null> => {
+    setGrantsLoading(true);
+    try {
+      const { data, error } = await supabase.auth.oauth.listGrants();
+      if (error) throw error;
+      const fresh = data ?? [];
+      setGrants(fresh);
+      setGrantsError(null);
+      // The list is the truth now; an earlier failed removal may since have
+      // gone through, so its message no longer describes anything.
+      setRemoveError(null);
+      return fresh;
+    } catch (e) {
+      setGrantsError(describeLoadError(e, "Could not load connected assistants"));
+      return null;
+    } finally {
+      setGrantsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isManager) return;
     load();
-  }, [isManager, load]);
+    void loadGrants();
+  }, [isManager, load, loadGrants]);
+
+  // No confirm: reconnecting is one sign-in away, so this just happens.
+  async function onRemoveGrant(grant: OAuthGrant) {
+    const name = grant.client.name || "The assistant";
+    setRemoving(grant.client.id);
+    setRemoveError(null);
+    const { error } = await supabase.auth.oauth.revokeGrant({ clientId: grant.client.id });
+    // Re-read either way. After an error that also settles what happened: if
+    // the row is gone (removed from another tab, say) it worked.
+    const fresh = await loadGrants();
+    setRemoving(null);
+    if (error && !(fresh && !fresh.some((g) => g.client.id === grant.client.id))) {
+      const why = describeLoadError(error, "The club's sign-in did not answer").replace(/\.$/, "");
+      setRemoveError(`${name} may still be connected. ${why}. Check the list and try again.`);
+      return;
+    }
+    toast.success(`${name} removed`);
+  }
 
   async function onCreate() {
     if (!label.trim()) {
@@ -240,7 +290,9 @@ function ApiTokensPage() {
             <CardTitle className="text-base">Connect without a token</CardTitle>
             <CardDescription>
               Assistants that support MCP (Claude Code, Claude, Cursor) can connect by signing in
-              with your club login instead. They get the same actions as a token.
+              with your club login instead. One connected this way is signed in as you: it gets the
+              same actions as a token, and anything else your login can reach, so only connect one
+              you trust.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -266,6 +318,60 @@ function ApiTokensPage() {
               Your assistant opens this site in a browser, you sign in and approve it, and you're
               done. Only manager accounts can use it.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* Assistants this manager has approved over MCP, and the way to cut one off. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Connected assistants</CardTitle>
+            <CardDescription>
+              Remove an assistant to sign it out. It can't sign back in without asking you again,
+              and any access it already holds runs out shortly after, normally within the hour.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {grantsLoading && grants.length === 0 && !grantsError ? (
+              <Loading label="Loading connected assistants..." />
+            ) : grantsError ? (
+              <LoadFailure
+                what="Connected assistants"
+                message={grantsError}
+                hint="This is not the same as having none, so an assistant you approved earlier may well still be connected."
+                onRetry={() => void loadGrants()}
+              />
+            ) : grants.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No assistants connected.</p>
+            ) : (
+              <ul className="divide-y">
+                {grants.map((g) => (
+                  <li
+                    key={g.client.id}
+                    className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-medium">{g.client.name || "(unnamed assistant)"}</span>
+                      <p className="text-xs text-muted-foreground">
+                        Connected {formatDateTime(g.granted_at)}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={removing !== null}
+                      onClick={() => onRemoveGrant(g)}
+                    >
+                      {removing === g.client.id ? "Removing..." : "Remove"}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {removeError && (
+              <p role="alert" className="text-sm text-destructive">
+                {removeError}
+              </p>
+            )}
           </CardContent>
         </Card>
 

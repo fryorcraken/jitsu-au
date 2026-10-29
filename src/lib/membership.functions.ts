@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { InsuranceReminderState } from "@/lib/insurance-reminders";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   buildPaymentReference,
@@ -23,6 +24,7 @@ import {
   rescheduleMembershipStart,
   sameInstant,
   savePlanSchema,
+  announcePlanSchema,
   sellablePlans,
   setMembershipStartSchema,
   setMembershipStatusSchema,
@@ -757,6 +759,9 @@ export const listMembershipPlans = createServerFn({ method: "GET" })
       .order("sort_order", { ascending: true });
     if (error) throw new Error(error.message);
     return (data ?? []).map((p) => ({
+      // Only for the card's anchor, which a plan announcement links to
+      // (`planAnnouncementHref`). Purchases still name a plan by `code`.
+      id: p.id,
       code: p.code,
       name: p.name,
       description: p.description,
@@ -1336,6 +1341,46 @@ export const saveMembershipPlan = createServerFn({ method: "POST" })
     return saveMembershipPlanRow(admin, data);
   });
 
+// ---- Manager: announce a plan to every member ----
+//
+// Two calls, not one with the save, so the screen can report them separately:
+// a plan that saved and an announcement that failed are different facts, and
+// retrying the announcement must never save (or create) the plan a second
+// time. Everything here is the same code the manager agent API runs
+// (`plan-announcement.server.ts`).
+
+/** How many emails announcing a plan would send right now, for the confirm. */
+export const countPlanAnnouncementAudience = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { countAnnouncementAudience } = await import("@/lib/plan-announcement.server");
+    return { inboxes: await countAnnouncementAudience(await adminClient()) };
+  });
+
+/** Announce one saved plan. Safe to retry with the same `client_submission_id`. */
+export const announcePlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => announcePlanSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const { announceMembershipPlan } = await import("@/lib/plan-announcement.server");
+    return announceMembershipPlan(await adminClient(), {
+      planId: data.plan_id,
+      announcementId: data.client_submission_id,
+      actorId: context.userId,
+    });
+  });
+
+/** Each plan's latest announcement, keyed by plan id, for the plans screen. */
+export const listPlanAnnouncements = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    const { loadAnnouncementSummaries } = await import("@/lib/plan-announcement.server");
+    return Object.fromEntries(await loadAnnouncementSummaries(await adminClient()));
+  });
+
 /**
  * All plans, incl. inactive ones, sorted for display. Exported (unlike most
  * helpers here) so the manager agent route can call it directly, the same
@@ -1438,6 +1483,17 @@ export const listMemberships = createServerFn({ method: "GET" })
       admin,
       (rows ?? []).map((r) => r.id),
     );
+    // Reminders about yearly insurance ending: the same projection the agent
+    // API's list_invoices reports. Lazy, because the module carries the email
+    // sender and this file ships to the client bundle.
+    const { loadInsuranceReminderStates } = await import("@/lib/insurance-reminders.server");
+    // Degrades to no reminder lines rather than failing the whole screen: a
+    // manager who came here for an invoice must not lose it to a reminder
+    // lookup. The agent API's listings keep failing loudly instead.
+    const reminders = await loadInsuranceReminderStates(admin, rows ?? []).catch((e) => {
+      console.error("[listMemberships] could not read insurance reminder state:", e);
+      return new Map<string, InsuranceReminderState>();
+    });
 
     return (rows ?? []).map((r) => ({
       ...projectMembership(r, planById.get(r.plan_id)),
@@ -1447,6 +1503,7 @@ export const listMemberships = createServerFn({ method: "GET" })
       // a member's own page reads too: it is the club's note about the money.
       paid_reference: r.paid_reference,
       checkin_count: checkinCounts.get(r.id) ?? 0,
+      insurance_reminder: reminders.get(r.id) ?? null,
       member_name: (r.user_id ? nameByUser.get(r.user_id) : null) || null,
       member_email: (r.user_id ? contactByUser.get(r.user_id)?.email : null) ?? null,
       // Null for the overwhelming majority: an account holder's address is
