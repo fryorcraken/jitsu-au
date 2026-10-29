@@ -18,9 +18,9 @@ test("a manager downloads a member's contact card", async ({ page }) => {
 
   await page.goto(`/manager/users/${userId}`);
 
-  const download = await step(page, "saves the member's contact card", async () => {
+  const download = await step(page, "downloads the member's contact card", async () => {
     const pending = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Save contact" }).click();
+    await page.getByRole("button", { name: "Download contact" }).click();
     return await pending;
   });
 

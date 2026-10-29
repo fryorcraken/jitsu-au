@@ -902,7 +902,7 @@ function ManagerUserPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => downloadContactCard(detail, userId)}>
-            <Contact className="mr-1 h-4 w-4" /> Save contact
+            <Contact className="mr-1 h-4 w-4" /> Download contact
           </Button>
           <Button asChild variant="outline">
             <Link to="/manager/users">Back to users</Link>
