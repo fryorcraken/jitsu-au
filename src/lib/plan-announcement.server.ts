@@ -18,7 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { MembershipPlanOpenEmail } from "@/lib/email-templates/membership-plan-open";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 import { clubReplyTo } from "@/lib/send-email.server";
 import {
