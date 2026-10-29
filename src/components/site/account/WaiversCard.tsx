@@ -12,13 +12,14 @@ import { formatDate } from "@/lib/dates";
 import { waiverClass } from "@/lib/status-colours";
 import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
 import type { SubjectVoice } from "@/lib/subject-voice";
+import type { WaiverListStatus } from "@/lib/validation";
 
 type MyWaiver = {
   id: string;
   signed_at: string;
   template_version: number | null;
   has_pdf: boolean;
-  status: "pending" | "active" | "superseded";
+  status: WaiverListStatus;
 };
 
 /**

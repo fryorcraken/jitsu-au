@@ -267,14 +267,32 @@ export function buildSignerMeta(
 
 /** The states a waiver submission can be shown in. Stored: pending/approved; the
  * approved set is split into the person's single ACTIVE waiver (latest approved)
- * and SUPERSEDED older ones. */
-export const waiverListStatuses = ["pending", "active", "superseded"] as const;
+ * and SUPERSEDED older ones, and an unapproved waiver the person has since
+ * re-signed past reads REPLACED rather than pending. */
+export const waiverListStatuses = ["pending", "active", "superseded", "replaced"] as const;
 export type WaiverListStatus = (typeof waiverListStatuses)[number];
 
 /**
  * Derive each waiver's displayed status. Per person, the approved waiver with
  * the greatest approved_at (falling back to signed_at) is `active`; other
- * approved ones are `superseded`; everything else is `pending`.
+ * approved ones are `superseded`.
+ *
+ * An unapproved waiver is `pending` only while it is still the person's newest
+ * signature. Once they have signed again and the club has approved THAT, the
+ * older submission is `replaced`, and the distinction is the whole point:
+ * `pending` claims a manager still owes somebody a decision, and on this row
+ * nobody does. Approving it could not change which waiver is on file, and the
+ * stored status has nowhere else to go (`pending | approved`, with no reject
+ * path), so left as pending it asks for attention that nothing can ever
+ * relieve it of. It is a fourth state rather than `superseded` because the two
+ * are different facts, and a manager reading the history later needs them
+ * apart: a superseded waiver was the waiver on file once, and this one never
+ * was.
+ *
+ * Keyed on the SIGNING dates, not `approved_at`: what replaces a waiver is a
+ * later signature the club has accepted, whereas a waiver signed earlier and
+ * approved last week says nothing about a newer signature still waiting for a
+ * look. An exact tie stays `pending`, the side that still asks for the look.
  */
 export function deriveWaiverListStatuses(
   rows: {
@@ -286,18 +304,43 @@ export function deriveWaiverListStatuses(
   }[],
 ): Map<string, WaiverListStatus> {
   const activeByUser = new Map<string, { id: string; at: string }>();
+  // Per person, the newest SIGNATURE among their approved waivers. A different
+  // question from which of them is active, and the one `replaced` turns on.
+  const approvedSignedByUser = new Map<string, string>();
   for (const r of rows) {
     if (r.approval_status !== "approved") continue;
     const at = r.approved_at ?? r.signed_at;
     const current = activeByUser.get(r.user_id);
     if (!current || current.at < at) activeByUser.set(r.user_id, { id: r.id, at });
+    const signed = approvedSignedByUser.get(r.user_id);
+    if (!signed || signed < r.signed_at) approvedSignedByUser.set(r.user_id, r.signed_at);
   }
   const out = new Map<string, WaiverListStatus>();
   for (const r of rows) {
-    if (r.approval_status !== "approved") out.set(r.id, "pending");
-    else out.set(r.id, activeByUser.get(r.user_id)?.id === r.id ? "active" : "superseded");
+    if (r.approval_status === "approved") {
+      out.set(r.id, activeByUser.get(r.user_id)?.id === r.id ? "active" : "superseded");
+      continue;
+    }
+    const approvedSigned = approvedSignedByUser.get(r.user_id);
+    out.set(
+      r.id,
+      approvedSigned !== undefined && approvedSigned > r.signed_at ? "replaced" : "pending",
+    );
   }
   return out;
+}
+
+/**
+ * Whether a derived status means the club has approved this waiver.
+ *
+ * Both approval buttons hang off this rather than off `=== "pending"`. A waiver
+ * is approved iff it is active or superseded, and the inverted test (anything
+ * not pending has been approved) stopped being true the moment `replaced`
+ * existed: it offers "Revoke approval" on a row with no approval to revoke, a
+ * button whose only effect would be to write back the status it already has.
+ */
+export function isApprovedWaiverStatus(status: WaiverListStatus): boolean {
+  return status === "active" || status === "superseded";
 }
 
 /**
@@ -305,9 +348,10 @@ export function deriveWaiverListStatuses(
  *
  * A manager opens that page to deal with what is waiting on them, so only the
  * newest submission expands, and only while it is still pending. Everything
- * else stays collapsed: older submissions are history, and an approved waiver
- * (active or superseded) has already been dealt with. Managers can still open
- * any panel by hand.
+ * else stays collapsed: older submissions are history, whether the club
+ * approved them (active or superseded) or a later approved signature overtook
+ * them (`replaced`, which the newest row can never be). Managers can still
+ * open any panel by hand.
  */
 export function deriveExpandedWaivers(
   rows: { id: string; signed_at: string; status: WaiverListStatus }[],

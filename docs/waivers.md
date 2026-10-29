@@ -153,8 +153,11 @@ system. (The contact form stores a message, not a person.)
 4. **Waivers are accepted at any time, without limit.** Resubmitting after a
    mistake is never blocked, before or after approval.
 5. **The active waiver is the latest approved one.** Older approved waivers are
-   superseded; unapproved ones stay pending. Screens derive this; it is not
-   stored.
+   superseded. An unapproved one stays pending only while it is the person's
+   newest signature: once they have signed again and the club has approved
+   **that**, the older submission is replaced, which is what keeps it out of the
+   manager's queue (`docs/notifications.md`). Screens derive all four; only
+   `pending | approved` is stored.
 6. **Approval promotes, unlocks, and assigns the trial.** Approving a waiver
    copies its details onto the profile; on the person's first approval it also
    lifts the ban on **their contact person's** login, emails them to say their
@@ -600,7 +603,10 @@ step happens. See `docs/notifications.md` for the two items and how each clears.
 
 The manager waivers screen lists submissions newest first with the submitted
 name/email, date, template version, status badge (pending / active /
-superseded), the PDF, and Approve / Revoke approval. The submitted name opens
+superseded / replaced), the PDF, and Approve / Revoke approval. Which of those
+two buttons a row carries is decided by whether there is an approval to revoke,
+not by whether the row is pending: a replaced waiver was never approved, so it
+keeps Approve, and a manager who wants the old form on file can still take it. The submitted name opens
 the person who signed it: every name in a manager's list is a link to that
 person's record, through `components/site/UserLink`. Approve = promote + unlock +
 assign the trial (see rule 6). The applicant becomes a visitor.
@@ -629,7 +635,7 @@ panel is opened or its PDF button is used, and re-signed once it goes stale.
 Exactly one panel opens by itself: the newest
 submission, and only while it is still pending, because that is the one waiting
 on a decision. Older submissions and approved ones (active or superseded) start
-collapsed; a manager can open any of them by hand.
+collapsed, as does a replaced one; a manager can open any of them by hand.
 
 ### Media consent
 

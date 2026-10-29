@@ -1339,9 +1339,10 @@ describe("filePaperWaiver", () => {
  * A PostgREST chain that answers each `from()` with the next queued result.
  *
  * Deliberately order-dependent: `countWaiversAwaitingApproval` makes two reads
- * of the same table (the count, then the newest row), so keying the fake by
- * table name could not tell them apart. The chain is thenable because the count
- * query is awaited directly rather than through `.maybeSingle()`.
+ * of the same table (the waiting rows, then the approved waivers belonging to
+ * the same people), so keying the fake by table name could not tell them apart.
+ * The chain is thenable because both are awaited directly rather than through
+ * `.maybeSingle()`.
  */
 type QueryResult = { data: unknown; error: { message: string } | null; count?: number | null };
 
@@ -1360,6 +1361,13 @@ function fakeCountAdmin(results: QueryResult[]) {
         select: () => chain,
         eq: (col: string, value: unknown) => {
           filters.push([col, value]);
+          return chain;
+        },
+        // Recorded for the same reason as `eq`: the second read is scoped to
+        // the people who have something waiting, and a fake that swallowed
+        // this would let that scope quietly become every member of the club.
+        in: (col: string, value: unknown) => {
+          filters.push([`in:${col}`, value]);
           return chain;
         },
         // Recorded, not swallowed: a fake that ignored this would let
@@ -1385,61 +1393,127 @@ function fakeCountAdmin(results: QueryResult[]) {
 describe("countWaiversAwaitingApproval", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  /** A waiting row as the first read returns it, names and all. */
+  const waiting = (over: {
+    id: string;
+    user_id?: string;
+    signed_at?: string;
+    first_name?: string;
+    last_name?: string;
+    preferred_name?: string;
+  }) => ({
+    user_id: "p1",
+    approval_status: "pending",
+    approved_at: null,
+    signed_at: "2026-08-05T10:00:00.000Z",
+    first_name: "Alexandra",
+    middle_name: "",
+    last_name: "Nguyen",
+    preferred_name: "Alex",
+    ...over,
   });
 
   it("reports nothing waiting without going looking for a name", async () => {
     const { countWaiversAwaitingApproval } = await import("./waiver.functions");
-    const { admin, tables } = fakeCountAdmin([{ data: null, error: null, count: 0 }]);
+    const { admin, tables } = fakeCountAdmin([{ data: [], error: null, count: 0 }]);
     expect(await countWaiversAwaitingApproval(admin)).toEqual({
       pending: 0,
       latestName: null,
       latestAt: null,
     });
-    // One read, not two: with nothing waiting there is no newest signer.
+    // One read, not two: with nothing waiting there is nothing to compare
+    // against and no newest signer.
     expect(tables).toEqual(["waivers"]);
   });
 
   it("names the newest signer the way the waivers screen does", async () => {
     const { countWaiversAwaitingApproval } = await import("./waiver.functions");
     const { admin, filters, orders } = fakeCountAdmin([
-      { data: null, error: null, count: 3 },
       {
-        data: {
-          first_name: "Alexandra",
-          middle_name: "",
-          last_name: "Nguyen",
-          preferred_name: "Alex",
-          signed_at: "2026-08-05T10:00:00.000Z",
-        },
+        data: [
+          waiting({ id: "w3" }),
+          waiting({ id: "w2", signed_at: "2026-08-02T10:00:00.000Z" }),
+          waiting({ id: "w1", signed_at: "2026-08-01T10:00:00.000Z" }),
+        ],
         error: null,
+        count: 3,
       },
+      { data: [], error: null },
     ]);
     expect(await countWaiversAwaitingApproval(admin)).toEqual({
       pending: 3,
       latestName: 'Alexandra "Alex" Nguyen',
       latestAt: "2026-08-05T10:00:00.000Z",
     });
-    // Both reads ask for the stored fact, and the name comes from the newest
-    // signature rather than the oldest one still waiting.
+    // The second read is the approved waivers of those same people, scoped to
+    // them rather than to the whole table. The name comes from the newest
+    // signature still waiting, not the oldest.
     expect(filters).toEqual([
       ["approval_status", "pending"],
-      ["approval_status", "pending"],
+      ["approval_status", "approved"],
+      ["in:user_id", ["p1"]],
     ]);
     expect(orders).toEqual([["signed_at", false]]);
   });
 
-  it("degrades to a bare count when the newest row cannot be read", async () => {
+  it("does not count a waiver the person has already signed past", async () => {
+    const { countWaiversAwaitingApproval } = await import("./waiver.functions");
+    // The live club's own shape: an old form nobody approved, and a newer
+    // signature from the same person that was. Nothing a manager can do settles
+    // the old one, so counting it puts a permanent item in the attention list.
+    const { admin } = fakeCountAdmin([
+      {
+        data: [
+          waiting({ id: "theirs", user_id: "pb", signed_at: "2026-10-01T00:00:00.000Z" }),
+          waiting({
+            id: "july",
+            user_id: "pa",
+            signed_at: "2026-07-27T04:20:00.000Z",
+            first_name: "Jordan",
+            last_name: "Reyes",
+            preferred_name: "",
+          }),
+        ],
+        error: null,
+        count: 2,
+      },
+      {
+        data: [
+          {
+            id: "august",
+            user_id: "pa",
+            approval_status: "approved",
+            signed_at: "2026-08-28T02:29:00.000Z",
+            approved_at: "2026-08-31T04:18:00.000Z",
+          },
+        ],
+        error: null,
+      },
+    ]);
+    expect(await countWaiversAwaitingApproval(admin)).toEqual({
+      pending: 1,
+      latestName: 'Alexandra "Alex" Nguyen',
+      latestAt: "2026-10-01T00:00:00.000Z",
+    });
+  });
+
+  it("over-reports rather than under-reports when the approved waivers cannot be read", async () => {
     const { countWaiversAwaitingApproval } = await import("./waiver.functions");
     const { admin } = fakeCountAdmin([
-      { data: null, error: null, count: 2 },
+      { data: [waiting({ id: "w1" }), waiting({ id: "w2" })], error: null, count: 2 },
       { data: null, error: { message: "boom" } },
     ]);
-    // The count is the part the notification cannot do without; a missing name
-    // only makes the copy vaguer.
+    // Without the comparison every waiting row counts, which is how this read
+    // behaved before `replaced` existed. An item a manager has already dealt
+    // with is noise; a signature nobody is told about is somebody waiting to
+    // train.
     expect(await countWaiversAwaitingApproval(admin)).toEqual({
       pending: 2,
-      latestName: null,
-      latestAt: null,
+      latestName: 'Alexandra "Alex" Nguyen',
+      latestAt: "2026-08-05T10:00:00.000Z",
     });
   });
 
