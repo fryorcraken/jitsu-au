@@ -51,7 +51,6 @@ import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
 import { getClubUser, setClubUserEmail, setClubUserKitSizes } from "@/lib/club-user.functions";
 import { buildVCard, vCardFileName } from "@/lib/vcard";
-import { SITE_ORIGIN } from "@/lib/seo";
 import { attachCheckInCoverage, transferCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
@@ -81,9 +80,14 @@ type Waiver = Detail["waivers"][number];
 function downloadContactCard(detail: Detail, userId: string) {
   const card = buildVCard({
     ...detail.profile,
+    // A dependant's record often has no guardian name typed on it, but the
+    // household always knows who holds their account.
+    guardian_name: detail.profile.guardian_name ?? detail.household.guardian?.name ?? null,
     email: detail.user.email,
-    email_belongs_to: detail.user.email_belongs_to,
-    url: `${SITE_ORIGIN}/manager/users/${userId}`,
+    // The host being browsed, like the calendar link on /account: a card saved
+    // from a preview or a local stack opens that stack's record, not a
+    // production page for an id that does not exist there.
+    url: `${window.location.origin}/manager/users/${userId}`,
   });
   const url = URL.createObjectURL(new Blob([card], { type: "text/vcard;charset=utf-8" }));
   const link = document.createElement("a");
@@ -92,9 +96,15 @@ function downloadContactCard(detail: Detail, userId: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  // Revoked on the next tick, not straight away: some browsers start reading
-  // the blob only after the click handler has returned.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  // Not revoked straight away: Safari and an installed app hand the download
+  // off after the click returns, and a revoked URL gives them an empty file.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  // Every person has an email, so none here means the lookup failed. The card
+  // still has their phone and address, but it will sit in a phone for years, so
+  // say what it is missing rather than let it look complete.
+  if (!detail.user.email) {
+    toast.warning("Saved without an email, because we could not look it up. Reload to try again.");
+  }
 }
 
 /** A copy of `record` without `key`. */

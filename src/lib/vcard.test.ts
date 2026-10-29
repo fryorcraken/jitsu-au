@@ -7,8 +7,8 @@ function person(over: Partial<VCardPerson> = {}): VCardPerson {
     middle_name: null,
     last_name: "Lovelace",
     preferred_name: null,
+    guardian_user_id: null,
     email: "ada@example.com",
-    email_belongs_to: null,
     phone: "0400 000 001",
     address: "1 Example St, Ultimo NSW 2007",
     date_of_birth: "1990-01-01",
@@ -78,26 +78,100 @@ describe("buildVCard", () => {
     expect(lines(card)).toContain("NOTE:UTS Jitsu");
   });
 
-  it("adds a minor's guardian, and lists a shared email only once", () => {
-    const card = lines(
-      buildVCard(
-        person({
-          is_minor: true,
-          email: "parent@example.com",
-          email_belongs_to: "Pat Lovelace",
-          guardian_name: "Pat Lovelace",
-          guardian_relationship: "Parent",
-          guardian_phone: "0400 000 003",
-          guardian_email: "Parent@example.com",
-        }),
-      ),
+  const GUARDIAN = "22222222-2222-4222-8222-222222222222";
+
+  /** Only the TEL / EMAIL lines, in card order. */
+  function contactLines(card: string): string[] {
+    return lines(card).filter((l) => l.startsWith("TEL") || l.startsWith("EMAIL"));
+  }
+
+  it("labels a dependant's phone and email as their guardian's, not the child's", () => {
+    // How a dependant filing actually lands: the parent's number and mailbox on
+    // the child's record, and nothing typed in the guardian fields.
+    const card = buildVCard(
+      person({
+        guardian_user_id: GUARDIAN,
+        is_minor: true,
+        phone: "0400 000 003",
+        email: "parent@example.com",
+        guardian_name: "Pat Lovelace",
+        emergency_contact_phone: "0400 000 004",
+      }),
     );
-    expect(card).toContain("TEL;TYPE=X-Guardian:0400 000 003");
-    // A dependant's email is their account holder's, so it says so.
-    expect(card.filter((l) => l.startsWith("EMAIL"))).toEqual([
+    expect(contactLines(card)).toEqual([
+      "TEL;TYPE=X-Guardian:0400 000 003",
+      "TEL;TYPE=X-Emergency:0400 000 004",
       "EMAIL;TYPE=X-Guardian:parent@example.com",
     ]);
-    expect(card.find((l) => l.startsWith("NOTE:"))).toContain("Guardian: Pat Lovelace (Parent)");
+    expect(card).not.toContain("TYPE=CELL");
+    expect(card).not.toContain("TYPE=HOME:parent");
+  });
+
+  it("treats a dependant as having a guardian even when is_minor is false", () => {
+    const card = buildVCard(
+      person({
+        guardian_user_id: GUARDIAN,
+        is_minor: false,
+        guardian_name: "Pat Lovelace",
+        guardian_relationship: "Parent",
+        guardian_phone: "0400 000 009",
+      }),
+    );
+    expect(contactLines(card)).toContain("TEL;TYPE=X-Guardian:0400 000 009");
+    expect(lines(card).find((l) => l.startsWith("NOTE:"))).toContain(
+      "Guardian: Pat Lovelace (Parent)",
+    );
+  });
+
+  it("writes one number once, as the guardian's, wherever the family typed it", () => {
+    // An account-holding minor whose parent filled every field with their own
+    // number. Three entries for one number would call it the child's mobile first.
+    const card = buildVCard(
+      person({
+        is_minor: true,
+        phone: "0400 000 003",
+        guardian_phone: "0400000003",
+        emergency_contact_phone: "0400 000 003",
+      }),
+    );
+    expect(contactLines(card).filter((l) => l.startsWith("TEL"))).toEqual([
+      "TEL;TYPE=X-Guardian:0400 000 003",
+    ]);
+  });
+
+  it("labels a minor's email as the guardian's when it is the guardian's address", () => {
+    const card = buildVCard(
+      person({
+        is_minor: true,
+        email: "parent@example.com",
+        guardian_email: "Parent@example.com",
+      }),
+    );
+    expect(contactLines(card).filter((l) => l.startsWith("EMAIL"))).toEqual([
+      "EMAIL;TYPE=X-Guardian:parent@example.com",
+    ]);
+  });
+
+  it("keeps a minor's own number and email beside their guardian's", () => {
+    const card = buildVCard(
+      person({
+        is_minor: true,
+        guardian_name: "Pat Lovelace",
+        guardian_relationship: "Parent",
+        guardian_phone: "0400 000 003",
+        guardian_email: "parent@example.com",
+      }),
+    );
+    expect(contactLines(card)).toEqual([
+      "TEL;TYPE=CELL:0400 000 001",
+      "TEL;TYPE=X-Guardian:0400 000 003",
+      "TEL;TYPE=X-Emergency:0400 000 002",
+      "EMAIL;TYPE=HOME:ada@example.com",
+      "EMAIL;TYPE=X-Guardian:parent@example.com",
+    ]);
+    expect(lines(card).find((l) => l.startsWith("NOTE:"))).toContain(
+      "Guardian: Pat Lovelace (Parent)",
+    );
   });
 
   it("ignores guardian details on an adult's record", () => {

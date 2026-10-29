@@ -19,6 +19,7 @@
 // carries how to reach somebody and nothing else. Medical notes, consents, the
 // student number and kit sizes stay on the person page.
 
+import { isDependant } from "@/lib/household";
 import { escapeIcsText, foldIcsLine } from "@/lib/ics";
 import { profileFullName } from "@/lib/validation";
 
@@ -27,10 +28,14 @@ export type VCardPerson = {
   middle_name: string | null;
   last_name: string | null;
   preferred_name: string | null;
+  /**
+   * Not null when this person is a dependant (`household.ts`). Their record
+   * then holds their account holder's email and, usually, phone: a child has
+   * neither of their own.
+   */
+  guardian_user_id: string | null;
   /** The address the club writes to about them. For a dependant it is their guardian's. */
   email: string | null;
-  /** Set when `email` is somebody else's: a dependant's account holder. */
-  email_belongs_to: string | null;
   phone: string | null;
   address: string | null;
   /** `YYYY-MM-DD`, as Postgres returns a `date`. */
@@ -70,6 +75,36 @@ function customType(label: string): string {
   return `X-${label.replace(/[^A-Za-z0-9 -]/g, "").trim()}`;
 }
 
+type ContactPoint = { value: string; type: string };
+
+/**
+ * The phone numbers or emails to write, each at most once, in the order given.
+ *
+ * Anything that is also one of `guardians` is labelled Guardian whichever slot
+ * it came in through, because a family usually types the same parent's number
+ * into the child's own field, the guardian field and the emergency field. Three
+ * entries for one number, the first calling it the child's mobile, is exactly
+ * how a manager ends up believing they can ring a ten-year-old.
+ */
+function contactPoints(
+  entries: { value: string | null; type: string }[],
+  guardians: (string | null)[],
+  key: (value: string) => string,
+): ContactPoint[] {
+  const guardianKeys = new Set(guardians.map(clean).flatMap((g) => (g ? [key(g)] : [])));
+  const seen = new Set<string>();
+  const points: ContactPoint[] = [];
+  for (const entry of entries) {
+    const value = clean(entry.value);
+    if (!value) continue;
+    const k = key(value);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    points.push({ value, type: guardianKeys.has(k) ? customType("Guardian") : entry.type });
+  }
+  return points;
+}
+
 /** Build the card. Lines are CRLF-separated and folded, ending in a CRLF. */
 export function buildVCard(p: VCardPerson): string {
   const lines: string[] = ["BEGIN:VCARD", "VERSION:3.0"];
@@ -87,23 +122,39 @@ export function buildVCard(p: VCardPerson): string {
     add(`NICKNAME:${text(preferred)}`);
   }
 
-  const phone = clean(p.phone);
-  if (phone) add(`TEL;TYPE=CELL:${text(phone)}`);
+  const dependant = isDependant(p);
+  // Who the club reaches about this person, when that is not them. A dependant
+  // always has one (it is what makes them a dependant), whatever `is_minor`
+  // says; an account-holding minor has one on their waiver.
+  const hasGuardian = dependant || p.is_minor;
+  const guardianPhone = hasGuardian ? p.guardian_phone : null;
+  const guardianEmail = hasGuardian ? p.guardian_email : null;
 
-  // Each email at most once: a minor's guardian email is usually the same
-  // address their account is held under.
-  const emails = new Set<string>();
-  const addEmail = (address: string | null, label: string | null) => {
-    const value = clean(address);
-    if (!value || emails.has(value.toLowerCase())) return;
-    emails.add(value.toLowerCase());
+  const phones = contactPoints(
+    [
+      { value: p.phone, type: "CELL" },
+      { value: guardianPhone, type: customType("Guardian") },
+      { value: p.emergency_contact_phone, type: customType("Emergency") },
+    ],
+    // A dependant's own number is their account holder's.
+    [guardianPhone, dependant ? p.phone : null],
+    (phone) => phone.replace(/\D/g, ""),
+  );
+  for (const tel of phones) add(`TEL;TYPE=${tel.type}:${text(tel.value)}`);
+
+  const emails = contactPoints(
     // No INTERNET type: it is 3.0's default anyway, and Android turns a type
     // it has no slot for into the label, so it could show up as "INTERNET".
-    add(`EMAIL;TYPE=${label ? customType(label) : "HOME"}:${text(value)}`);
-  };
-  // A dependant has no mailbox of their own. The one on file is the account
-  // holder's, so it is labelled as theirs rather than passed off as the child's.
-  addEmail(p.email, clean(p.email_belongs_to) ? "Guardian" : null);
+    [
+      { value: p.email, type: "HOME" },
+      { value: guardianEmail, type: customType("Guardian") },
+    ],
+    // A dependant has no mailbox of their own: the one on file is the account
+    // holder's, so it is labelled as theirs rather than passed off as the child's.
+    [guardianEmail, dependant ? p.email : null],
+    (email) => email.toLowerCase(),
+  );
+  for (const email of emails) add(`EMAIL;TYPE=${email.type}:${text(email.value)}`);
 
   const address = clean(p.address);
   // The club keeps an address as one line of free text, so it all goes in the
@@ -115,15 +166,10 @@ export function buildVCard(p: VCardPerson): string {
   }
 
   const notes: string[] = ["UTS Jitsu"];
-  if (p.is_minor) {
-    const guardianPhone = clean(p.guardian_phone);
-    if (guardianPhone) add(`TEL;TYPE=${customType("Guardian")}:${text(guardianPhone)}`);
-    addEmail(p.guardian_email, "Guardian");
-    const guardian = nameWithRelationship(p.guardian_name, p.guardian_relationship);
-    if (guardian) notes.push(`Guardian: ${guardian}`);
-  }
-  const emergencyPhone = clean(p.emergency_contact_phone);
-  if (emergencyPhone) add(`TEL;TYPE=${customType("Emergency")}:${text(emergencyPhone)}`);
+  const guardian = hasGuardian
+    ? nameWithRelationship(p.guardian_name, p.guardian_relationship)
+    : null;
+  if (guardian) notes.push(`Guardian: ${guardian}`);
   const emergency = nameWithRelationship(
     p.emergency_contact_name,
     p.emergency_contact_relationship,
