@@ -419,6 +419,11 @@ export async function loadClubUser(admin: SupabaseClient<Database>, userId: stri
     // falls back to one captured on a membership) — that would show the
     // record as complete while the column driving student pricing is null.
     profile: {
+      // The name in its parts, which the contact card needs: a phone files a
+      // contact under surname and given name, not under one joined string.
+      first_name: profile.first_name,
+      middle_name: profile.middle_name,
+      last_name: profile.last_name,
       preferred_name: profile.preferred_name,
       // Who holds this person's account, when somebody else does. The page
       // needs the ID rather than just the guardian's name (which the summary

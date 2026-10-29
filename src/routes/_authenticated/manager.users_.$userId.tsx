@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronDown, Download } from "lucide-react";
+import { ChevronDown, Contact, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
@@ -50,6 +50,8 @@ import { emailVerificationLabel, isEmailVerified } from "@/lib/email-verificatio
 import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
 import { getClubUser, setClubUserEmail, setClubUserKitSizes } from "@/lib/club-user.functions";
+import { buildVCard, vCardFileName } from "@/lib/vcard";
+import { SITE_ORIGIN } from "@/lib/seo";
 import { attachCheckInCoverage, transferCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
@@ -70,6 +72,30 @@ export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
 
 type Detail = Awaited<ReturnType<typeof getClubUser>>;
 type Waiver = Detail["waivers"][number];
+
+/**
+ * Hand the browser this person's contact card as a `.vcf` file. On Android
+ * opening the download offers to add it to Contacts, and iOS shows the card
+ * with an "Add to Contacts" button, so no app or account is needed.
+ */
+function downloadContactCard(detail: Detail, userId: string) {
+  const card = buildVCard({
+    ...detail.profile,
+    email: detail.user.email,
+    email_belongs_to: detail.user.email_belongs_to,
+    url: `${SITE_ORIGIN}/manager/users/${userId}`,
+  });
+  const url = URL.createObjectURL(new Blob([card], { type: "text/vcard;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = vCardFileName(detail.profile);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoked on the next tick, not straight away: some browsers start reading
+  // the blob only after the click handler has returned.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 /** A copy of `record` without `key`. */
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -865,6 +891,9 @@ function ManagerUserPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => downloadContactCard(detail, userId)}>
+            <Contact className="mr-1 h-4 w-4" /> Save contact
+          </Button>
           <Button asChild variant="outline">
             <Link to="/manager/users">Back to users</Link>
           </Button>
