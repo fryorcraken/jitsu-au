@@ -20,6 +20,8 @@ export const notificationKinds = [
   "blog_comment",
   "kb_comment",
   "membership_plan_open",
+  "insurance_ending_soon",
+  "insurance_ended",
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
@@ -29,6 +31,7 @@ export const notificationSubjectTypes = [
   "kb_annotation",
   "blog_post",
   "membership_plan_announcement",
+  "membership",
 ] as const;
 export type NotificationSubjectType = (typeof notificationSubjectTypes)[number];
 
@@ -69,11 +72,18 @@ export const preferenceForKind: Record<NotificationKind, EmailPreferenceKey | nu
   // `new_blog_post` announcement switch, which is off by default and would
   // stop it reaching almost anybody.
   membership_plan_open: null,
+  // Yearly insurance ending (`insurance-reminders.ts`, docs/memberships.md,
+  // "When yearly insurance ends"). About the person's own cover, so nobody
+  // can turn it off either.
+  insurance_ending_soon: null,
+  insurance_ended: null,
 };
 
 /** The closed list of kinds no switch governs. See `preferenceForKind`. */
 export const UNSWITCHABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = [
   "membership_plan_open",
+  "insurance_ending_soon",
+  "insurance_ended",
 ];
 
 /** Whether a person's switches have any say over emailing this kind. */
@@ -201,9 +211,11 @@ export function digestSections(
 ): DigestSections {
   const allowed = rows.filter((r) => shouldEmail(prefs, r.kind, opts));
   return {
-    // First, because it is about the person's own membership. It reaches the
-    // digest only when the immediate email did not go (`plan-announcement.server.ts`).
-    membership: allowed.filter((r) => r.kind === "membership_plan_open"),
+    // First, because it is about the person's own membership. These reach the
+    // digest only when their own email did not go: the plan announcement's
+    // immediate send (`plan-announcement.server.ts`), or an insurance reminder
+    // the morning run could not send (`insurance-reminders.server.ts`).
+    membership: allowed.filter((r) => !isSwitchableKind(r.kind)),
     replies: allowed.filter((r) => r.kind === "reply"),
     threads: allowed.filter((r) => r.kind === "thread_activity"),
     posts: allowed.filter((r) => r.kind === "new_blog_post"),

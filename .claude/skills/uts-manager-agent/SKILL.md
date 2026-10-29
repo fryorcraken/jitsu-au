@@ -232,6 +232,24 @@ tell a capped page from a complete one. Each invoice also carries
 To find unpaid invoices, filter the result on `paid_at` being null rather than by
 status — see the note under `list_users`.
 
+Every invoice (here and inside `list_users`) also carries `insurance_reminder`.
+It is `null` unless the plan is yearly insurance. On those it is
+`{ "ends_within_14_days", "owed", "last_sent" }`:
+
+- `ends_within_14_days` is true while the member is owed the "your insurance
+  ends soon" email: their cover ends in the next 14 days (Sydney), they have not
+  renewed, and it is not cancelled. Paid or unpaid makes no difference.
+- `owed` is the reminder owed today (`insurance_ending_soon` or
+  `insurance_ended`), whether or not it has gone out yet, or `null`.
+- `last_sent` is `{ "kind", "sent_at" }` for the latest reminder actually
+  emailed (`insurance_ending_soon` 14 days before, `insurance_ended` on the
+  day), or `null` if none has gone out.
+
+The site sends both reminders itself every morning. There is no action to send,
+resend or stop one, and members cannot switch them off. To answer "whose
+insurance runs out soon?", filter `list_invoices` on
+`insurance_reminder.ends_within_14_days`.
+
 ```bash
 scripts/agent.sh list_invoices '{}'
 ```

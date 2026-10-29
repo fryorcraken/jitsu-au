@@ -65,7 +65,11 @@ describe("preferenceForKind", () => {
   // editing this line on purpose. An announcement that lost its switch by
   // accident would reach every inbox the club has with no way to turn it off.
   it("keeps the un-switchable list closed", () => {
-    expect([...UNSWITCHABLE_NOTIFICATION_KINDS]).toEqual(["membership_plan_open"]);
+    expect([...UNSWITCHABLE_NOTIFICATION_KINDS]).toEqual([
+      "membership_plan_open",
+      "insurance_ending_soon",
+      "insurance_ended",
+    ]);
   });
 
   // Two kinds, one switch: "tell me about new comments" is one decision a
@@ -234,6 +238,15 @@ describe("digestSections", () => {
 
   it("gives a member no moderation section", () => {
     expect(digestSections(rows, null).moderation).toHaveLength(0);
+  });
+
+  it("puts an insurance reminder its own send missed under Membership, switches or not", () => {
+    const sections = digestSections(
+      [item({ kind: "insurance_ending_soon" }), item({ kind: "insurance_ended" })],
+      { reply_to_me: false, thread_activity: false, new_blog_post: false },
+    );
+    expect(sections.membership).toHaveLength(2);
+    expect(hasDigestContent(sections)).toBe(true);
   });
 
   it("keeps a membership email for a person with every switch off", () => {

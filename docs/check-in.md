@@ -276,6 +276,8 @@ storage rules they rest on.
   refuses to activate an invoice.
 - **An expiry job.** Check-in closes memberships it finds past their end date,
   but nothing sweeps the whole table on a schedule. That is a separate change.
+  The morning job does now email people whose yearly insurance is ending
+  (`docs/memberships.md`, "When yearly insurance ends"), but it closes nothing.
   It never closes the membership the same check-in just drew on, because
   back-filling an older roster can legitimately spend a pass that has since run
   out of days.

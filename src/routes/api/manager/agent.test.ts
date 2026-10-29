@@ -50,7 +50,12 @@ function fakeAdminForListInvoices(rows: (typeof ROW)[], total: number) {
         };
       }
       if (table === "membership_plans") {
-        return { select: () => Promise.resolve(ok([])) };
+        // `.eq("kind", "insurance")` is the reminder-state lookup asking which
+        // plans are yearly insurance. None here, so it reads nothing more.
+        const plans = Object.assign(Promise.resolve(ok([])), {
+          eq: () => Promise.resolve(ok([])),
+        });
+        return { select: () => plans };
       }
       throw new Error(`unexpected table ${table}`);
     },
@@ -398,6 +403,8 @@ describe("manager agent route", () => {
     const body = await res.json();
     expect(body.result.count).toBe(2);
     expect(body.result.total).toBe(2);
+    // Not yearly insurance, so there is no reminder to report.
+    expect(body.result.invoices[0].insurance_reminder).toBeNull();
   });
 
   // A $0 invoice that was already paid and active silently became a $245 one.

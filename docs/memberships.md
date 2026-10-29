@@ -330,6 +330,100 @@ nothing, and setting the date back undoes it. What it does show, before the
 save, is the end date moving with the start. The agent equivalents are
 `create_membership`'s and `edit_invoice`'s `starts_on`.
 
+## When yearly insurance ends
+
+A year of cover runs `duration_days` from its start, and nobody re-raises it by
+hand. Until this, nothing told anybody when it ran out: check-in never looks at
+insurance (it never covers a class, `docs/check-in.md`) and there is no expiry
+sweep, so an ended year sat `active` and silent. Now the club sends two
+reminders per insurance membership:
+
+- **14 days before** it ends: "Your club insurance ends on 12 March".
+- **On the day it ends**, in Sydney: "Your club insurance ended today". A year
+  bought at the counter ends at the time of day it was bought, often the
+  evening, and the job runs at 8 or 9am, so until the cover has actually run out
+  it says "Your club insurance ends today" and to renew today.
+
+Both say how to renew, and that works: the yearly insurance is on sale on its
+own on `/membership` (the "Also available" card), and it is also offered with a
+training period, ticked by default once current cover is within 30 days of
+ending. A child's reminder links to `/membership?for=<child>`.
+
+**Who gets one.** `insuranceRemindersDue` in `src/lib/insurance-reminders.ts`,
+and nowhere else, so every surface that asks agrees:
+
+- Insurance memberships are the ones whose plan has `kind = 'insurance'`, never
+  the `insurance_yearly` code, the same control the screens use.
+- **Unpaid cover is still reminded.** Cover is about dates, and an unpaid
+  invoice is a separate problem the "How to pay" panel already shows.
+- **Only active cover is.** A cancelled or expired one was ended on purpose by
+  a manager, and a leftover `pending` invoice is a promise rather than cover.
+- **Somebody who has already renewed is not.** That is another insurance
+  membership of theirs, active, that ends later than this one, paid or not.
+- When "left the club" exists, the people who left drop out in that same
+  function. There is deliberately no switch for it yet.
+
+**Windows, not exact days, counted in club days.** The job runs once a morning
+and can miss one, so "ending soon" is any of the 14 Sydney days before the end
+day, and "ended" is the end day or up to 3 days after it. The day a cover ends
+is the club date of its `ends_at`, the date every screen prints, and the
+distance is counted on the calendar with the same arithmetic
+`planMembershipWindow` uses, so a daylight-saving change in between never moves
+a reminder a day. Each reminder still goes out once per membership: the unique
+index on `notifications (user_id, kind, subject_id)` refuses a second row.
+
+**The 3-day cap is what keeps the first deploy quiet.** Without it the first
+run would email everybody whose cover ever ran out. Read live on 2026-10-23
+(SELECT only): 11 yearly insurance memberships, none ending within 14 days or
+ended within 3, so **the first morning after deploy sends nothing**. The
+nearest end is about 11 February 2027, so the first reminder goes out around
+28 January 2027.
+
+**One email per inbox.** A child's reminder goes to the parent and names the
+child. Two children whose cover ends on the same day are one email naming both;
+a third ending another day is its own email.
+
+**Nobody can turn these off.** They are about somebody's membership, like an
+invoice, so they are not governed by the email switches, and they are sent on
+their own rather than in the morning summary. See `docs/notifications.md`.
+
+**How it runs.** On the same morning job as the summary (`docs/notifications.md`,
+"The daily summary"), before it, and never stopping it:
+
+1. Write the rows owed today, one `notifications` row per membership per
+   reminder (`subject_type = 'membership'`, `subject_id` the membership). The
+   row belongs to whoever reads the mail, so a child's reminder sits on the
+   parent's `/notifications` and its title names the child.
+2. Withdraw pending rows nobody is owed any more (they renewed, a manager
+   cancelled, the window passed). Deleted rather than stamped, so `emailed_at`
+   on one of these rows only ever means the email went out.
+3. Send what is pending, at most 20 emails a run and the earliest end day
+   first, stamping `emailed_at` only on a successful send. Anything left over
+   or failed stays pending and goes on the next morning under the same
+   idempotency key, so a send that was delivered but answered with an error is
+   not delivered twice. The summary never sends these. Rows that sit unsent are
+   what the stalled-email attention item watches.
+
+Until `20261026000000_notification_insurance_reminders.sql` is applied the
+database refuses these kinds, so the writes are logged and nothing is sent.
+
+**What managers see.**
+
+- On `/notifications`: "3 people's insurance ends in the next 14 days", counting
+  people owed the first reminder, with "See who".
+- On `/manager/memberships`: those people first, under "Insurance ending in the
+  next 14 days". Every yearly insurance row also says when it ends and which
+  reminder went out: "14-day reminder sent 26 Feb", "Ended reminder sent 12
+  Mar", or "Reminder not sent yet" / "Ended reminder not sent yet" while one is
+  owed and has not gone out.
+- The same line on a person's page, under the end date.
+- The agent API reports the same thing on every invoice in `list_invoices` and
+  `list_users`, as `insurance_reminder`. There is no action to send or stop one.
+
+**Nothing closes the membership.** It stays `active` after the end, as before;
+see "Staying a member through the break" and `docs/check-in.md`. The reminder
+is the only thing that happens on the day.
+
 ## Staying a member through the break
 
 Nothing in the app closes a membership automatically when its `ends_at`
@@ -699,14 +793,15 @@ things to somebody about to transfer money.
 
 ## Manager screens & the manager agent API
 
-| Manager UI                        | Manager agent actions                            | What it does                                                                              |
-| --------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `/manager/membership-plans`       | `list_membership_plans` / `save_membership_plan` | Add, price, date, retire, or duplicate a plan; email every member about one (`announce`). |
-| `/manager/memberships`            | `list_invoices` / `edit_invoice`                 | See and correct invoices.                                                                 |
-| both membership screens           | `edit_invoice` (`status`) / `delete_invoice`     | Cancel from any state; delete a junk invoice.                                             |
-| `/manager/users/<id>`             | `create_membership`                              | Raise a membership for a person.                                                          |
-| both membership screens           | `edit_invoice` (`starts_on`)                     | Correct the day yearly cover began.                                                       |
-| `/manager/users/<id>` (check-ins) | none                                             | Move a check-in to another membership.                                                    |
+| Manager UI                        | Manager agent actions                                              | What it does                                                                              |
+| --------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `/manager/membership-plans`       | `list_membership_plans` / `save_membership_plan`                   | Add, price, date, retire, or duplicate a plan; email every member about one (`announce`). |
+| `/manager/memberships`            | `list_invoices` / `edit_invoice`                                   | See and correct invoices.                                                                 |
+| both membership screens           | `edit_invoice` (`status`) / `delete_invoice`                       | Cancel from any state; delete a junk invoice.                                             |
+| `/manager/users/<id>`             | `create_membership`                                                | Raise a membership for a person.                                                          |
+| both membership screens           | `edit_invoice` (`starts_on`)                                       | Correct the day yearly cover began.                                                       |
+| both membership screens           | `list_invoices` / `list_users` / `get_user` (`insurance_reminder`) | See which insurance reminder went out.                                                    |
+| `/manager/users/<id>` (check-ins) | none                                                               | Move a check-in to another membership.                                                    |
 
 Moving a check-in is the one row with no agent equivalent: the API has no
 check-in actions at all, and adding the first one is a wider decision than this

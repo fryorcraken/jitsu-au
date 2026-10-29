@@ -27,9 +27,11 @@ read state, and nothing can dismiss it. An **activity item** is something that
 happened, stored as a row in `notifications`, unread until somebody looks at it.
 They share one badge, and nothing else. The **email switches**
 (`notification_preferences`) govern the inbox only: every activity item is
-written whether or not the person wants it emailed. One kind has no switch at
-all, a membership plan a manager announced, because it is about the person's
-own membership rather than news about the club (see "A plan is announced").
+written whether or not the person wants it emailed. Three kinds have no switch
+at all, because they are about the person's own membership rather than news
+about the club: a membership plan a manager announced (see "A plan is
+announced") and the two yearly insurance reminders (see "Emails with no
+switch").
 
 ## Rules
 
@@ -60,7 +62,9 @@ own membership rather than news about the club (see "A plan is announced").
    is a daily summary.** You said something and somebody answered, which is
    worth an interruption, and a manager who presses "Save and email" means
    now. Thread activity, blog announcements and moderation alerts batch, so a
-   busy thread cannot produce ten emails in an afternoon.
+   busy thread cannot produce ten emails in an afternoon. The yearly insurance
+   reminders go out on their own too, on the morning run just before the
+   summary.
 9. **Announcements are off until somebody opts in.** They are the only kind that
    would reach a person who did nothing to ask for it. Everything else is on by
    default. A NULL column means "never chose", which is why the preference
@@ -429,7 +433,10 @@ Two further gaps it has, both worth knowing before trusting it:
 - **A reply email masks it.** It stays quiet if ANY row was stamped in the last
   36 hours, and `sendReplyNotification` stamps the instant reply emails, which
   do not go through the digest at all. One comment reply in the window hides a
-  dead digest.
+  dead digest. The insurance reminders do NOT mask it: they are stamped by
+  the same morning request just before the summary, so only kinds the summary
+  sends count as evidence here. Their unsent rows do count toward the backlog,
+  so a reminder stuck unsent raises the item too.
 - **It is shown, not sent.** It is an attention item on a page, so it reaches
   only a manager who signs in to the site and looks. A manager who works
   through the agent API never sees it.
@@ -604,6 +611,42 @@ nothing else — no read access to member data, no write path. Small blast
 radius, but the docs should not imply the old key stops working the instant you
 publish, because it does not.
 
+### Emails with no switch
+
+`UNSWITCHABLE_NOTIFICATION_KINDS` in `src/lib/notifications.ts` is the closed
+list of kinds the switches do not govern (`preferenceForKind` maps each of them
+to `null`, and a test holds the two together): messages about somebody's
+**membership**, the way an invoice is, rather than about a conversation. It
+holds the plan announcement (`membership_plan_open`, see "A plan is announced")
+and the two yearly insurance reminders, `insurance_ending_soon` and
+`insurance_ended` (`docs/memberships.md`, "When yearly insurance ends").
+
+- **Nobody can turn them off.** `shouldEmail` answers yes for them without
+  reading preferences, and the switches page offers nothing for them. Every kind
+  with a switch still obeys it.
+- **Each is sent on its own.** A plan announcement goes out when the manager
+  saves it, and one still unsent when the summary runs is rendered in its
+  "Membership" section, first, rather than stamped as "nothing they wanted".
+  The insurance reminders go out on the morning run just before the summary,
+  and the summary never reads them: they carry idempotency keys of their own,
+  so a reminder whose send was delivered but answered with an error must not go
+  out again under the summary's key. Their own run retries them the next
+  morning instead.
+- **The insurance emails carry no settings link**, because a link to a page of
+  switches would promise a choice that page does not offer.
+- **Adding a kind to the list takes a choice away from people**, so it is a
+  product decision each time, made in that one list, which a test pins.
+
+The insurance reminders are written and sent by the **same morning job** as the
+summary: `/api/notifications/digest` calls `sendInsuranceReminders` first, logs
+what it did, and carries on to the summary whatever happened. There is still one
+scheduler. The endpoint's response carries an `insurance` block beside the
+summary's counts. A reminder that run did not send (over its batch of 20, a failed
+send, an address it could not resolve) stays unstamped, is retried the next
+morning under the same key, and counts toward the stalled-email attention item
+like any other unsent row. The insurance stamps do not count as evidence the
+summary works, since they come from the same request just before it.
+
 ### A post goes live
 
 `createBlogPostRow` and `updateBlogPostRow` announce on the transition **into**
@@ -774,9 +817,10 @@ way back means we genuinely do not know.
 - **No per-thread mute.** The switches are per kind. If one thread turns noisy,
   the answer today is to turn thread activity off.
 - **No in-app bell or toast.** The sidebar badge is the only in-app signal.
-- **The attention list has five checks**: waivers waiting for approval, unanswered
-  contact messages, a stalled daily digest, new interest registrations, and the
-  club's training dates running out. Unmatched bank transactions and unpaid
+- **The attention list has six checks**: waivers waiting for approval, unanswered
+  contact messages, a stalled daily digest, new interest registrations, people
+  whose yearly insurance ends in the next 14 days, and the club's training dates
+  running out. Unmatched bank transactions and unpaid
   invoices are the obvious next entries and the shape supports them, but widening
   the manager queue further is separate work.
 - **Signing up notifies managers by email at the moment it happens** (a new-lead
@@ -842,3 +886,5 @@ Two consequences worth knowing:
 | Announcing a plan (rules, then I/O)              | `src/lib/plan-announcement.ts`, `plan-announcement.server.ts`                 |
 | The plan email                                   | `src/lib/email-templates/membership-plan-open.tsx`                            |
 | The tick box, confirm and retry                  | `src/hooks/use-plan-announcement.tsx`                                         |
+| Kinds with no switch                             | `UNSWITCHABLE_NOTIFICATION_KINDS` in `src/lib/notifications.ts`               |
+| Insurance reminders: rules / sending             | `src/lib/insurance-reminders.ts` / `insurance-reminders.server.ts`            |

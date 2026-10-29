@@ -46,6 +46,10 @@ function fakeAdmin(results: QueryResult[]) {
           filters.push([`gte:${col}`, value]);
           return chain;
         },
+        not: (col: string, op: string, value: unknown) => {
+          filters.push([`not.${op}:${col}`, value]);
+          return chain;
+        },
         order: () => chain,
         limit: () => chain,
         maybeSingle: () => Promise.resolve(result),
@@ -111,6 +115,15 @@ describe("digestBacklogNotifications", () => {
     const { admin, filters } = fakeAdmin([backlog(4), backlog(19)]);
     await digestBacklogNotifications(admin, NOW);
     expect(filters).toContainEqual(["gte:emailed_at", CUTOFF]);
+  });
+
+  it("does not take an insurance reminder going out as proof the summary works", async () => {
+    // The reminders are sent by the same morning request just before the
+    // summary, so one landing says nothing about the summary after it.
+    const { admin, filters } = fakeAdmin([backlog(4), backlog(19)]);
+    await digestBacklogNotifications(admin, NOW);
+    const excluded = filters.find(([f]) => f === "not.in:kind")?.[1] as string;
+    expect(excluded).toBe("(insurance_ending_soon,insurance_ended)");
   });
 
   it("says nothing when a read fails, rather than crying wolf", async () => {

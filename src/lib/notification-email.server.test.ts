@@ -82,7 +82,16 @@ function fakeDb(pending: PendingRow[], fails: { emails?: boolean; prefs?: boolea
         return {
           select: () => ({
             is: () => ({
-              order: () => ({ limit: () => Promise.resolve({ data: pending, error: null }) }),
+              // The digest leaves the insurance reminders to their own sender.
+              not: (_c: string, _op: string, list: string) => ({
+                order: () => ({
+                  limit: () =>
+                    Promise.resolve({
+                      data: pending.filter((r) => !list.includes(r.kind)),
+                      error: null,
+                    }),
+                }),
+              }),
             }),
           }),
           update: () => ({
@@ -192,6 +201,27 @@ describe("sendDailyDigests, for a household", () => {
     // Every row stamped, including the three the merge folded away. Leaving
     // those pending would mail the same post again tomorrow.
     expect(stamped.flat().sort()).toEqual(["n1", "n2", "n3", "n4"]);
+  });
+
+  it("leaves the insurance reminders to their own sender", async () => {
+    const { sendDailyDigests } = await import("./notification-email.server");
+    // They are sent by the same morning request just before this, under keys
+    // of their own. One whose send was delivered but answered with an error
+    // would otherwise go out a second time here, under the digest's key, which
+    // the provider cannot recognise as the same email. Whatever that run did
+    // not send, it retries itself the next morning.
+    const reminder: PendingRow = {
+      ...post("n9", PARENT, "membership-1"),
+      kind: "insurance_ending_soon",
+      title: "Bea's club insurance ends on 12 March",
+      href: "/membership?for=child-a",
+    };
+    const { db, stamped } = fakeDb([post("n1", PARENT), reminder]);
+
+    const result = await sendDailyDigests(db, new Date("2026-08-30T22:00:00Z"));
+
+    expect(result.considered).toBe(1);
+    expect(stamped.flat()).toEqual(["n1"]);
   });
 
   it("still sends a separate email to an unrelated household", async () => {

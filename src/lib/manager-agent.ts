@@ -308,7 +308,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "26",
+  version: "27",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -321,6 +321,14 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "27",
+      // One new response field; nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "list_invoices rows, each invoice inside list_users, and each membership inside get_user carry insurance_reminder. It is null on every plan except yearly insurance (a plan whose kind is insurance). On those it is { ends_within_14_days, owed, last_sent }: ends_within_14_days is true while the member is owed the 'ending soon' reminder (their cover ends in the next 14 club days, they have not renewed with another active insurance membership, and it is not cancelled); owed is the reminder owed today (insurance_ending_soon, insurance_ended, or null), sent or not; and last_sent is { kind, sent_at } for the latest reminder actually emailed, or null if none has gone out. The site sends both reminders itself every morning; there is no action to send or suppress one, and members cannot switch them off.",
+      ],
+    },
     {
       version: "26",
       // A new optional param and two new response fields. Nothing that worked
@@ -635,7 +643,7 @@ export const AGENT_MANIFEST: {
       name: "list_users",
       method: "POST",
       summary:
-        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining. Each row also carries phone, email_confirmed_at (null = not verified) and code_of_conduct (the same object get_user reports). For anything more about one person (profile, waivers, attendance), call get_user.",
+        "List everyone in the club's funnel (leads, applicants, visitors, members) with their lifecycle status, roles, invoices, and how many classes they have attended (sessions_attended, lifetime across all plans). Each invoice carries its own sessions_allowed (the plan's session credits, e.g. 2 for a trial_2_session plan) and sessions_remaining (this invoice's own live balance, spent one per check-in) — use those, not sessions_attended, to answer 'how much of this trial is left'. sessions_allowed is null for a plan with no session credits (e.g. a period plan); sessions_remaining is ALSO null for a still-pending invoice on a session-credit plan (it's set on activation) — null there means not started yet, not zero remaining. Each row also carries phone, email_confirmed_at (null = not verified) and code_of_conduct (the same object get_user reports). For anything more about one person (profile, waivers, attendance), call get_user. A yearly insurance invoice also carries insurance_reminder (see list_invoices).",
       params: [
         {
           name: "status",
@@ -653,7 +661,7 @@ export const AGENT_MANIFEST: {
       name: "get_user",
       method: "POST",
       summary:
-        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at and checkin_count; list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at, approver, and is_paper: true for a scanned paper form filed by a manager). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
+        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at, checkin_count and insurance_reminder (see list_invoices); list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at, approver, and is_paper: true for a scanned paper form filed by a manager). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
       params: [
         {
           name: "user_id",
@@ -666,7 +674,7 @@ export const AGENT_MANIFEST: {
       name: "list_invoices",
       method: "POST",
       summary:
-        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries paid_at and paid_reference (what a payment recorded by hand was known by), and sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero).",
+        "List invoices (membership payment records) with member name/email — useful to find an invoice id to edit. Each carries paid_at and paid_reference (what a payment recorded by hand was known by), and sessions_allowed and sessions_remaining; read the list_users summary for what null means on each (they are not interchangeable with zero). Each also carries insurance_reminder: null unless the plan is yearly insurance, otherwise { ends_within_14_days, owed, last_sent } — whether the member is owed the 'insurance ends soon' reminder today, which reminder is owed today, and the latest reminder emailed ({ kind: insurance_ending_soon | insurance_ended, sent_at }) or null. The same thing the memberships screen shows as '14-day reminder sent 26 Feb'.",
       params: [
         {
           name: "status",
