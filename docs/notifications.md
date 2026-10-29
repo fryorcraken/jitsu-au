@@ -113,12 +113,16 @@ a confirm that says what will happen" is the club's own UX rule.
 stored fact. `countWaiversAwaitingApproval` reads the waiting rows and asks
 `deriveWaiverListStatuses` which of them are **`replaced`** — unapproved
 submissions the person has since signed past, where the club approved that later
-signature — and leaves those out. Approving one could not change which waiver is
-on file, so it is not work, and counted it was an item no manager could ever
-clear. The club was carrying one: a July submission nobody approved, under an
-August re-signing that was. The other two derived states, `active` and
-`superseded`, only ever apply to an already-approved waiver and so never hid
-work from this count.
+signature — and leaves those out. Approving one is not the chore it looks like:
+`active` is keyed on `approved_at`, so approving an overtaken submission today
+makes that older document the person's active waiver and patches its stale
+details onto their profile, over the newer form they actually signed. Leaving it
+alone is the only right action, the stored status cannot record that, and so
+counted it was both an item no manager could ever clear and an invitation to the
+one click that would do damage. The club was carrying one: a July submission
+nobody approved, under an August re-signing that was. The other two derived
+states, `active` and `superseded`, only ever apply to an already-approved waiver
+and so never hid work from this count.
 
 Both reads are scoped: the waiting rows are capped at the same 500 the waivers
 screen itself reads under, and the second read asks only for the approved

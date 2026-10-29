@@ -1758,18 +1758,24 @@ export const listWaivers = createServerFn({ method: "GET" })
  */
 const WAITING_WAIVER_SCAN = 500;
 
+/** PostgREST renders `.in()` into the URL; same chunk size as household-email.ts. */
+const ID_CHUNK = 100;
+
 /**
  * How many signed waivers are waiting for a manager, and who signed the newest
  * one. Feeds the "needs attention" list behind /notifications.
  *
  * NOT a count of `approval_status = 'pending'`, which is the stored fact but
  * not the question asked here. A waiver the person has since signed past, where
- * the club approved that later signature, stays stored pending for good:
- * approving it could not change which waiver is on file, and there is no reject
- * status to move it to. Counted, it is an attention item no manager can ever
- * clear, and the live club was carrying one. `deriveWaiverListStatuses` is the
- * single place that decides which those are (`replaced`), so this reads the
- * rows and asks it rather than keeping a second opinion in SQL.
+ * the club approved that later signature, stays stored pending for good, and
+ * approving it is not the chore it looks like: it would make that older
+ * document their active waiver and patch its stale details onto their profile
+ * (see `deriveWaiverListStatuses`, which carries the reasoning). So the right
+ * action is to leave it alone, the stored status cannot say that, and counted
+ * it is an item no manager can clear that also invites the damaging click. The
+ * live club was carrying one. `deriveWaiverListStatuses` is the single place
+ * that decides which those are (`replaced`), so this reads the rows and asks it
+ * rather than keeping a second opinion in SQL.
  *
  * A plain exported function taking its client, like `countUnreadContactMessages`:
  * the attention list is composed in one place and this is a source for it.
@@ -1803,20 +1809,39 @@ export async function countWaiversAwaitingApproval(admin: SupabaseClient<Databas
   // The approved waivers of just these people, which is what decides whether a
   // waiting row has been replaced. A person's whole history or none of it: the
   // derivation cannot answer for a row it was told nothing around.
-  const { data: approved, error: approvedError } = await admin
-    .from("waivers")
-    .select("id, user_id, approval_status, approved_at, signed_at")
-    .eq("approval_status", "approved")
-    .in("user_id", [...new Set(waiting.map((w) => w.user_id))]);
-  // No early return, and nothing to special-case: with no approved rows to
-  // compare against, every waiting row derives as `pending` and the count comes
-  // out as it did before this change. That is the right direction to fail in.
-  // An item a manager has already dealt with is noise; a signature nobody is
-  // told about is somebody waiting to train.
-  if (approvedError)
-    console.error("[waivers] could not read the approved waivers beside them:", approvedError);
+  //
+  // Chunked for the reason household-email.ts chunks: PostgREST renders `.in()`
+  // into the URL, and at the scan cap above one list of ids would run past the
+  // proxy's request-line limit, failing the read as a whole rather than
+  // narrowing it.
+  const userIds = [...new Set(waiting.map((w) => w.user_id))];
+  const approved: {
+    id: string;
+    user_id: string;
+    approval_status: string;
+    approved_at: string | null;
+    signed_at: string;
+  }[] = [];
+  for (let i = 0; i < userIds.length; i += ID_CHUNK) {
+    const { data: slice, error: sliceError } = await admin
+      .from("waivers")
+      .select("id, user_id, approval_status, approved_at, signed_at")
+      .eq("approval_status", "approved")
+      .in("user_id", userIds.slice(i, i + ID_CHUNK));
+    // Stop, keep what came back, and carry on with it. Nothing to special-case:
+    // a missing approved row can only leave a waiting row looking `pending`, so
+    // a partial or empty read counts MORE, which is how this read behaved
+    // before `replaced` existed. That is the right direction to fail in. An
+    // item a manager has already dealt with is noise; a signature nobody is
+    // told about is somebody waiting to train.
+    if (sliceError) {
+      console.error("[waivers] could not read the approved waivers beside them:", sliceError);
+      break;
+    }
+    approved.push(...(slice ?? []));
+  }
 
-  const statuses = deriveWaiverListStatuses([...waiting, ...(approved ?? [])]);
+  const statuses = deriveWaiverListStatuses([...waiting, ...approved]);
   const stillWaiting = waiting.filter((w) => statuses.get(w.id) === "pending");
 
   // `count` is how many rows are waiting; `waiting` is how many this read

@@ -280,14 +280,20 @@ export type WaiverListStatus = (typeof waiverListStatuses)[number];
  * An unapproved waiver is `pending` only while it is still the person's newest
  * signature. Once they have signed again and the club has approved THAT, the
  * older submission is `replaced`, and the distinction is the whole point:
- * `pending` claims a manager still owes somebody a decision, and on this row
- * nobody does. Approving it could not change which waiver is on file, and the
- * stored status has nowhere else to go (`pending | approved`, with no reject
- * path), so left as pending it asks for attention that nothing can ever
- * relieve it of. It is a fourth state rather than `superseded` because the two
- * are different facts, and a manager reading the history later needs them
- * apart: a superseded waiver was the waiver on file once, and this one never
- * was.
+ * `pending` claims a manager still owes somebody a decision on this row, and
+ * on this row the decision is not owed, it is a trap. `active` is keyed on
+ * `approved_at`, not on the signing date, so approving an overtaken submission
+ * TODAY would make that older document the person's active waiver and patch
+ * its stale details onto their profile, over the newer form they actually
+ * signed (`waiverToProfileFields`, and the same warning the paper-filing form
+ * carries: `docs/waivers.md`). Leaving it alone is the only right action, and
+ * the stored status has nowhere to record that (`pending | approved`, with no
+ * reject path), so read as pending it asks for attention that nothing can
+ * relieve it of and invites the one click that would do damage.
+ *
+ * It is a fourth state rather than `superseded` because the two are different
+ * facts, and a manager reading the history later needs them apart: a
+ * superseded waiver was the waiver on file once, and this one never was.
  *
  * Keyed on the SIGNING dates, not `approved_at`: what replaces a waiver is a
  * later signature the club has accepted, whereas a waiver signed earlier and

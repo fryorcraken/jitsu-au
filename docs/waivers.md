@@ -476,6 +476,13 @@ decide which waiver is active. That is still the most recently **approved** one
 (rule 5), so approving an old paper form today makes it that person's active
 waiver even if they signed a newer one online. The upload form says so.
 
+That is also why a back-dated form filed for somebody whose newer online waiver
+is already approved lands **`replaced`** rather than pending, and raises no
+attention item: it is filed, scanned and on the record, which is the point of a
+migration, but approving it is the exact mistake the paragraph above warns
+about. The manager who filed it is the one who would have been notified, and
+Approve is still on the row for the rare case they mean it.
+
 **Filing the same paper twice stops for a look.** Signing is unlimited, but if
 the person already has a waiver signed on that date, filing another one pauses
 and shows what it collided with. "The person" means the **participant**, so two
@@ -597,8 +604,10 @@ the person detail page (with the date), and on the member's account page.
 ### Manager reviews and approves
 
 Both steps of signing up now reach the manager on `/notifications`: a read-only
-item for the registration, and one carrying **Approve** for every waiver still
-`pending`. Neither replaces the emails that already go out at the moment each
+item for the registration, and one carrying **Approve** for every waiver
+awaiting a decision — every stored-`pending` one except those derived
+`replaced`, which are not awaiting anything (rule 5, and
+`docs/notifications.md` for why counting them was worse than useless). Neither replaces the emails that already go out at the moment each
 step happens. See `docs/notifications.md` for the two items and how each clears.
 
 The manager waivers screen lists submissions newest first with the submitted

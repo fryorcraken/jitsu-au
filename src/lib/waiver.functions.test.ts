@@ -1500,6 +1500,28 @@ describe("countWaiversAwaitingApproval", () => {
     });
   });
 
+  it("chunks the people it asks about, so a long queue does not blow the URL", async () => {
+    const { countWaiversAwaitingApproval } = await import("./waiver.functions");
+    const people = Array.from({ length: 101 }, (_, i) => `p${i}`);
+    const { admin, filters, tables } = fakeCountAdmin([
+      {
+        data: people.map((user_id, i) => waiting({ id: `w${i}`, user_id })),
+        error: null,
+        count: 101,
+      },
+      { data: [], error: null },
+      { data: [], error: null },
+    ]);
+    expect((await countWaiversAwaitingApproval(admin)).pending).toBe(101);
+    // Two follow-up reads of 100 and 1, not one read of 101: PostgREST renders
+    // `.in()` into the URL, and an unchunked list at the scan cap would run
+    // past the proxy's request-line limit and fail the read as a whole.
+    expect(tables).toEqual(["waivers", "waivers", "waivers"]);
+    const scopes = filters.filter(([col]) => col === "in:user_id").map(([, ids]) => ids);
+    expect((scopes[0] as string[]).length).toBe(100);
+    expect(scopes[1]).toEqual(["p100"]);
+  });
+
   it("over-reports rather than under-reports when the approved waivers cannot be read", async () => {
     const { countWaiversAwaitingApproval } = await import("./waiver.functions");
     const { admin } = fakeCountAdmin([
