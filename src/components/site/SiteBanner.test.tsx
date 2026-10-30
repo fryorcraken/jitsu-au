@@ -20,6 +20,16 @@ describe("SiteBannerBar", () => {
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
+  // A hover underline on the whole line drew a second line under the link text.
+  it("underlines the link text once, and nothing else", () => {
+    render(<SiteBannerBar banner={BANNER} pathname="/" onDismiss={() => {}} />);
+    const link = screen.getByRole("link");
+    expect(link.className).not.toMatch(/(^|\s)(hover:)?underline(\s|$)/);
+    const underlined = link.querySelectorAll(".underline");
+    expect(underlined).toHaveLength(1);
+    expect(underlined[0]).toHaveTextContent("Register your interest");
+  });
+
   it("shows a notice with no link as plain text", () => {
     render(
       <SiteBannerBar

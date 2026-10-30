@@ -96,12 +96,18 @@ function BannerText({
 
   const content = (
     <>
-      {banner.message} <span className="underline underline-offset-2">{banner.link_label}</span>
+      {banner.message}{" "}
+      <span className="underline underline-offset-2 group-hover:decoration-2">
+        {banner.link_label}
+      </span>
     </>
   );
   if (!interactive) return <p className={className}>{content}</p>;
   return (
-    <BannerLink href={banner.link_href} className={`${className} hover:underline`}>
+    // One underline only: the link text's own, thickened on hover. A hover
+    // underline on the whole line drew a second, offset line under the link
+    // text whenever the pointer was over the banner.
+    <BannerLink href={banner.link_href} className={`${className} group`}>
       {content}
     </BannerLink>
   );
