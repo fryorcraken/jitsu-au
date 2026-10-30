@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { AddressFields } from "./AddressFields";
-import { EMPTY_AU_ADDRESS, auAddressFieldId } from "@/lib/au-address";
+import { EMPTY_ADDRESS, auAddressFieldId } from "@/lib/au-address";
 
 describe("AddressFields", () => {
   it("asks for the four parts, each tied to its label", () => {
-    render(<AddressFields idPrefix="address" value={EMPTY_AU_ADDRESS} onChange={() => {}} />);
+    render(<AddressFields idPrefix="address" value={EMPTY_ADDRESS} onChange={() => {}} />);
     for (const label of ["Street address", "Suburb", "State", "Postcode"]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
@@ -14,15 +14,15 @@ describe("AddressFields", () => {
 
   it("reports what was typed as a whole draft", () => {
     const onChange = vi.fn();
-    render(<AddressFields idPrefix="address" value={EMPTY_AU_ADDRESS} onChange={onChange} />);
+    render(<AddressFields idPrefix="address" value={EMPTY_ADDRESS} onChange={onChange} />);
     fireEvent.change(screen.getByLabelText("State"), { target: { value: "VIC" } });
-    expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_AU_ADDRESS, state: "VIC" });
+    expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_ADDRESS, state: "VIC" });
     fireEvent.change(screen.getByLabelText("Postcode"), { target: { value: "3000" } });
-    expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_AU_ADDRESS, postcode: "3000" });
+    expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_ADDRESS, postcode: "3000" });
   });
 
   it("offers all eight states and lets the field stand empty", () => {
-    render(<AddressFields idPrefix="address" value={EMPTY_AU_ADDRESS} onChange={() => {}} />);
+    render(<AddressFields idPrefix="address" value={EMPTY_ADDRESS} onChange={() => {}} />);
     const options = Array.from(
       (screen.getByLabelText("State") as HTMLSelectElement).options,
       (o) => o.value,
@@ -35,7 +35,7 @@ describe("AddressFields", () => {
       <AddressFields
         idPrefix="guardian_address"
         section="guardian"
-        value={EMPTY_AU_ADDRESS}
+        value={EMPTY_ADDRESS}
         onChange={() => {}}
       />,
     );
@@ -49,7 +49,7 @@ describe("AddressFields", () => {
     render(
       <AddressFields
         idPrefix="address"
-        value={EMPTY_AU_ADDRESS}
+        value={EMPTY_ADDRESS}
         onChange={() => {}}
         previousLine="1 Broadway Ultimo"
       />,
@@ -62,7 +62,7 @@ describe("AddressFields", () => {
     render(
       <AddressFields
         idPrefix="address"
-        value={EMPTY_AU_ADDRESS}
+        value={EMPTY_ADDRESS}
         onChange={() => {}}
         fieldProps={(field) => (field === id ? { "aria-invalid": true } : {})}
         fieldMessage={(field) => (field === id ? <p>A postcode is four digits.</p> : null)}
@@ -96,5 +96,74 @@ describe("AddressFields", () => {
       />,
     );
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  describe("outside Australia", () => {
+    it("turns the boxes into free text, with a country, when ticked", () => {
+      const onChange = vi.fn();
+      const { rerender } = render(
+        <AddressFields idPrefix="address" value={EMPTY_ADDRESS} onChange={onChange} />,
+      );
+      expect(screen.queryByLabelText(/Country/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText("This address is outside Australia"));
+      expect(onChange).toHaveBeenLastCalledWith({ ...EMPTY_ADDRESS, overseas: true });
+
+      rerender(
+        <AddressFields
+          idPrefix="address"
+          value={{ ...EMPTY_ADDRESS, overseas: true }}
+          onChange={onChange}
+        />,
+      );
+      expect(screen.getByLabelText(/Country/)).toBeInTheDocument();
+      // A typed box, not the list of Australian states.
+      expect(screen.getByLabelText(/State or region/).tagName).toBe("INPUT");
+      expect(screen.getByLabelText(/Postcode/)).not.toHaveAttribute("inputmode");
+      expect(screen.getByLabelText(/Postcode/)).toHaveAttribute("maxlength", "12");
+      // Everything but the street line says it is optional.
+      expect(screen.getByText(/Town or city/).parentElement).toHaveTextContent("(optional)");
+      expect(screen.getByLabelText("Street address")).toBeInTheDocument();
+    });
+
+    it("starts the street box from a line the club could not split", () => {
+      const onChange = vi.fn();
+      render(
+        <AddressFields
+          idPrefix="address"
+          value={EMPTY_ADDRESS}
+          onChange={onChange}
+          previousLine="10 Downing St London"
+        />,
+      );
+      fireEvent.click(screen.getByLabelText("This address is outside Australia"));
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ overseas: true, street: "10 Downing St London" }),
+      );
+    });
+
+    it("drops an Australian state on the way over, and a typed region on the way back", () => {
+      const onChange = vi.fn();
+      const { rerender } = render(
+        <AddressFields
+          idPrefix="address"
+          value={{ ...EMPTY_ADDRESS, state: "NSW" }}
+          onChange={onChange}
+        />,
+      );
+      fireEvent.click(screen.getByLabelText("This address is outside Australia"));
+      expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ state: "" }));
+
+      rerender(
+        <AddressFields
+          idPrefix="address"
+          value={{ ...EMPTY_ADDRESS, overseas: true, state: "Bavaria" }}
+          onChange={onChange}
+        />,
+      );
+      fireEvent.click(screen.getByLabelText("This address is outside Australia"));
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ overseas: false, state: "" }),
+      );
+    });
   });
 });

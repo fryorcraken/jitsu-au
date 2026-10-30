@@ -7,10 +7,12 @@ import {
   auAddressFromRow,
   auAddressProblems,
   auAddressSchema,
+  composeOverseasAddress,
+  finishedAddress,
   completeAuAddress,
   composeAuAddress,
   draftAddressLine,
-  EMPTY_AU_ADDRESS,
+  EMPTY_ADDRESS,
   addressPartsFromLine,
   isBlankAuAddress,
   readComposedAuAddress,
@@ -149,7 +151,7 @@ describe("splitAuAddress", () => {
 
 describe("auAddressProblems", () => {
   it("lists every blank part, in the order the form shows them", () => {
-    expect(auAddressProblems(EMPTY_AU_ADDRESS).map((p) => p.part)).toEqual([
+    expect(auAddressProblems(EMPTY_ADDRESS).map((p) => p.part)).toEqual([
       "street",
       "suburb",
       "state",
@@ -217,8 +219,8 @@ describe("rows and drafts", () => {
   });
 
   it("knows a blank draft from a started one", () => {
-    expect(isBlankAuAddress(EMPTY_AU_ADDRESS)).toBe(true);
-    expect(isBlankAuAddress({ ...EMPTY_AU_ADDRESS, state: "VIC" })).toBe(false);
+    expect(isBlankAuAddress(EMPTY_ADDRESS)).toBe(true);
+    expect(isBlankAuAddress({ ...EMPTY_ADDRESS, state: "VIC" })).toBe(false);
   });
 });
 
@@ -227,10 +229,10 @@ describe("drafts on the way to an address", () => {
     expect(draftAddressLine({ ...broadway, street: " 1 Broadway " })).toBe(
       "1 Broadway, Ultimo NSW 2007",
     );
-    expect(draftAddressLine({ ...EMPTY_AU_ADDRESS, street: "1 Broadway", state: "NSW" })).toBe(
+    expect(draftAddressLine({ ...EMPTY_ADDRESS, street: "1 Broadway", state: "NSW" })).toBe(
       "1 Broadway, NSW",
     );
-    expect(draftAddressLine(EMPTY_AU_ADDRESS)).toBe("");
+    expect(draftAddressLine(EMPTY_ADDRESS)).toBe("");
   });
 
   it("gives the parts only when the draft would be accepted", () => {
@@ -360,5 +362,69 @@ describe("auAddressSchema refuses keys it does not read", () => {
   it("refuses a unit or a country rather than dropping it", () => {
     expect(auAddressSchema.safeParse({ ...broadway, unit: "3" }).success).toBe(false);
     expect(auAddressSchema.safeParse({ ...broadway, country: "AU" }).success).toBe(false);
+  });
+});
+
+describe("an address outside Australia", () => {
+  const london = {
+    overseas: true,
+    street: "10 Downing St",
+    suburb: "London",
+    state: "",
+    postcode: "SW1A 2AA",
+    country: "United Kingdom",
+  };
+
+  it("is one line in envelope order, with nothing invented for what was left out", () => {
+    expect(composeOverseasAddress(london)).toBe("10 Downing St, London SW1A 2AA, United Kingdom");
+    expect(composeOverseasAddress({ ...london, suburb: "", postcode: "", country: "" })).toBe(
+      "10 Downing St",
+    );
+  });
+
+  // Nothing is mandatory abroad except an address to put on the waiver.
+  it("asks only for the street line", () => {
+    expect(auAddressProblems({ ...london, suburb: "", postcode: "", country: "" })).toEqual([]);
+    expect(auAddressProblems({ ...london, street: " " })).toEqual([
+      { part: "street", label: "Street address" },
+    ]);
+  });
+
+  it("takes any postcode and any state, with no list and no format", () => {
+    expect(auAddressProblems({ ...london, state: "Greater London", postcode: "EC1A 1BB" })).toEqual(
+      [],
+    );
+    expect(postcodeStateNote({ ...london, state: "NSW", postcode: "3000" })).toBeNull();
+  });
+
+  it("is sent as its line, never as Australian parts", () => {
+    expect(finishedAddress(london)).toEqual({
+      line: "10 Downing St, London SW1A 2AA, United Kingdom",
+    });
+    expect(completeAuAddress(london)).toBeNull();
+    expect(draftAddressLine(london)).toBe("10 Downing St, London SW1A 2AA, United Kingdom");
+  });
+
+  it("still keeps every box on one line, as the database requires of a line", () => {
+    expect(auAddressProblems({ ...london, country: "United\tKingdom" })).toEqual([
+      { part: "country", label: "Country", hint: "Please keep the country on one line" },
+    ]);
+  });
+
+  it("must fit in the 300 characters an address may be", () => {
+    const long = {
+      ...london,
+      street: "x".repeat(150),
+      suburb: "y".repeat(60),
+      state: "z".repeat(40),
+      postcode: "1".repeat(12),
+      country: "w".repeat(40),
+    };
+    expect(finishedAddress(long)).toBeNull();
+    expect(auAddressProblems(long)[0].part).toBe("street");
+  });
+
+  it("sends an Australian address as its parts", () => {
+    expect(finishedAddress(broadway)).toEqual({ parts: broadway });
   });
 });

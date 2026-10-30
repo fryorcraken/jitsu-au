@@ -250,6 +250,29 @@ describe("/account", () => {
     });
   });
 
+  // A member who lives abroad gives their address as free text, with no state
+  // list or postcode format, and it is saved as its one line with no parts.
+  it("saves an address outside Australia as its one line", async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(screen.getByLabelText("This address is outside Australia"));
+    await user.clear(screen.getByLabelText("Street address"));
+    await user.type(screen.getByLabelText("Street address"), "10 Downing St");
+    await user.clear(screen.getByLabelText(/Town or city/));
+    await user.type(screen.getByLabelText(/Town or city/), "London");
+    await user.clear(screen.getByLabelText(/Postcode/));
+    await user.type(screen.getByLabelText(/Postcode/), "SW1A 2AA");
+    await user.type(screen.getByLabelText(/Country/), "United Kingdom");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    const sent = updateMyProfile.mock.calls[0][0].data;
+    expect(sent.address).toBe("10 Downing St, London SW1A 2AA, United Kingdom");
+    expect(sent).not.toHaveProperty("address_street");
+    expect(sent).not.toHaveProperty("address_postcode");
+  });
+
   // The address the club could not split must not stand between a member and
   // saving a new mobile, nor be rewritten by a save that never touched it.
   it("saves a new mobile without asking about an address that was not edited", async () => {

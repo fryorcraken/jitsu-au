@@ -292,8 +292,15 @@ fields applies and is locked, and the server refuses a submission that does not
 match it.
 
 **The address is asked in parts: street, suburb, state (a list of the eight
-states and territories) and a four-digit postcode**, and only an Australian
-address can be given. The parts are what the club can sort and count people
+states and territories) and a four-digit postcode**. An address abroad is
+given by ticking **"This address is outside Australia"** above the boxes,
+which turns them into free text (street, town or city, state or region,
+postcode, country) with only the street line required and no list or format
+to meet. It is stored as the one line made from what was given, with no
+parts, so it is never counted by suburb or postcode, and it reaches the
+server the same way a one-line address always has. Somebody living in
+Australia, an international student included, gives their Australian
+address as usual. The parts are what the club can sort and count people
 by; the one line every screen, email and the signed PDF print is composed from
 them by the server, as `<street>, <suburb> <STATE> <postcode>`, so the two
 cannot disagree (the database refuses a waiver where they do: see the

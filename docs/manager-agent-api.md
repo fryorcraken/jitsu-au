@@ -510,7 +510,9 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   screen can look up a missing postcode before pressing Sign; an agent working
   through a stack of old records cannot always split what is written, and
   guessing a postcode to make it fit would put a wrong one on a signed
-  document. A line is stored as written with no parts, and the person is asked
+  document. A one-line address is also how an address outside Australia goes, from
+  every surface: the screens build it from their "outside Australia" boxes,
+  and an agent sends it as `address`. A line is stored as written with no parts, and the person is asked
   for them the next time they give an address. Changing either surface's rule
   means changing this bullet.
 - **The two surfaces present that one check differently on purpose, and

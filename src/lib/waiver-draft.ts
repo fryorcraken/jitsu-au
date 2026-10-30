@@ -22,11 +22,11 @@
 
 import type { HealthAnswers, HealthQuestionId, WaiverSigningFor } from "@/lib/validation";
 import {
-  EMPTY_AU_ADDRESS,
+  EMPTY_ADDRESS,
   auAddressDraft,
   isAuState,
   addressPartsFromLine,
-  type AuAddressDraft,
+  type AddressDraft,
 } from "@/lib/au-address";
 
 export const WAIVER_DRAFT_KEY = "uts-jitsu.waiver.draft";
@@ -61,7 +61,7 @@ export type WaiverDraft = {
   phone: string;
   email: string;
   /** The participant's address, part by part as typed. */
-  address: AuAddressDraft;
+  address: AddressDraft;
   /**
    * An address held as one line that could not be read as parts, shown above
    * the boxes so it is not lost: the club's record of it, or a line typed into
@@ -84,7 +84,7 @@ export type WaiverDraft = {
   /** "The guardian lives at the participant's address": the form's default. */
   guardianSameAddress: boolean;
   /** The guardian's own address, used only when the tick above is off. */
-  guardianAddress: AuAddressDraft;
+  guardianAddress: AddressDraft;
   /** The same as `addressOnFile`, for the guardian's address. */
   guardianAddressOnFile: string;
   guardianPhone: string;
@@ -154,16 +154,20 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
   // one line instead; that is read into parts where it can be, and otherwise
   // restored empty rather than binning the whole draft (see `giSize` below for
   // why the version is not bumped for a change like this).
-  const address = (v: unknown): AuAddressDraft => {
+  const address = (v: unknown): AddressDraft => {
     if (typeof v === "string") return auAddressDraft(addressPartsFromLine(v));
-    if (!v || typeof v !== "object") return { ...EMPTY_AU_ADDRESS };
+    if (!v || typeof v !== "object") return { ...EMPTY_ADDRESS };
     const source = v as Record<string, unknown>;
+    const overseas = source.overseas === true;
     const state = text(source.state);
     return {
+      overseas,
       street: text(source.street),
       suburb: text(source.suburb),
-      state: isAuState(state) ? state : "",
+      // Free text abroad; at home only a state the picker offers.
+      state: overseas || isAuState(state) ? state : "",
       postcode: text(source.postcode),
+      country: text(source.country),
     };
   };
   // An old one-line draft address that could not be read as parts: kept, so

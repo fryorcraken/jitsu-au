@@ -19,14 +19,14 @@ import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { WaiverDocument } from "@/components/site/WaiverDocument";
 import { AddressFields } from "@/components/site/AddressFields";
 import {
-  EMPTY_AU_ADDRESS,
+  EMPTY_ADDRESS,
   auAddressDraft,
   auAddressFromRow,
-  completeAuAddress,
+  finishedAddress,
   draftAddressLine,
   addressPartsFromLine,
   sameAuAddress,
-  type AuAddressDraft,
+  type AddressDraft,
 } from "@/lib/au-address";
 import {
   submitWaiverWithPdf,
@@ -193,7 +193,7 @@ function Waiver() {
    * which is the exact accident `resolveDependantId` exists to prevent.
    */
   const [dependantId, setDependantId] = useState("");
-  const [address, setAddress] = useState<AuAddressDraft>(EMPTY_AU_ADDRESS);
+  const [address, setAddress] = useState<AddressDraft>(EMPTY_ADDRESS);
   // An address the club holds only as one line it could not read as parts.
   // Shown above the boxes so a returning signer can see what they told us,
   // rather than meeting four empty fields and wondering what happened.
@@ -223,7 +223,7 @@ function Waiver() {
   // `resolveWaiverContacts`. The default, so a family at one address types
   // nothing; unticked, the guardian's address is asked for in parts.
   const [guardianSameAddress, setGuardianSameAddress] = useState(true);
-  const [guardianAddress, setGuardianAddress] = useState<AuAddressDraft>(EMPTY_AU_ADDRESS);
+  const [guardianAddress, setGuardianAddress] = useState<AddressDraft>(EMPTY_ADDRESS);
   const [guardianAddressOnFile, setGuardianAddressOnFile] = useState<string | null>(null);
   const [guardianPhone, setGuardianPhone] = useState("");
   const [guardianEmail, setGuardianEmail] = useState("");
@@ -903,6 +903,11 @@ function Waiver() {
   async function sendWaiver() {
     const sigImg = signatureMode === "draw" ? signatureImage : "";
     const sigName = signatureMode === "type" ? signatureName : "";
+    const participantAddress = finishedAddress(address);
+    // Only when the guardian block is on screen and they live elsewhere; a
+    // hidden or "same address" one sends nothing, which means the participant's.
+    const guardianOwnAddress =
+      needsGuardian && !guardianSameAddress ? finishedAddress(guardianAddress) : null;
 
     const outcome = await send.submit({
       run: async (signal, submissionId) => {
@@ -918,10 +923,12 @@ function Waiver() {
             last_name: lastName,
             preferred_name: preferredName,
             date_of_birth: dob,
-            // Every part is filled in by this point (the checklist above
-            // guards the send), so this is the address in parts; the server
-            // composes the line the document prints.
-            address_parts: completeAuAddress(address) ?? undefined,
+            // Finished by this point (the checklist above guards the send):
+            // the parts of an Australian address, from which the server
+            // composes the line the document prints, or the one line of an
+            // address outside Australia, which is stored as given.
+            address_parts: participantAddress?.parts,
+            address: participantAddress?.line ?? "",
             phone,
             // Who it is for, and therefore which address the club gets. Signing
             // for somebody on the account the participant's field is not on
@@ -949,10 +956,8 @@ function Waiver() {
             // nobody can see a problem with.
             guardian_name: needsGuardian ? guardianName : "",
             guardian_relationship: needsGuardian ? guardianRelationship : "",
-            guardian_address_parts:
-              needsGuardian && !guardianSameAddress
-                ? (completeAuAddress(guardianAddress) ?? undefined)
-                : undefined,
+            guardian_address_parts: guardianOwnAddress?.parts,
+            guardian_address: guardianOwnAddress?.line ?? "",
             guardian_phone: needsGuardian ? guardianPhone : "",
             guardian_email: needsGuardian ? guardianEmail : "",
             // Every question is answered by this point (guarded below), so the
@@ -1510,7 +1515,7 @@ function Waiver() {
                   onChange={setAddress}
                   // Kept on screen while they copy it into the boxes, and
                   // gone once the four are complete.
-                  previousLine={completeAuAddress(address) ? null : addressOnFile}
+                  previousLine={finishedAddress(address) ? null : addressOnFile}
                   fieldProps={fieldProps}
                   fieldMessage={fieldMessage}
                 />
@@ -1684,7 +1689,7 @@ function Waiver() {
                         value={guardianAddress}
                         onChange={setGuardianAddress}
                         previousLine={
-                          completeAuAddress(guardianAddress) ? null : guardianAddressOnFile
+                          finishedAddress(guardianAddress) ? null : guardianAddressOnFile
                         }
                         fieldProps={fieldProps}
                         fieldMessage={fieldMessage}

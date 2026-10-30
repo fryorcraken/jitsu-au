@@ -24,7 +24,7 @@
 import { z } from "zod";
 import { waiverNeedsGuardian, type WaiverSigningFor } from "./validation";
 import { anyHealthConcern, missingHealthAnswers, type HealthAnswerDraft } from "./waiver-health";
-import { auAddressFieldId, auAddressProblems, type AuAddressDraft } from "./au-address";
+import { auAddressFieldId, auAddressProblems, type AddressDraft } from "./au-address";
 import {
   missingRequiredAcks,
   type AcknowledgementAnswers,
@@ -52,7 +52,7 @@ export type WaiverFieldState = {
   phone: string;
   email: string;
   /** The participant's address, part by part. */
-  address: AuAddressDraft;
+  address: AddressDraft;
   ecName: string;
   ecRelationship: string;
   ecPhone: string;
@@ -69,7 +69,7 @@ export type WaiverFieldState = {
   guardianRelationship: string;
   /** "Lives at the same address": when ticked, no second address is asked for. */
   guardianSameAddress: boolean;
-  guardianAddress: AuAddressDraft;
+  guardianAddress: AddressDraft;
   /**
    * Optional signing for yourself, so only its FORMAT is checked and only when
    * one was typed. REQUIRED for a dependant, where it is the only address on
@@ -98,7 +98,7 @@ export const ADDRESS_ANCHOR_PREFIX = {
 
 /** Each part of an address the draft is still missing, as summary entries. */
 function addressEntries(
-  draft: AuAddressDraft,
+  draft: AddressDraft,
   prefix: string,
   labelPrefix: string,
 ): MissingWaiverField[] {

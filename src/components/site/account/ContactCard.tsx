@@ -8,10 +8,10 @@ import { AddressFields } from "@/components/site/AddressFields";
 import {
   auAddressDraft,
   auAddressFromRow,
-  completeAuAddress,
+  finishedAddress,
   composeAuAddress,
   addressPartsFromLine,
-  type AuAddressDraft,
+  type AddressDraft,
 } from "@/lib/au-address";
 import { SaveFailure } from "@/components/site/SaveFailure";
 import { CardActions } from "./CardActions";
@@ -32,7 +32,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
     onSaved,
   });
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState<AuAddressDraft>(auAddressDraft(null));
+  const [address, setAddress] = useState<AddressDraft>(auAddressDraft(null));
   // Pressing Save with part of the address missing is the one way this card
   // can be refused before it is sent, so it says which part, under the field.
   const [attempted, setAttempted] = useState(false);
@@ -91,9 +91,11 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
 
   useEffect(revert, [revert]);
 
-  const addressChanged = (["street", "suburb", "state", "postcode"] as const).some(
-    (part) => address[part] !== stored.address[part],
-  );
+  const addressChanged =
+    Boolean(address.overseas) !== Boolean(stored.address.overseas) ||
+    (["street", "suburb", "state", "postcode", "country"] as const).some(
+      (part) => (address[part] ?? "") !== (stored.address[part] ?? ""),
+    );
   const dirty =
     phone !== stored.phone ||
     addressChanged ||
@@ -105,7 +107,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
   // The line on file could not be read as parts: show it while the member
   // copies it into the boxes, so it is there to read until they are done.
   const previousLine =
-    !completeAuAddress(stored.address) && !completeAuAddress(address) && stored.addressLine
+    !finishedAddress(stored.address) && !finishedAddress(address) && stored.addressLine
       ? stored.addressLine
       : null;
 
@@ -114,8 +116,8 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
     // The address is only checked, and only sent, when it was edited. Saving a
     // new mobile must not depend on an address the club could not split, and
     // it must not rewrite the address line as typed into the composed one.
-    const parts = addressChanged ? completeAuAddress(address) : null;
-    if (addressChanged && !parts) {
+    const finished = addressChanged ? finishedAddress(address) : null;
+    if (addressChanged && !finished) {
       setAttempted(true);
       return;
     }
@@ -125,15 +127,18 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
         // The parts, plus the line made from them so this page's copy of the
         // profile reads right straight away. The server composes the line
         // itself and does not take this one on trust.
-        ...(parts
+        ...(finished?.parts
           ? {
-              address_street: parts.street,
-              address_suburb: parts.suburb,
-              address_state: parts.state,
-              address_postcode: parts.postcode,
-              address: composeAuAddress(parts),
+              address_street: finished.parts.street,
+              address_suburb: finished.parts.suburb,
+              address_state: finished.parts.state,
+              address_postcode: finished.parts.postcode,
+              address: composeAuAddress(finished.parts),
             }
           : {}),
+        // An address outside Australia goes as its one line, with no parts:
+        // the database clears any it held for the old address.
+        ...(finished?.line ? { address: finished.line } : {}),
         sms_whatsapp_consent: smsConsent,
         emergency_contact_name: ecName.trim(),
         emergency_contact_relationship: ecRelationship.trim(),

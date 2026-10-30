@@ -11,7 +11,7 @@ import {
   writeDraft,
   type WaiverDraft,
 } from "./waiver-draft";
-import { EMPTY_AU_ADDRESS } from "./au-address";
+import { EMPTY_ADDRESS } from "./au-address";
 
 const blank: WaiverDraft = {
   submissionId: "3f7c1a2e-9b4d-4c8a-8e21-5d6f0a1b2c3d",
@@ -23,7 +23,7 @@ const blank: WaiverDraft = {
   dob: "",
   phone: "",
   email: "",
-  address: EMPTY_AU_ADDRESS,
+  address: EMPTY_ADDRESS,
   addressOnFile: "",
   utsStudentNumber: "",
   smsConsent: false,
@@ -36,7 +36,7 @@ const blank: WaiverDraft = {
   guardianName: "",
   guardianRelationship: "",
   guardianSameAddress: true,
-  guardianAddress: EMPTY_AU_ADDRESS,
+  guardianAddress: EMPTY_ADDRESS,
   guardianAddressOnFile: "",
   guardianPhone: "",
   guardianEmail: "",
@@ -58,7 +58,13 @@ const filled: WaiverDraft = {
   dob: "1990-12-10",
   phone: "0400000000",
   email: "ada@example.com",
-  address: { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" },
+  address: {
+    ...EMPTY_ADDRESS,
+    street: "1 Broadway",
+    suburb: "Ultimo",
+    state: "NSW",
+    postcode: "2007",
+  },
   smsConsent: true,
   giSize: "4",
   martialArtsExperience: "2 years BJJ",
@@ -212,7 +218,13 @@ describe("addresses in a draft", () => {
     const draft: WaiverDraft = {
       ...filled,
       guardianSameAddress: false,
-      guardianAddress: { street: "9 Quay St", suburb: "Haymarket", state: "", postcode: "20" },
+      guardianAddress: {
+        ...EMPTY_ADDRESS,
+        street: "9 Quay St",
+        suburb: "Haymarket",
+        state: "",
+        postcode: "20",
+      },
     };
     expect(parseDraft(serializeDraft(draft))).toEqual(draft);
   });
@@ -223,7 +235,7 @@ describe("addresses in a draft", () => {
     old.guardianAddress = "9 Quay St, Haymarket NSW 2000";
     delete old.guardianSameAddress;
     const restored = parseDraft(JSON.stringify(old));
-    expect(restored?.address).toEqual({
+    expect(restored?.address).toMatchObject({
       street: "1 Broadway",
       suburb: "Ultimo",
       state: "NSW",
@@ -239,7 +251,7 @@ describe("addresses in a draft", () => {
     old.guardianAddress = "";
     delete old.guardianSameAddress;
     const restored = parseDraft(JSON.stringify(old));
-    expect(restored?.address).toEqual(EMPTY_AU_ADDRESS);
+    expect(restored?.address).toEqual(EMPTY_ADDRESS);
     // ...but not lost: the page shows it above the boxes to copy from.
     expect(restored?.addressOnFile).toBe("1 Broadway Ultimo");
     expect(restored?.guardianSameAddress).toBe(true);
@@ -251,5 +263,22 @@ describe("addresses in a draft", () => {
     const stored = JSON.parse(serializeDraft(filled));
     stored.address.state = "XYZ";
     expect(parseDraft(JSON.stringify(stored))?.address.state).toBe("");
+  });
+});
+
+describe("an address outside Australia in a draft", () => {
+  it("keeps the tick, the free-text state and the country across a reload", () => {
+    const draft: WaiverDraft = {
+      ...filled,
+      address: {
+        overseas: true,
+        street: "10 Downing St",
+        suburb: "London",
+        state: "England",
+        postcode: "SW1A 2AA",
+        country: "United Kingdom",
+      },
+    };
+    expect(parseDraft(serializeDraft(draft))?.address).toEqual(draft.address);
   });
 });

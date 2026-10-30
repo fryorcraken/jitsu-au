@@ -13,6 +13,13 @@
 // the migration's by one space would stop every waiver from being signed.
 // `au-address.test.ts` reads the migration and fails if the two ever disagree.
 //
+// An address outside Australia is the one exception, and it is deliberately
+// simple: the same boxes plus a country, every one free text and only the
+// street line required, stored as the one line made from them with no parts.
+// It has no state list or postcode format to meet, so it cannot be sorted or
+// counted by suburb or postcode, and it is not meant to be: the parts exist
+// for the club's Australian addresses.
+//
 // Pure and server-import-free, like `validation.ts`, so the form, the server
 // and the tests all share it.
 import { z } from "zod";
@@ -44,15 +51,31 @@ export type AuAddress = {
   postcode: string;
 };
 
-/** An address while somebody is typing it: any part may still be blank. */
-export type AuAddressDraft = {
+/**
+ * An address while somebody is typing it: any part may still be blank.
+ *
+ * `overseas` is the "This address is outside Australia" tick. While it is off,
+ * `state` is one of `AU_STATES` (or "" for not chosen yet) and `country` is
+ * unused; while it is on, every part is free text.
+ */
+export type AddressDraft = {
+  /** Absent means Australian, which is what every draft was before the tick. */
+  overseas?: boolean;
   street: string;
   suburb: string;
-  state: AuState | "";
+  state: string;
   postcode: string;
+  country?: string;
 };
 
-export const EMPTY_AU_ADDRESS: AuAddressDraft = { street: "", suburb: "", state: "", postcode: "" };
+export const EMPTY_ADDRESS: AddressDraft = {
+  overseas: false,
+  street: "",
+  suburb: "",
+  state: "",
+  postcode: "",
+  country: "",
+};
 
 /** The longest each part may be, as the database's CHECK constraints allow. */
 export const AU_ADDRESS_LIMITS = { street: 200, suburb: 60 } as const;
@@ -141,14 +164,28 @@ export function addressPartsFromLine(line: string | null | undefined): AuAddress
 }
 
 /** The draft to show for an address the club holds, or an empty one. */
-export function auAddressDraft(a: AuAddress | null): AuAddressDraft {
-  return a ? { ...a } : { ...EMPTY_AU_ADDRESS };
+export function auAddressDraft(a: AuAddress | null): AddressDraft {
+  return a ? { ...EMPTY_ADDRESS, ...a } : { ...EMPTY_ADDRESS };
 }
 
 /** True when nothing has been typed into any part. */
-export function isBlankAuAddress(d: AuAddressDraft): boolean {
-  return !d.street.trim() && !d.suburb.trim() && !d.state && !d.postcode.trim();
+export function isBlankAuAddress(d: AddressDraft): boolean {
+  return (
+    !d.street.trim() &&
+    !d.suburb.trim() &&
+    !d.state &&
+    !d.postcode.trim() &&
+    !(d.country ?? "").trim()
+  );
 }
+
+/** Just the four Australian parts of a draft, for the strict schema. */
+const auPartsOf = (d: AddressDraft) => ({
+  street: d.street,
+  suburb: d.suburb,
+  state: d.state,
+  postcode: d.postcode,
+});
 
 /** The address a profile or waiver row holds as parts, when it holds them. */
 export function auAddressFromRow(row: {
@@ -186,14 +223,34 @@ export const AU_ADDRESS_LABELS = {
   postcode: "Postcode",
 } as const;
 
-/** Which part a problem is about. Doubles as the suffix of that input's id. */
+/** The same boxes' names for an address outside Australia. */
+export const OVERSEAS_ADDRESS_LABELS = {
+  street: "Street address",
+  suburb: "Town or city",
+  state: "State or region",
+  postcode: "Postcode",
+  country: "Country",
+} as const;
+
+/** The longest each part of an address outside Australia may be. */
+export const OVERSEAS_ADDRESS_LIMITS = {
+  street: 150,
+  suburb: 60,
+  state: 40,
+  postcode: 12,
+  country: 40,
+} as const;
+
+/** The four parts of an Australian address. */
 export type AuAddressPart = keyof AuAddress;
+/** Which part a problem is about. Doubles as the suffix of that input's id. */
+export type AddressPart = AuAddressPart | "country";
 
 /** The `id` of one part's input on a form: the form's jump links aim at these. */
-export const auAddressFieldId = (idPrefix: string, part: AuAddressPart) => `${idPrefix}_${part}`;
+export const auAddressFieldId = (idPrefix: string, part: AddressPart) => `${idPrefix}_${part}`;
 
 /** One thing wrong with a draft, in the words the form shows under the field. */
-export type AuAddressProblem = { part: AuAddressPart; label: string; hint?: string };
+export type AuAddressProblem = { part: AddressPart; label: string; hint?: string };
 
 /**
  * What is still missing or wrong in a draft, in the order the fields appear.
@@ -202,22 +259,37 @@ export type AuAddressProblem = { part: AuAddressPart; label: string; hint?: stri
  * these before anything is sent, so somebody hears "the postcode is four
  * digits" under the field rather than as a rejected submission.
  */
-export function auAddressProblems(d: AuAddressDraft): AuAddressProblem[] {
+export function auAddressProblems(d: AddressDraft): AuAddressProblem[] {
   // Read off the schema itself rather than restated, so the form can never
   // pass an address the server then refuses (a pasted tab, say): what the
   // schema says about a part is what the person is told under it.
-  const parsed = auAddressSchema.safeParse(d);
+  const parsed = d.overseas
+    ? overseasAddressSchema.safeParse(d)
+    : auAddressSchema.safeParse(auPartsOf(d));
   if (parsed.success) return [];
+  const labels: Record<AddressPart, string> = d.overseas
+    ? OVERSEAS_ADDRESS_LABELS
+    : { ...AU_ADDRESS_LABELS, country: OVERSEAS_ADDRESS_LABELS.country };
   const problems: AuAddressProblem[] = [];
-  for (const part of ["street", "suburb", "state", "postcode"] as const) {
+  for (const part of ["street", "suburb", "state", "postcode", "country"] as const) {
     const issue = parsed.error.issues.find((i) => i.path[0] === part);
     if (!issue) continue;
     const blank = !String(d[part] ?? "").trim();
     problems.push({
       part,
-      label: AU_ADDRESS_LABELS[part],
+      label: labels[part],
       // A blank part needs no explaining: "please fill this in" says it.
       ...(blank ? {} : { hint: issue.message.replace(/\.$/, "") }),
+    });
+  }
+  // The whole line has a length too, which no one part owns: it is reported
+  // against the street, the box most likely to be holding the bulk of it.
+  const lineIssue = parsed.error.issues.find((i) => i.path.length === 0);
+  if (lineIssue && !problems.some((p) => p.part === "street")) {
+    problems.push({
+      part: "street",
+      label: labels.street,
+      hint: lineIssue.message.replace(/\.$/, ""),
     });
   }
   return problems;
@@ -275,10 +347,75 @@ export function resolveAddressInput(
   return { address: (line ?? "").trim(), parts: null };
 }
 
+/**
+ * An address outside Australia as it is checked before it is sent. Only the
+ * street line is required, nothing has a format, and the whole line has to fit
+ * in the 300 characters an address may be.
+ */
+const freeText = (max: number, what: string) =>
+  z
+    .string()
+    .trim()
+    .max(max, `Please keep the ${what} under ${max} characters.`)
+    .refine((v) => !CONTROL.test(v), `Please keep the ${what} on one line.`);
+
+export const overseasAddressSchema = z
+  .object({
+    overseas: z.literal(true),
+    street: freeText(OVERSEAS_ADDRESS_LIMITS.street, "street address").refine(
+      (v) => v.length > 0,
+      "Please give the street address.",
+    ),
+    suburb: freeText(OVERSEAS_ADDRESS_LIMITS.suburb, "town or city"),
+    state: freeText(OVERSEAS_ADDRESS_LIMITS.state, "state or region"),
+    postcode: freeText(OVERSEAS_ADDRESS_LIMITS.postcode, "postcode"),
+    country: freeText(OVERSEAS_ADDRESS_LIMITS.country, "country").optional(),
+  })
+  .refine((a) => composeOverseasAddress(a).length <= 300, {
+    message: "Please shorten the address. It has to fit in 300 characters.",
+  });
+
+/**
+ * The one line an address outside Australia is stored and printed as: what
+ * was given, in envelope order, with nothing invented for what was left out.
+ * "10 Downing St, London SW1A 2AA, United Kingdom".
+ */
+export function composeOverseasAddress(a: {
+  street: string;
+  suburb: string;
+  state: string;
+  postcode: string;
+  country?: string;
+}): string {
+  const locality = [a.suburb, a.state, a.postcode]
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .join(" ");
+  return [a.street.trim(), locality, (a.country ?? "").trim()].filter(Boolean).join(", ");
+}
+
 /** A finished draft as parts, trimmed, or `null` while anything is missing or wrong. */
-export function completeAuAddress(d: AuAddressDraft): AuAddress | null {
-  const parsed = auAddressSchema.safeParse(d);
+export function completeAuAddress(d: AddressDraft): AuAddress | null {
+  if (d.overseas) return null;
+  const parsed = auAddressSchema.safeParse(auPartsOf(d));
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * What a finished draft sends: the parts of an Australian address, or the one
+ * line of an address outside Australia. `null` while it is not finished.
+ *
+ * The line goes up the same way a line always has (`resolveAddressInput`), so
+ * the server needs nothing new for it: stored as given, with no parts.
+ */
+export function finishedAddress(
+  d: AddressDraft,
+): { parts: AuAddress; line?: never } | { line: string; parts?: never } | null {
+  if (d.overseas) {
+    return overseasAddressSchema.safeParse(d).success ? { line: composeOverseasAddress(d) } : null;
+  }
+  const parts = completeAuAddress(d);
+  return parts ? { parts } : null;
 }
 
 /**
@@ -288,7 +425,8 @@ export function completeAuAddress(d: AuAddressDraft): AuAddress | null {
  * complete; until then it shows whatever has been typed, so a half-filled
  * address previews as half an address rather than as nothing.
  */
-export function draftAddressLine(d: AuAddressDraft): string {
+export function draftAddressLine(d: AddressDraft): string {
+  if (d.overseas) return composeOverseasAddress(d);
   const done = completeAuAddress(d);
   if (done) return composeAuAddress(done);
   const locality = [d.suburb.trim(), d.state, d.postcode.trim()].filter(Boolean).join(" ");
@@ -335,9 +473,9 @@ export function sameAuAddress(a: string | null | undefined, b: string | null | u
  * signed waiver and counted in the wrong state. The same table is what keeps
  * `splitAuAddress` from reading "Ultimo VIC 2007" as an address.
  */
-export function postcodeStateNote(d: AuAddressDraft): string | null {
+export function postcodeStateNote(d: AddressDraft): string | null {
   const postcode = d.postcode.trim();
-  if (!d.state || !/^[0-9]{4}$/.test(postcode)) return null;
+  if (d.overseas || !isAuState(d.state) || !/^[0-9]{4}$/.test(postcode)) return null;
   if (POSTCODE_LEAD[d.state].test(postcode)) return null;
   const usual = AU_STATES.filter((state) => POSTCODE_LEAD[state].test(postcode));
   if (usual.length === 0) {

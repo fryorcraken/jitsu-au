@@ -766,8 +766,9 @@ joined into one PDF in array order (10 MB decoded total per call), and
 `suburb` has no digits or commas; `street` is everything before the suburb,
 unit included. The line the waiver prints is made from them as
 `<street>, <suburb> <STATE> <postcode>`. Only when the paper's address really
-cannot be split (no suburb, no postcode, an overseas address) send it as one
-line in `address` instead: it is stored as written and the person is asked for
+cannot be split (no suburb, no postcode), or is outside Australia (any
+format: there is no state list or postcode rule abroad), send it as one line
+in `address` instead: it is stored as written and the person is asked for
 the parts the next time they give an address. Do not guess a missing postcode
 to make it fit. A guardian who lives elsewhere takes `guardian_address_parts`
 in the same shape (`guardian_address` for one line).

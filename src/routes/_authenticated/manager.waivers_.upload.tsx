@@ -11,11 +11,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddressFields } from "@/components/site/AddressFields";
 import {
-  EMPTY_AU_ADDRESS,
+  EMPTY_ADDRESS,
   auAddressFieldId,
   auAddressProblems,
-  completeAuAddress,
-  type AuAddressDraft,
+  finishedAddress,
+  type AddressDraft,
 } from "@/lib/au-address";
 import {
   MAX_SCAN_BYTES,
@@ -130,7 +130,7 @@ function UploadPaperWaiverPage() {
   // since #111; this screen was the one caller that could not say it.
   const [signingFor, setSigningFor] = useState<WaiverSigningFor>("self");
   const [email, setEmail] = useState("");
-  const [address, setAddress] = useState<AuAddressDraft>(EMPTY_AU_ADDRESS);
+  const [address, setAddress] = useState<AddressDraft>(EMPTY_ADDRESS);
   // Set once Sign is pressed with part of an address missing, so the boxes say
   // which part rather than the screen refusing silently.
   const [addressAttempted, setAddressAttempted] = useState(false);
@@ -147,7 +147,7 @@ function UploadPaperWaiverPage() {
   // Ticked by default, as on the online form: the guardian lives with the
   // applicant unless the paper says otherwise.
   const [guardianSameAddress, setGuardianSameAddress] = useState(true);
-  const [guardianAddress, setGuardianAddress] = useState<AuAddressDraft>(EMPTY_AU_ADDRESS);
+  const [guardianAddress, setGuardianAddress] = useState<AddressDraft>(EMPTY_ADDRESS);
   const [guardianPhone, setGuardianPhone] = useState("");
   const [guardianEmail, setGuardianEmail] = useState("");
   const [medicalNotes, setMedicalNotes] = useState("");
@@ -234,17 +234,18 @@ function UploadPaperWaiverPage() {
     }
     // Both addresses in parts, as the online form takes them. A part missing
     // is flagged under its box, which is where the manager is looking.
-    const addressParts = completeAuAddress(address);
-    const guardianParts =
-      needsGuardian && !guardianSameAddress ? completeAuAddress(guardianAddress) : null;
+    const participantAddress = finishedAddress(address);
+    const guardianOwnAddress =
+      needsGuardian && !guardianSameAddress ? finishedAddress(guardianAddress) : null;
     const addressesComplete =
-      Boolean(addressParts) && !(needsGuardian && !guardianSameAddress && !guardianParts);
+      Boolean(participantAddress) &&
+      !(needsGuardian && !guardianSameAddress && !guardianOwnAddress);
     // Cleared once both are in, so a later edit is not flagged before Sign.
     setAddressAttempted(!addressesComplete);
     if (!addressesComplete) {
       // Straight to the box that is wrong, not the top of its block.
-      const prefix = addressParts ? "guardian_address" : "address";
-      const draft = addressParts ? guardianAddress : address;
+      const prefix = participantAddress ? "guardian_address" : "address";
+      const draft = participantAddress ? guardianAddress : address;
       const first = auAddressProblems(draft)[0];
       document.getElementById(auAddressFieldId(prefix, first?.part ?? "street"))?.focus();
       return;
@@ -266,7 +267,9 @@ function UploadPaperWaiverPage() {
           last_name: lastName,
           preferred_name: preferredName,
           date_of_birth: dob,
-          address_parts: addressParts,
+          // Parts for an Australian address, one line for one abroad.
+          address_parts: participantAddress?.parts,
+          address: participantAddress?.line ?? "",
           phone,
           signing_for: signingFor,
           // Refused by the schema for a dependant rather than merely ignored:
@@ -281,7 +284,8 @@ function UploadPaperWaiverPage() {
           emergency_contact_phone: contactPhone,
           guardian_name: guardianName,
           guardian_relationship: guardianRelationship,
-          guardian_address_parts: guardianParts ?? undefined,
+          guardian_address_parts: guardianOwnAddress?.parts,
+          guardian_address: guardianOwnAddress?.line ?? "",
           guardian_phone: guardianPhone,
           guardian_email: guardianEmail,
           medical_notes: medicalNotes,

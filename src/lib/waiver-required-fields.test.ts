@@ -5,7 +5,7 @@ import {
   missingWaiverFields,
   type WaiverFieldState,
 } from "./waiver-required-fields";
-import { EMPTY_AU_ADDRESS } from "./au-address";
+import { EMPTY_ADDRESS } from "./au-address";
 import { healthQuestions } from "./waiver-health";
 
 const allAnswered = {
@@ -24,7 +24,7 @@ const emptyForm: WaiverFieldState = {
   dob: "",
   phone: "",
   email: "",
-  address: EMPTY_AU_ADDRESS,
+  address: EMPTY_ADDRESS,
   ecName: "",
   ecRelationship: "",
   ecPhone: "",
@@ -32,7 +32,7 @@ const emptyForm: WaiverFieldState = {
   guardianName: "",
   guardianRelationship: "",
   guardianSameAddress: true,
-  guardianAddress: EMPTY_AU_ADDRESS,
+  guardianAddress: EMPTY_ADDRESS,
   guardianEmail: "",
   health: {},
   medical: "",
@@ -109,6 +109,16 @@ describe("missingWaiverFields", () => {
       form({ address: { ...completeForm.address, postcode: "" }, ecPhone: "" }),
     );
     expect(missing.map((f) => f.anchorId)).toEqual(["address_postcode", "emergency_contact_phone"]);
+  });
+
+  it("asks only for the street line of an address outside Australia", () => {
+    const abroad = { ...EMPTY_ADDRESS, overseas: true };
+    expect(missingWaiverFields(form({ address: abroad })).map((f) => f.anchorId)).toEqual([
+      "address_street",
+    ]);
+    expect(missingWaiverFields(form({ address: { ...abroad, street: "10 Downing St" } }))).toEqual(
+      [],
+    );
   });
 
   it("names the address part that is missing, in the words of its label", () => {
@@ -265,7 +275,7 @@ describe("missingWaiverFields", () => {
       const missing = missingWaiverFields(
         minorForm({
           guardianSameAddress: false,
-          guardianAddress: { ...EMPTY_AU_ADDRESS, street: "9 Quay St", state: "NSW" },
+          guardianAddress: { ...EMPTY_ADDRESS, street: "9 Quay St", state: "NSW" },
         }),
       );
       expect(missing).toEqual([
@@ -279,7 +289,7 @@ describe("missingWaiverFields", () => {
         missingWaiverFields(
           minorForm({
             guardianSameAddress: true,
-            guardianAddress: { ...EMPTY_AU_ADDRESS, street: "x" },
+            guardianAddress: { ...EMPTY_ADDRESS, street: "x" },
           }),
         ),
       ).toEqual([]);

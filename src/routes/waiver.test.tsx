@@ -339,7 +339,12 @@ describe("/waiver, who is this for", () => {
     expect(dependant).toHaveAccessibleDescription(/never need an email address/i);
     // One Email field on the page, and it is the Email field.
     expect(screen.getAllByLabelText(/email/i)).toHaveLength(1);
-    expect(screen.getAllByLabelText(/address/i)).toHaveLength(1);
+    // The address boxes, and the "outside Australia" tick above them, are the
+    // only controls named for an address.
+    expect(screen.getAllByLabelText(/address/i).map((el) => el.id)).toEqual([
+      "address_overseas",
+      "address_street",
+    ]);
   });
 
   it("starts on Myself, so the form is the one everybody already knows", async () => {
