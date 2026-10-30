@@ -57,6 +57,7 @@ import { Route as AuthenticatedManagerMembershipPlansRouteImport } from './route
 import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_authenticated/manager.memberships'
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
 import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
+import { Route as AuthenticatedManagerSiteBannerRouteImport } from './routes/_authenticated/manager.site-banner'
 import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
@@ -326,6 +327,12 @@ const AuthenticatedManagerSettingsRoute =
     path: '/manager/settings',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerSiteBannerRoute =
+  AuthenticatedManagerSiteBannerRouteImport.update({
+    id: '/manager/site-banner',
+    path: '/manager/site-banner',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerUsersRoute =
   AuthenticatedManagerUsersRouteImport.update({
     id: '/manager/users',
@@ -446,6 +453,7 @@ export interface FileRoutesByFullPath {
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
+  '/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -507,6 +515,7 @@ export interface FileRoutesByTo {
   '/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
+  '/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -571,6 +580,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/memberships': typeof AuthenticatedManagerMembershipsRoute
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/_authenticated/manager/settings': typeof AuthenticatedManagerSettingsRoute
+  '/_authenticated/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
   '/_authenticated/manager/users': typeof AuthenticatedManagerUsersRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -635,6 +645,7 @@ export interface FileRouteTypes {
     | '/manager/memberships'
     | '/manager/reconciliation'
     | '/manager/settings'
+    | '/manager/site-banner'
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
@@ -696,6 +707,7 @@ export interface FileRouteTypes {
     | '/manager/memberships'
     | '/manager/reconciliation'
     | '/manager/settings'
+    | '/manager/site-banner'
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
@@ -759,6 +771,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/memberships'
     | '/_authenticated/manager/reconciliation'
     | '/_authenticated/manager/settings'
+    | '/_authenticated/manager/site-banner'
     | '/_authenticated/manager/users'
     | '/_authenticated/manager/waiver-template'
     | '/_authenticated/manager/waivers'
@@ -1150,6 +1163,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerSettingsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/site-banner': {
+      id: '/_authenticated/manager/site-banner'
+      path: '/manager/site-banner'
+      fullPath: '/manager/site-banner'
+      preLoaderRoute: typeof AuthenticatedManagerSiteBannerRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/users': {
       id: '/_authenticated/manager/users'
       path: '/manager/users'
@@ -1262,6 +1282,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerMembershipsRoute: typeof AuthenticatedManagerMembershipsRoute
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
   AuthenticatedManagerSettingsRoute: typeof AuthenticatedManagerSettingsRoute
+  AuthenticatedManagerSiteBannerRoute: typeof AuthenticatedManagerSiteBannerRoute
   AuthenticatedManagerUsersRoute: typeof AuthenticatedManagerUsersRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
   AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
@@ -1294,6 +1315,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedManagerReconciliationRoute:
     AuthenticatedManagerReconciliationRoute,
   AuthenticatedManagerSettingsRoute: AuthenticatedManagerSettingsRoute,
+  AuthenticatedManagerSiteBannerRoute: AuthenticatedManagerSiteBannerRoute,
   AuthenticatedManagerUsersRoute: AuthenticatedManagerUsersRoute,
   AuthenticatedManagerWaiverTemplateRoute:
     AuthenticatedManagerWaiverTemplateRoute,

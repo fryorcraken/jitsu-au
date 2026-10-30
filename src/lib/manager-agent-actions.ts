@@ -43,6 +43,8 @@ import {
   agentGetBlogPostSchema,
   agentSaveBlogPostSchema,
   agentUploadBlogImageSchema,
+  agentSaveSiteBannerSchema,
+  siteBannerSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -148,7 +150,8 @@ import { ItemNoLongerListedError } from "@/lib/item-invoices";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
-import { loadClubSettings } from "@/lib/club-settings.functions";
+import { siteBannerLocalHref } from "@/lib/site-banner";
+import { loadClubSettings, loadSiteBanner, writeClubSetting } from "@/lib/club-settings.functions";
 import { ResendNotSentError, resendEmail } from "@/lib/email-resend.functions";
 import type { ResendRefusal } from "@/lib/email-resend";
 import {
@@ -1803,6 +1806,70 @@ async function handleGetClubSettings() {
   }
 }
 
+// ---- actions: get_site_banner, save_site_banner ----
+//
+// Through `loadSiteBanner` and `writeClubSetting`, the read and the write
+// `/manager/site-banner` makes, so an agent and a manager see and store the
+// same banner.
+//
+// Unlike the bank account and the reply-to above, the banner IS writable here.
+// It is public text that anybody can read on the site the moment it changes,
+// it moves no money and no replies, and it is undone by saving it again, which
+// is the same footing as publishing a blog post.
+
+function siteBannerUnreadable(e: unknown): AgentError {
+  // The screen will not show an empty form over a failed read, and the API
+  // will not answer "off" (or merge a save over nothing) for the same reason.
+  return new AgentError(
+    503,
+    "settings_unreadable",
+    e instanceof Error ? e.message : "Could not read the site banner.",
+    undefined,
+    30,
+  );
+}
+
+async function handleGetSiteBanner() {
+  try {
+    return { banner: await loadSiteBanner(await adminClient()) };
+  } catch (e) {
+    throw siteBannerUnreadable(e);
+  }
+}
+
+async function handleSaveSiteBanner(params: unknown, actingAs: string) {
+  const changes = agentSaveSiteBannerSchema.parse(params);
+  const admin = await adminClient();
+  const current = await loadSiteBanner(admin).catch((e: unknown) => {
+    throw siteBannerUnreadable(e);
+  });
+  // Parsed on its own rather than through `saveClubSettingsSchema`, so a
+  // refusal names the param the caller sent (`message`), not `value.message`.
+  const input = {
+    key: "site_banner" as const,
+    value: siteBannerSchema.parse({ ...current, ...changes }),
+  };
+  // The schema keeps the caller from SENDING an outside link; this keeps it
+  // from reusing one a manager stored. Rewording or switching on a banner that
+  // links to another site would put a club-branded message of the token's
+  // choosing in front of that link. Switching it off is always allowed.
+  const outside = input.value.link_href !== "" && !siteBannerLocalHref(input.value.link_href);
+  const onlySwitchingOff = Object.keys(changes).length === 1 && changes.enabled === false;
+  if (outside && !onlySwitchingOff) {
+    throw new AgentError(
+      409,
+      "outside_link",
+      "This banner links to another site, so it can only be switched off here. Change it on the Site banner screen, or send a link_href on this site to replace the outside link.",
+    );
+  }
+  try {
+    await writeClubSetting(admin, input, actingAs);
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : "Not saved.");
+  }
+  return { banner: input.value };
+}
+
 // ---- action: resend_email ----
 //
 // Through `resendEmail`, the function the screens' Resend buttons post to, so
@@ -2124,6 +2191,10 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
       return handleDeleteItemInvoice(params, actingAs);
     case "get_club_settings":
       return handleGetClubSettings();
+    case "get_site_banner":
+      return handleGetSiteBanner();
+    case "save_site_banner":
+      return handleSaveSiteBanner(params, actingAs);
     case "resend_email":
       return handleResendEmail(params, actingAs);
     case "list_blog_posts":

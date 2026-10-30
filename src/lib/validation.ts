@@ -11,6 +11,7 @@ import { resendKinds } from "./email-resend";
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
 import { annotationVisibilities, articleVisibilities } from "./kb";
+import { siteBannerLocalHref } from "./site-banner";
 // Same idea for the gi/belt size charts: `kit-sizes.ts` owns the two code sets
 // (and the CHECK constraints on `profiles` mirror them), so the wire schemas
 // below enumerate them from there rather than repeating the lists.
@@ -3076,6 +3077,8 @@ export const managerAgentActions = [
   "cancel_item_invoice",
   "delete_item_invoice",
   "get_club_settings",
+  "get_site_banner",
+  "save_site_banner",
   "resend_email",
   "list_blog_posts",
   "get_blog_post",
@@ -3337,6 +3340,156 @@ export function parseClubReplyTo(raw: string | null): string | null {
   return parsed.success && parsed.data ? parsed.data : null;
 }
 
+// ---- Manager: the site banner (`docs/site-banner.md`) ----
+
+/** Longest banner message. It is one line across the top of a phone screen. */
+export const SITE_BANNER_MESSAGE_MAX = 200;
+/** Longest link text, which sits after the message on the same line. */
+export const SITE_BANNER_LINK_LABEL_MAX = 60;
+
+/**
+ * A page on this site: one leading slash, then printable ASCII with no spaces
+ * and no backslash. `//host` is refused because a browser reads it as another
+ * site, and so is `/\\host`, because a browser treats a backslash in a web
+ * address as a slash and reads that the same way. Control characters go too:
+ * browsers strip them, which can turn an innocent-looking path into `//host`.
+ */
+const SITE_PATH = /^\/(?![/\\])[!-[\]-~]*$/;
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where the banner's link goes: a page on this site (`/register-interest`) or a
+ * full `https://` address, or `""` for no link. Nothing else, so a `javascript:`
+ * or plain `http:` address can never reach the top of every public page.
+ */
+export const siteBannerLinkHrefSchema = z
+  .string()
+  .trim()
+  .max(500, "That address is too long.")
+  .refine((v) => v === "" || SITE_PATH.test(v) || isHttpsUrl(v), {
+    message: "Use a page on this site, like /register-interest, or a full https:// address.",
+  });
+
+/**
+ * The banner across the top of every public page, as a manager sets it.
+ *
+ * The message is one line: any run of whitespace, newlines included, collapses
+ * to a single space, because the banner has no room for a second line and a
+ * pasted paragraph would otherwise push the header off a phone screen.
+ *
+ * The message may be kept while the banner is off, so a manager can turn a
+ * notice off and back on without retyping it. The link is optional, but its
+ * text and its address come together or not at all: text with nowhere to go
+ * looks clickable and is not, and an address with no text cannot be read.
+ */
+export const siteBannerSchema = z
+  .object({
+    enabled: z.boolean(),
+    message: z
+      .string()
+      .transform((v) => v.replace(/\s+/g, " ").trim())
+      .pipe(
+        z
+          .string()
+          .max(SITE_BANNER_MESSAGE_MAX, `Keep it to ${SITE_BANNER_MESSAGE_MAX} characters.`),
+      ),
+    link_label: z
+      .string()
+      .transform((v) => v.replace(/\s+/g, " ").trim())
+      .pipe(
+        z
+          .string()
+          .max(SITE_BANNER_LINK_LABEL_MAX, `Keep it to ${SITE_BANNER_LINK_LABEL_MAX} characters.`),
+      )
+      .default(""),
+    link_href: siteBannerLinkHrefSchema.default(""),
+  })
+  .strict()
+  .superRefine((banner, ctx) => {
+    if (banner.enabled && !banner.message) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["message"],
+        message: "Write the message, or turn the banner off.",
+      });
+    }
+    if (banner.link_label && !banner.link_href) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["link_href"],
+        message: "Add where the link goes, or clear the link text.",
+      });
+    }
+    if (banner.link_href && !banner.link_label) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["link_label"],
+        message: "Add the link text, or clear where it goes.",
+      });
+    }
+  });
+export type SiteBanner = z.infer<typeof siteBannerSchema>;
+
+/**
+ * `save_site_banner` over the agent API: any of the four fields, merged over
+ * what is stored, so "turn it off" is `{ enabled: false }` and keeps the
+ * message for next time. The merged banner then passes `siteBannerSchema`, the
+ * same rules the screen's save meets.
+ *
+ * One rule is the API's alone: its link can only be a page on this site. An
+ * outside address across the top of every page is exactly what a leaked token
+ * would want (a club-branded "pay here" link), the same reason the bank
+ * account and reply-to are not writable over the API at all. A manager who
+ * wants an outside link sets it on the screen, signed in.
+ */
+export const agentSaveSiteBannerSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    message: z.string().optional(),
+    link_label: z.string().optional(),
+    link_href: z
+      .string()
+      .refine((v) => v.trim() === "" || siteBannerLocalHref(v.trim()) !== null, {
+        message:
+          "Over the API the link is a page on this site, like /register-interest. An outside address is set on the Site banner screen.",
+      })
+      .optional(),
+  })
+  .strict()
+  .refine((p) => Object.keys(p).length > 0, {
+    message: "Send at least one of enabled, message, link_label or link_href.",
+  });
+
+/** What a site that has never had a banner set shows: nothing. */
+export const SITE_BANNER_OFF: SiteBanner = {
+  enabled: false,
+  message: "",
+  link_label: "",
+  link_href: "",
+};
+
+/**
+ * Read the stored banner back. Unset reads as off, and so does anything stored
+ * that would not pass `siteBannerSchema` today: showing a half-valid banner to
+ * every visitor is worse than showing none.
+ */
+export function parseSiteBanner(raw: string | null): SiteBanner {
+  if (!raw?.trim()) return SITE_BANNER_OFF;
+  try {
+    const parsed = siteBannerSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : SITE_BANNER_OFF;
+  } catch {
+    return SITE_BANNER_OFF;
+  }
+}
+
 /**
  * One club setting to save, by key. Each key carries its own validation, so a
  * save names the key it writes and nothing can be stored under a key without
@@ -3346,6 +3499,7 @@ export function parseClubReplyTo(raw: string | null): string | null {
 export const saveClubSettingsSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("invoice_payment_details"), value: clubPaymentDetailsSchema }),
   z.object({ key: z.literal("email_reply_to"), value: clubReplyToSchema }),
+  z.object({ key: z.literal("site_banner"), value: siteBannerSchema }),
 ]);
 export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
 

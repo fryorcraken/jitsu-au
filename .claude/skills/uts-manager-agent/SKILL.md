@@ -13,6 +13,7 @@ description: >-
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), keep the club's item price
   list and charge somebody for items, see where replies to club emails go,
+  turn the notice across the top of the public site on or off and reword it,
   resend an invoice, receipt or waiver email,
   migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
@@ -687,6 +688,32 @@ emails point at the contact page, phone and WhatsApp instead.
 > replies and money go, so there is no action that changes either. If a manager
 > wants one changed, tell them it is on the Club settings screen
 > (`/manager/settings`). Do not try to work around this.
+
+### `get_site_banner` / `save_site_banner` — the notice across the top of the site
+
+```bash
+scripts/agent.sh get_site_banner '{}'
+scripts/agent.sh save_site_banner '{"enabled":true,"message":"We are training at a temporary location, so free trials are paused for now.","link_label":"Register your interest","link_href":"/register-interest"}'
+scripts/agent.sh save_site_banner '{"enabled":false}'
+```
+
+`get_site_banner` returns `{ banner: { enabled, message, link_label, link_href } }`.
+A banner nobody has set reads as `enabled: false`. A `503 settings_unreadable`
+means the read failed, **not** that the banner is off.
+
+`save_site_banner` takes only the fields you are changing; the rest keep their
+stored values, so turning it off keeps the message for next time. The message
+is one line of up to 200 characters. The link is optional, but `link_label` and
+`link_href` go together, and `link_href` is a page on this site (`/classes`,
+`/faq#trial`). An outside `https://` address is refused here: if the manager
+wants one, tell them it is on the Site banner screen (`/manager/site-banner`).
+If the stored banner already links to another site, you can only switch it off
+(`409 outside_link` for anything else); send the manager to the same screen.
+
+> **It is public the moment it saves.** Every visitor sees the banner at the top
+> of every public page, and a changed message is shown again even to people who
+> closed the old one. Read the wording back to the manager and get a yes before
+> saving, and write it in the club's voice: plain, no em dashes.
 
 ### `resend_email` — send an email again
 
