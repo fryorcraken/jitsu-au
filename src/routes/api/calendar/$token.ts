@@ -16,7 +16,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { hashToken } from "@/lib/manager-api-tokens";
 import { feedTokenVerdict, UNKNOWN_LINK_MESSAGE } from "@/lib/calendar-feed-token";
 import { buildCalendar, type IcsEvent } from "@/lib/ics";
-import { CLUB_TIME_ZONE } from "@/lib/calendar";
+import { CLUB_TIME_ZONE, withoutHiddenInviteOnly } from "@/lib/calendar";
 import type { CalendarClient, CalendarFeedSelection } from "@/lib/calendar-types";
 
 const FEED_WINDOW_PAST_DAYS = 30;
@@ -130,13 +130,11 @@ export const Route = createFileRoute("/api/calendar/$token")({
             admin.from("event_rsvps").select("event_id").eq("user_id", tokenRow.user_id),
             admin.from("calendar_series").select("id").eq("invite_only", true),
           ]);
-          const invited = new Set((rsvps ?? []).map((r) => r.event_id));
-          const inviteOnlySeries = new Set((inviteSeries ?? []).map((s) => s.id));
-          visible = visible.filter(
-            (e) =>
-              (!e.invite_only && !(e.series_id && inviteOnlySeries.has(e.series_id))) ||
-              invited.has(e.id),
-          );
+          visible = withoutHiddenInviteOnly(visible, {
+            isManager: false,
+            invitedEventIds: new Set((rsvps ?? []).map((r) => r.event_id)),
+            inviteOnlySeriesIds: new Set((inviteSeries ?? []).map((s) => s.id)),
+          });
         }
 
         const ics = buildCalendar({
