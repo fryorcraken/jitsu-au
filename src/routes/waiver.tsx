@@ -38,9 +38,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { listMyDependants } from "@/lib/household.functions";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
-import { newSubmissionId } from "@/lib/submit-resilience";
-import { RESUBMISSION_REFUSED } from "@/lib/validation";
-import { WAIVER_SUBMIT } from "@/lib/submit-resilience";
+import { newSubmissionId, WAIVER_SUBMIT } from "@/lib/submit-resilience";
 import {
   clearDraft,
   draftHasContent,
@@ -50,6 +48,7 @@ import {
 } from "@/lib/waiver-draft";
 import {
   greetingName,
+  RESUBMISSION_REFUSED,
   resolveNamePrefill,
   waiverNeedsGuardian,
   waiverPrefillSearchSchema,
