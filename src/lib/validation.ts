@@ -1119,6 +1119,17 @@ export function isPaperWaiver(signerMeta: unknown): boolean {
 }
 
 /**
+ * What the signing endpoint says when a resent submission id does not belong
+ * to the request carrying it (see `isSameOnlineSubmission`). It deliberately
+ * says nothing about the waiver the id named. The waiver page recognises it and
+ * starts a fresh submission, so pressing "Try again" files the form as typed.
+ * A real signer only meets it after editing their email or birth date between
+ * an attempt that landed and one that could not confirm it had.
+ */
+export const RESUBMISSION_REFUSED =
+  "We couldn't save this waiver. Your details are still here, so please try again.";
+
+/**
  * Whether a stored waiver is the one an online signing retry is asking about.
  *
  * The public signing endpoint resolves a resent `client_submission_id` to the

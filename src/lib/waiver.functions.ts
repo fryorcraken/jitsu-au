@@ -14,6 +14,7 @@ import {
   isMinorOn,
   isPaperWaiver,
   isSameOnlineSubmission,
+  RESUBMISSION_REFUSED,
   nameWithPreferred,
   splitFullName,
   nextUtcDay,
@@ -119,15 +120,6 @@ export type WaiverSubmitResult = {
    */
   reply_to_confirmation: boolean;
 };
-
-/**
- * What the signing endpoint says when a resent submission id does not belong
- * to the request carrying it (see `isSameOnlineSubmission`). A real signer
- * only meets it if their browser somehow reused an id, and reloading mints a
- * new one; it deliberately says nothing about the waiver the id named.
- */
-export const RESUBMISSION_REFUSED =
-  "We couldn't save this waiver. Please reload the page and sign again.";
 
 /**
  * Mint a fresh download link for an already-stored waiver PDF.
