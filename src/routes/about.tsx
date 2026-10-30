@@ -55,7 +55,6 @@ function About() {
           alt="UTS Jitsu members in white gis and coloured belts posing together on the mat at UTS Ultimo, one sitting on another's shoulders"
           width={1920}
           height={1440}
-          loading="lazy"
           className="aspect-[16/9] w-full rounded-2xl object-cover shadow-lg ring-1 ring-black/5"
         />
       </section>
