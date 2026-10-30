@@ -79,7 +79,7 @@ export async function buildScanPdf(pages: ScanPage[]): Promise<Uint8Array> {
       sheet.drawImage(image, fitOnPage(image.width, image.height));
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
-      throw new Error(`Could not read "${page.name}": ${reason}`);
+      throw new Error(`Could not read "${page.name}": ${reason}`, { cause: e });
     }
   }
 

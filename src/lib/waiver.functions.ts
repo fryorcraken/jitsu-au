@@ -2009,6 +2009,7 @@ export async function filePaperWaiver(
       e instanceof Error
         ? e.message
         : "We couldn't read that scan. Try a PDF, or photograph each page again.",
+      { cause: e },
     );
   }
 

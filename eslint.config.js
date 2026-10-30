@@ -53,30 +53,16 @@ export default defineConfig(
           ],
         },
       ],
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // A route file exports `Route = createFileRoute(...)(...)` with its page
+      // components beside it, TanStack Router's convention. Naming the route
+      // builders here lets the rule count that export as a component, as it
+      // did before v0.5, so it stays quiet about the convention and still
+      // flags anything else a route file exports.
+      "react-refresh/only-export-components": [
+        "warn",
+        { allowConstantExport: true, extraHOCs: ["createFileRoute", "createRootRouteWithContext"] },
+      ],
       "@typescript-eslint/no-unused-vars": "off",
-    },
-  },
-  {
-    // ESLint 10's recommended set asks every rethrow to carry `{ cause: e }`.
-    // Not where server code lives: a server function's error is serialized to
-    // the browser with all of its own properties, `cause` included, so
-    // following the rule would ship the raw upstream error a rethrow exists to
-    // replace with words a person can act on. Log the original server side
-    // instead. Everywhere else (components, hooks, scripts) the rule stands.
-    files: ["src/lib/**/*.{ts,tsx}", "src/routes/**/*.{ts,tsx}"],
-    rules: {
-      "preserve-caught-error": "off",
-    },
-  },
-  {
-    // A route file exports only `Route` and keeps its page components beside
-    // it, which is TanStack Router's file convention. From v0.5 this rule
-    // flags every such component; hot reload for them is the router plugin's
-    // job (it splits the components out), not something this rule can judge.
-    files: ["src/routes/**/*.{ts,tsx}"],
-    rules: {
-      "react-refresh/only-export-components": "off",
     },
   },
   eslintPluginPrettier,
