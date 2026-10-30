@@ -193,12 +193,10 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
   //
   // Skipped entirely when it is the guardian above: those fields are not on
   // screen, so listing them would send somebody to a control they cannot see.
-  if (
-    !(
-      waiverNeedsGuardian({ is_minor: state.isMinor, signing_for: state.signingFor }) &&
-      state.ecIsGuardian
-    )
-  ) {
+  if (!(
+    waiverNeedsGuardian({ is_minor: state.isMinor, signing_for: state.signingFor }) &&
+    state.ecIsGuardian
+  )) {
     require("emergency_contact_name", "Emergency contact name", state.ecName);
     require("emergency_contact_relationship", "Emergency contact relationship", state.ecRelationship);
     require("emergency_contact_phone", "Emergency contact mobile", state.ecPhone);

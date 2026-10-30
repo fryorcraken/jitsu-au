@@ -109,9 +109,7 @@ export type PageMetaOptions = {
 
 /** The meta tag shapes `buildPageMeta` produces (a route's `head().meta` array element). */
 export type PageMetaTag =
-  | { title: string }
-  | { name: string; content: string }
-  | { property: string; content: string };
+  { title: string } | { name: string; content: string } | { property: string; content: string };
 
 /**
  * A page's title/description/OpenGraph/Twitter meta, keyed so the router

@@ -3382,8 +3382,7 @@ export const CLUB_INTERNATIONAL_FIELDS = [
 ] as const;
 
 export type ClubPaymentFieldKey =
-  | (typeof CLUB_ACCOUNT_FIELDS)[number]["key"]
-  | (typeof CLUB_INTERNATIONAL_FIELDS)[number]["key"];
+  (typeof CLUB_ACCOUNT_FIELDS)[number]["key"] | (typeof CLUB_INTERNATIONAL_FIELDS)[number]["key"];
 
 /**
  * The value to show and to copy for one field. Only the BSB differs from what is

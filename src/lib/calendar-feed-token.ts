@@ -16,8 +16,7 @@ import { SITE_HOST } from "@/lib/site-origin";
 export type FeedTokenRow = { revoked_at: string | null };
 
 export type FeedTokenVerdict<T> =
-  | { serve: true; row: T }
-  | { serve: false; status: number; message: string };
+  { serve: true; row: T } | { serve: false; status: number; message: string };
 
 /**
  * What someone gets from a link that has been replaced. Most calendar apps

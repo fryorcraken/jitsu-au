@@ -381,8 +381,7 @@ export const ANNOTATIONS_LIMIT = 1000;
  * included (`isManager` is deliberately not consulted here).
  */
 export type AnnotationReadFilter =
-  | { mode: "shared-only" }
-  | { mode: "shared-or-own"; orExpression: string };
+  { mode: "shared-only" } | { mode: "shared-or-own"; orExpression: string };
 
 export function annotationReadFilter(viewer: Viewer): AnnotationReadFilter {
   if (!viewer.userId) return { mode: "shared-only" };
