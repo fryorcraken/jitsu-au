@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { buildPageMeta, canonicalUrl } from "@/lib/seo";
-import aboutImg from "@/assets/training2.jpg.asset.json";
+import aboutImg from "@/assets/uts-jitsu-club-group-photo.jpg.asset.json";
 import teamImg from "@/assets/training4.jpg.asset.json";
 
 export const Route = createFileRoute("/about")({
@@ -52,7 +52,10 @@ function About() {
         </div>
         <img
           src={aboutImg.url}
-          alt="UTS Jitsu class training together"
+          alt="UTS Jitsu members in white gis and coloured belts posing together on the mat at UTS Ultimo, one sitting on another's shoulders"
+          width={1920}
+          height={1440}
+          loading="lazy"
           className="aspect-[16/9] w-full rounded-2xl object-cover shadow-lg ring-1 ring-black/5"
         />
       </section>
