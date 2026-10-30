@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SITE_BANNER_STORAGE_KEY,
-  isSiteBannerLinkToHere,
+  shouldDropSiteBannerLink,
   persistDismissedSiteBanner,
   readDismissedSiteBanner,
   siteBannerFingerprint,
@@ -73,19 +73,26 @@ describe("dismissal", () => {
   });
 });
 
-describe("isSiteBannerLinkToHere", () => {
+describe("shouldDropSiteBannerLink", () => {
   it("is true on the page the link points at", () => {
-    expect(isSiteBannerLinkToHere("/register-interest", "/register-interest")).toBe(true);
-    expect(isSiteBannerLinkToHere("/register-interest/", "/register-interest")).toBe(true);
-    expect(isSiteBannerLinkToHere("/register-interest?from=banner", "/register-interest")).toBe(
+    expect(shouldDropSiteBannerLink("/register-interest", "/register-interest")).toBe(true);
+    expect(shouldDropSiteBannerLink("/register-interest/", "/register-interest")).toBe(true);
+    expect(shouldDropSiteBannerLink("/register-interest?from=banner", "/register-interest")).toBe(
       true,
     );
-    expect(isSiteBannerLinkToHere("/", "/")).toBe(true);
+    expect(shouldDropSiteBannerLink("/", "/")).toBe(true);
+  });
+
+  // A stray tap on the banner must not carry somebody off a half-filled waiver.
+  it("is true on the waiver, wherever the link goes", () => {
+    expect(shouldDropSiteBannerLink("/register-interest", "/waiver")).toBe(true);
+    expect(shouldDropSiteBannerLink("https://example.com/", "/waiver/")).toBe(true);
+    expect(shouldDropSiteBannerLink("/classes", "/waiver-info")).toBe(false);
   });
 
   it("is false anywhere else, and for another site", () => {
-    expect(isSiteBannerLinkToHere("/register-interest", "/")).toBe(false);
-    expect(isSiteBannerLinkToHere("/register-interest", "/register-interest-old")).toBe(false);
-    expect(isSiteBannerLinkToHere("https://example.com/", "/")).toBe(false);
+    expect(shouldDropSiteBannerLink("/register-interest", "/")).toBe(false);
+    expect(shouldDropSiteBannerLink("/register-interest", "/register-interest-old")).toBe(false);
+    expect(shouldDropSiteBannerLink("https://example.com/", "/")).toBe(false);
   });
 });

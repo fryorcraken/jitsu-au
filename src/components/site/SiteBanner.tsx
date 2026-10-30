@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { useRouterState } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -6,9 +6,9 @@ import { X } from "lucide-react";
 import { getSiteBanner } from "@/lib/site-banner.functions";
 import {
   SITE_BANNER_QUERY_KEY,
-  isSiteBannerLinkToHere,
   persistDismissedSiteBanner,
   readDismissedSiteBanner,
+  shouldDropSiteBannerLink,
   siteBannerFingerprint,
 } from "@/lib/site-banner";
 import type { SiteBanner as SiteBannerValue } from "@/lib/validation";
@@ -99,7 +99,7 @@ function BannerText({
   interactive: boolean;
 }) {
   const className = "flex-1 text-center font-medium";
-  const linked = banner.link_href && !isSiteBannerLinkToHere(banner.link_href, pathname);
+  const linked = banner.link_href && !shouldDropSiteBannerLink(banner.link_href, pathname);
   if (!linked) return <p className={className}>{banner.message}</p>;
 
   const content = (
@@ -108,15 +108,15 @@ function BannerText({
     </>
   );
   if (!interactive) return <p className={className}>{content}</p>;
-  if (banner.link_href.startsWith("/")) {
-    return (
-      <Link to={banner.link_href} className={`${className} hover:underline`}>
-        {content}
-      </Link>
-    );
-  }
+  // A plain anchor for a page here too, not the router's <Link>: `to` is a
+  // route path, and a manager's `/faq#trial` or `?from=banner` is a URL.
+  const external = !banner.link_href.startsWith("/");
   return (
-    <a href={banner.link_href} rel="noopener noreferrer" className={`${className} hover:underline`}>
+    <a
+      href={banner.link_href}
+      rel={external ? "noopener noreferrer" : undefined}
+      className={`${className} hover:underline`}
+    >
       {content}
     </a>
   );

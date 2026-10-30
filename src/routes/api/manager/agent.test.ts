@@ -1524,7 +1524,10 @@ describe("manager agent route: site banner", () => {
     currentAdmin = fake.db;
     const res = await post({ action: "save_site_banner", params: { enabled: true } });
     expect(res.status).toBe(400);
-    expect((await res.json()).error.code).toBe("invalid_params");
+    const { error } = await res.json();
+    expect(error.code).toBe("invalid_params");
+    // Named as the param the caller sends, not the stored shape behind it.
+    expect(error.issues[0].path).toBe("message");
     expect(fake.upserts).toEqual([]);
   });
 

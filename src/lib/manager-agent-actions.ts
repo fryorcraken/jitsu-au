@@ -44,7 +44,7 @@ import {
   agentSaveBlogPostSchema,
   agentUploadBlogImageSchema,
   agentSaveSiteBannerSchema,
-  saveClubSettingsSchema,
+  siteBannerSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -1842,10 +1842,12 @@ async function handleSaveSiteBanner(params: unknown, actingAs: string) {
   const current = await loadSiteBanner(admin).catch((e: unknown) => {
     throw siteBannerUnreadable(e);
   });
-  const input = saveClubSettingsSchema.parse({
-    key: "site_banner",
-    value: { ...current, ...changes },
-  });
+  // Parsed on its own rather than through `saveClubSettingsSchema`, so a
+  // refusal names the param the caller sent (`message`), not `value.message`.
+  const input = {
+    key: "site_banner" as const,
+    value: siteBannerSchema.parse({ ...current, ...changes }),
+  };
   try {
     await writeClubSetting(admin, input, actingAs);
   } catch (e) {

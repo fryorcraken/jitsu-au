@@ -3303,11 +3303,13 @@ export const SITE_BANNER_MESSAGE_MAX = 200;
 export const SITE_BANNER_LINK_LABEL_MAX = 60;
 
 /**
- * A page on this site: one leading slash, then no spaces. `//host` is refused
- * because a browser reads it as another site, which is exactly the mistake the
- * "a page on this site" choice exists to rule out.
+ * A page on this site: one leading slash, then printable ASCII with no spaces
+ * and no backslash. `//host` is refused because a browser reads it as another
+ * site, and so is `/\\host`, because a browser treats a backslash in a web
+ * address as a slash and reads that the same way. Control characters go too:
+ * browsers strip them, which can turn an innocent-looking path into `//host`.
  */
-const SITE_PATH = /^\/(?!\/)\S*$/;
+const SITE_PATH = /^\/(?![/\\])[!-[\]-~]*$/;
 
 function isHttpsUrl(value: string): boolean {
   try {

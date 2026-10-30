@@ -18,10 +18,16 @@ import type { SiteBanner } from "@/lib/validation";
  */
 export const getSiteBanner = createServerFn({ method: "GET" }).handler(
   async (): Promise<SiteBanner | null> => {
-    const [{ supabaseAdmin }, { readSiteBanner }] = await Promise.all([
+    const [{ supabaseAdmin }, { readSiteBanner }, { setResponseHeader }] = await Promise.all([
       import("@/integrations/supabase/client.server"),
       import("@/lib/club-settings.server"),
+      import("@tanstack/react-start/server"),
     ]);
+    // Every public page asks for this, and it changes a few times a term. A
+    // minute's caching (and a few more of serving the old copy while it
+    // refreshes) keeps that from being a database read per page view, at the
+    // cost of a change taking a minute or two to reach everybody.
+    setResponseHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
     const read = await readSiteBanner(supabaseAdmin);
     if (!read.ok) {
       console.error("[site-banner] could not read the banner; rendering without it");

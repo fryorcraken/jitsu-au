@@ -3062,6 +3062,12 @@ describe("siteBannerSchema", () => {
     expect(siteBannerSchema.parse(LIVE)).toEqual(LIVE);
   });
 
+  it("accepts a page with a query or a hash", () => {
+    for (const href of ["/register-interest?from=banner", "/faq#trial", "/"]) {
+      expect(siteBannerSchema.safeParse({ ...LIVE, link_href: href }).success, href).toBe(true);
+    }
+  });
+
   it("accepts a full https address as the link", () => {
     const external = { ...LIVE, link_href: "https://example.com/news" };
     expect(siteBannerSchema.safeParse(external).success).toBe(true);
@@ -3109,6 +3115,9 @@ describe("siteBannerSchema", () => {
       "javascript:alert(1)",
       "http://example.com",
       "//example.com",
+      "/\\example.com",
+      "/\texample.com",
+      "/a\\b",
       "register-interest",
       "/register interest",
       "data:text/html,hi",

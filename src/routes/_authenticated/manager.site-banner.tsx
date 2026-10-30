@@ -88,7 +88,7 @@ function SiteBannerPage() {
           onRetry={load}
         />
       ) : (
-        <BannerForm initial={saved} onSaved={setSaved} />
+        <BannerForm initial={saved} />
       )}
     </section>
   );
@@ -100,13 +100,7 @@ function SiteBannerPage() {
  * edit. No confirm, because it is undone the same way it is done, and the
  * preview already shows exactly what visitors will get.
  */
-function BannerForm({
-  initial,
-  onSaved,
-}: {
-  initial: SiteBanner;
-  onSaved: (banner: SiteBanner) => void;
-}) {
+function BannerForm({ initial }: { initial: SiteBanner }) {
   const save = useServerFn(saveClubSettings);
   const queryClient = useQueryClient();
   const send = useResilientSubmit<{ ok: true }>(INTAKE_SUBMIT);
@@ -143,7 +137,6 @@ function BannerForm({
       setForm(banner);
       setTouched(false);
       send.reset();
-      onSaved(banner);
       // The banner on this device refreshes now; other visitors pick it up on
       // their next visit (it is cached for a few minutes).
       void queryClient.invalidateQueries({ queryKey: SITE_BANNER_QUERY_KEY });
@@ -152,7 +145,12 @@ function BannerForm({
   }
 
   const showError = (key: TextField) => (touched ? errors[key] : undefined);
-  const preview = parsed.success ? parsed.data : form;
+  // What a save would store, so the preview never shows what visitors won't
+  // get (a message of only spaces, say). Shown on a page no link points at, so
+  // a link to "/" is previewed as the link it is everywhere else.
+  const preview = parsed.success
+    ? parsed.data
+    : { ...form, message: form.message.replace(/\s+/g, " ").trim() };
 
   return (
     <form onSubmit={(e) => void submit(e)} className="space-y-6" noValidate>
@@ -234,7 +232,7 @@ function BannerForm({
         <CardContent>
           {preview.message ? (
             <div className={form.enabled ? undefined : "opacity-50"}>
-              <SiteBannerBar banner={preview} pathname="/" />
+              <SiteBannerBar banner={preview} pathname="/manager/site-banner" />
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">Write a message to see it here.</p>

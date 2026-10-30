@@ -14,15 +14,20 @@ on or off; nobody has to change code to do either.
   (a fingerprint of the message and the link), so a new message, or the same
   message with a new link, is shown again to everybody. Turning the same notice
   off and back on does not bring it back for someone who already closed it.
-- **The link is dropped on the page it points at.** On `/register-interest`, a
-  banner linking there still shows its message (it is the most useful place for
-  "free trials are paused") but not a link to the page you are already on.
+- **The link is dropped where following it would hurt.** On the page it points
+  at (on `/register-interest`, a banner linking there still shows its message,
+  the most useful place for "free trials are paused", but not a link to where
+  you already are), and on `/waiver`, where the whole line being a tap target
+  could carry somebody away from a half-filled form with health answers and a
+  signature in it. The message shows on both.
 - **A failed read shows no banner.** It is a notice, not something a visitor is
   waiting on, so the page renders without it rather than with an error where it
   would be. The failure is logged.
-- **Changes reach visitors within a few minutes.** The banner is fetched once
-  and cached for five minutes in a visitor's open tab; a fresh page load gets
-  the current one. The manager who saved sees it at once.
+- **Changes reach visitors within a few minutes.** The public read is cached
+  for a minute (and an older copy may be served for a few more while it
+  refreshes), and a visitor's open tab keeps what it fetched for five minutes,
+  so every page view is not a database read. The manager who saved sees it on
+  their own device straight away.
 
 ## Managers
 
@@ -46,10 +51,10 @@ Both read and write the same stored value the same way.
   It must not be empty while the banner is on.
 - The link is optional, but its text (up to 60 characters) and its address come
   together or not at all.
-- The address is a page on this site (`/register-interest`) or a full
-  `https://` address. Nothing else, so a `javascript:` or `http:` link can never
-  reach the top of every page. `//host` is refused because a browser reads it
-  as another site.
+- The address is a page on this site (`/register-interest`, with a `?query` or
+  `#section` if needed) or a full `https://` address. Nothing else, so a
+  `javascript:` or `http:` link can never reach the top of every page. `//host`
+  and `/\host` are refused because a browser reads both as another site.
 - Anything stored that would not pass these rules today reads as off.
 
 A banner that has never been set is off. The free-trial offer that used to be

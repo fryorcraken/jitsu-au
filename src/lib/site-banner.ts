@@ -58,14 +58,24 @@ export function persistDismissedSiteBanner(
 }
 
 /**
- * Whether the banner's link should be dropped on this page: it points at the
- * page the visitor is already on. The message still shows (on the register
- * page, "free trials are paused" is the most useful place for it); only the
- * link to where they already are goes.
+ * Pages where the banner's message shows but its link does not. The whole line
+ * is a tap target, and on these a stray tap would carry somebody away from a
+ * form they are partway through (the waiver holds health answers and a
+ * signature). The old free-trial offer was hidden on the waiver for the same
+ * reason; a notice is still worth reading there, a link is not.
  */
-export function isSiteBannerLinkToHere(href: string, pathname: string): boolean {
+const NO_LINK_PATH_PREFIXES = ["/waiver"] as const;
+
+/**
+ * Whether the banner's link should be dropped on this page: on a form-filling
+ * page (above), or where the link points at the page the visitor is already
+ * on. The message still shows either way (on the register page, "free trials
+ * are paused" is the most useful place for it).
+ */
+export function shouldDropSiteBannerLink(href: string, pathname: string): boolean {
+  const here = pathname.replace(/\/+$/, "") || "/";
+  if (NO_LINK_PATH_PREFIXES.some((p) => here === p || here.startsWith(`${p}/`))) return true;
   if (!href.startsWith("/")) return false;
   const path = href.split(/[?#]/)[0].replace(/\/+$/, "") || "/";
-  const here = pathname.replace(/\/+$/, "") || "/";
   return path === here;
 }
