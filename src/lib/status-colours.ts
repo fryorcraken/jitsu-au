@@ -63,6 +63,10 @@ const WAIVER: Record<WaiverListStatus, string> = {
   pending: "bg-muted text-muted-foreground",
   active: "bg-primary/15 text-primary",
   superseded: "bg-muted text-muted-foreground line-through",
+  // Painted exactly like a superseded one, because what a reader needs off the
+  // badge is the same fact: this is not the waiver that counts. Which of the
+  // two it is, the word says.
+  replaced: "bg-muted text-muted-foreground line-through",
 };
 
 // What paid for a class on the check-in board. Red is right for "none" here,
@@ -127,7 +131,7 @@ export function verificationClass(label: string): string {
   return VERIFICATION[label as VerificationLabel] ?? NEUTRAL_STATUS_CLASS;
 }
 
-/** Colour for a waiver's derived status (`pending` / `active` / `superseded`). */
+/** Colour for a waiver's derived status (`pending` / `active` / `superseded` / `replaced`). */
 export function waiverClass(status: string): string {
   return WAIVER[status as WaiverListStatus] ?? NEUTRAL_STATUS_CLASS;
 }

@@ -92,6 +92,17 @@ describe("status colours", () => {
     expect(waiverClass("superseded")).toContain("line-through");
   });
 
+  it("strikes through a waiver that is not the one on file, however it got there", () => {
+    // A replaced waiver and a superseded one answer the reader's question the
+    // same way: this is not the waiver that counts. The word on the badge is
+    // what tells them apart, not the colour. The last assertion is the bug
+    // itself: painted as pending, an overtaken submission on a member's own
+    // card reads as one the club is still reviewing.
+    expect(waiverClass("replaced")).toContain("line-through");
+    expect(waiverClass("replaced")).toBe(waiverClass("superseded"));
+    expect(waiverClass("replaced")).not.toBe(waiverClass("pending"));
+  });
+
   it("does not colour a pending membership and a pending waiver alike", () => {
     // They are different things in different vocabularies; the shared module
     // must not quietly collapse them because they share a word.

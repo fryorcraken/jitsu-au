@@ -12,13 +12,14 @@ import { formatDate } from "@/lib/dates";
 import { waiverClass } from "@/lib/status-colours";
 import { getWaiverPdfUrl, listMyWaivers } from "@/lib/waiver.functions";
 import type { SubjectVoice } from "@/lib/subject-voice";
+import type { WaiverListStatus } from "@/lib/validation";
 
 type MyWaiver = {
   id: string;
   signed_at: string;
   template_version: number | null;
   has_pdf: boolean;
-  status: "pending" | "active" | "superseded";
+  status: WaiverListStatus;
 };
 
 /**
@@ -107,10 +108,12 @@ export function WaiversCard({ userId, voice }: { userId: string; voice: SubjectV
                   {w.template_version != null && (
                     <span className="text-muted-foreground"> (v{w.template_version})</span>
                   )}{" "}
-                  {/* The same three statuses, and the same colours, a manager
+                  {/* The same four statuses, and the same colours, a manager
                       sees. The two-way ternary this replaced painted a
                       superseded waiver exactly like a pending one, so a member
-                      who had re-signed could not tell which one counted. */}
+                      who had re-signed could not tell which one counted. The
+                      same bug came back as `replaced` for a member whose older
+                      submission was never approved at all. */}
                   <Pill label={w.status} className={waiverClass(w.status)} />
                 </span>
                 {w.has_pdf && (

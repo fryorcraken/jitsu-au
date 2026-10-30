@@ -20,7 +20,7 @@ import { ItemInvoicePaidEmail } from "@/lib/email-templates/item-invoice-paid";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { idempotencyKeyFor } from "@/lib/email-resend";
 import { readClubPaymentDetails } from "@/lib/club-settings.server";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager dashboard where memberships are reviewed and payments reconciled. */
