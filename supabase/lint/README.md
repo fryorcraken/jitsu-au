@@ -159,11 +159,12 @@ produces no commit and no signal, and is exactly the drift these catch.
 unapplied** — the two below. Both were then allowlisted as already-live
 re-emissions, so the next run reports **0 unapplied** and lists them under
 "Allowlisted, so not counted above" instead.
-**Client grants last run: 2026-10-25**, straight after applying
-`20261023120000_profile_archive.sql`, and the first run of the widened
-`client-grants.sql`: 18 live, 18 expected, 0 unexpected, and no column,
-`PUBLIC` or inherited grant anywhere in `public`. (The run before it,
-2026-09-01, read table grants only, with the same 18.) The one ledger row with no file here (`20260722131547`) is the known
+**Client grants last run: 2026-10-30**, straight after applying
+`20261029000000_structured_address.sql`: 18 live, 18 expected, 0 unexpected,
+and no column, `PUBLIC` or inherited grant anywhere in `public`. (The same
+result as 2026-10-25, the first run of the widened `client-grants.sql`, after
+`20261023120000_profile_archive.sql`; the run before that, 2026-09-01, read
+table grants only, with the same 18.) The one ledger row with no file here (`20260722131547`) is the known
 duplicate re-emission described in `docs/database-changes.md`, not missing
 schema.
 
