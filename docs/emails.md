@@ -41,7 +41,8 @@ club's email name are each spelled once, in `email-sender.ts`.
 **The auth emails are the one exception to `sendEmail`.** Supabase Auth calls
 `/lovable/email/auth/webhook`, and Lovable's `createAuthEmailHandler` sends from
 inside its own code. That route still takes its `From`, sending domain and name
-from `email-sender.ts`. The handler offers no Reply-To option.
+from `email-sender.ts`. The handler can set a Reply-To (`replyTo`, since
+`@lovable.dev/email-js` 0.6), and the route passes none (below).
 
 **Best-effort, everywhere.** A failed send is caught by its caller and logged,
 never thrown into the flow that triggered it: a waiver is saved, a payment is
@@ -77,8 +78,10 @@ every call site decides, and the rule is stated at the top of
   replied to you" means to answer X, and the email cannot reach them; sending
   that to the committee instead would put a message written for another member
   in the club inbox without the writer knowing.
-- **Supabase Auth emails carry none**: the handler cannot set one. None of them
-  asks for a reply.
+- **Supabase Auth emails carry none.** None of them asks for a reply, so the
+  webhook passes no `replyTo`. If one ever should, note that the handler takes
+  a fixed value when it is built and the route builds it once, so it would not
+  follow a manager changing the address on `/manager/settings`.
 
 The signing page's "your PDF is not ready" screen follows the same rule: it
 says "reply to your confirmation email" only when that email actually went out

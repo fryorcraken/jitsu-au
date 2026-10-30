@@ -672,8 +672,7 @@ functions, with no alias. Its replacement, `.validator()`, already exists on
 1.169 is two steps: rename every call to `.validator()` while still on 1.168
 (`typecheck` proves each one), then bump. Check first that Lovable's editor
 writes the new name too, or its next edit reintroduces the old one. Until then,
-stay on 1.168.x. The build will not warn you: a removed builder method only
-fails at runtime, or under `typecheck`.
+stay on 1.168.x.
 
 ## Conventions & style
 
