@@ -6,6 +6,7 @@
 // true of createServerFn handlers.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { AGENT_MANIFEST } from "@/lib/manager-agent";
 
 type Result<T> = { data: T | null; error: { message: string } | null };
 const ok = <T>(data: T): Result<T> => ({ data, error: null });
@@ -157,6 +158,8 @@ function fakeAdminForCreateMembership(plan: Record<string, unknown>) {
 }
 
 let currentAdmin: unknown;
+/** What the has_role re-check answers. Only the upload link tests turn it off. */
+let stillManager = true;
 vi.mock("@/integrations/supabase/client.server", () => ({
   get supabaseAdmin() {
     return withMintedToken(currentAdmin);
@@ -295,7 +298,7 @@ function withMintedToken(db: unknown) {
       return base.from(table);
     },
     rpc: (name: string, args?: unknown) => {
-      if (name === "has_role") return Promise.resolve(ok(true));
+      if (name === "has_role") return Promise.resolve(ok(stillManager));
       if (!base.rpc) throw new Error(`unexpected rpc ${name}`);
       return base.rpc(name, args);
     },
@@ -1940,9 +1943,17 @@ describe("manager agent route: the blog", () => {
    * filters each chain applies rather than ignoring them, so a save that wrote
    * the wrong row or a slug check that matched nothing would show.
    */
-  function fakeBlog(seed: Row[], opts: { afterFirstRead?: (rows: Row[]) => void } = {}) {
+  function fakeBlog(
+    seed: Row[],
+    opts: {
+      afterFirstRead?: (rows: Row[]) => void;
+      /** Another upload lands at the same path just before the first one does. */
+      racedBy?: boolean;
+    } = {},
+  ) {
     const rows = seed.map((r) => ({ ...r }));
     let reads = 0;
+    let raced = false;
     const uploads: { path: string; type: string; size: number }[] = [];
     const removed: string[] = [];
     const query = (op: "select" | "update" | "delete", patch?: Row) => {
@@ -2006,10 +2017,27 @@ describe("manager agent route: the blog", () => {
           from: (bucket: string) => {
             if (bucket !== "blog-media") throw new Error(`unexpected bucket ${bucket}`);
             return {
-              upload: (path: string, bytes: Uint8Array, opts: { contentType: string }) => {
-                uploads.push({ path, type: opts.contentType, size: bytes.byteLength });
+              upload: (path: string, bytes: Uint8Array, up: { contentType: string }) => {
+                if (opts.racedBy && !raced) {
+                  raced = true;
+                  uploads.push({ path, type: up.contentType, size: 1 });
+                }
+                // As the bucket does with upsert off: a path is written once.
+                if (uploads.some((u) => u.path === path)) {
+                  return Promise.resolve({ error: { message: "The resource already exists" } });
+                }
+                uploads.push({ path, type: up.contentType, size: bytes.byteLength });
                 return Promise.resolve({ error: null });
               },
+              list: (folder: string, opts: { search: string }) =>
+                Promise.resolve(
+                  ok(
+                    uploads
+                      .filter((u) => u.path.startsWith(`${folder}/`))
+                      .map((u) => ({ name: u.path.slice(folder.length + 1) }))
+                      .filter((o) => o.name.includes(opts.search)),
+                  ),
+                ),
               getPublicUrl: (path: string) => ({
                 data: { publicUrl: `https://cdn.example.com/blog-media/${path}` },
               }),
@@ -2280,6 +2308,242 @@ describe("manager agent route: the blog", () => {
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fake.uploads[0].path).toMatch(/-belt\.png$/);
+  });
+
+  // The route for an assistant that holds the file but can only type: ask for
+  // a link over the API, then send the bytes to it.
+  describe("upload links", () => {
+    const png = () => Uint8Array.from(atob(PNG_BASE64), (ch) => ch.charCodeAt(0));
+
+    async function startUpload(params: Record<string, unknown> = {}) {
+      const res = await post({ action: "start_blog_image_upload", params });
+      expect(res.status).toBe(200);
+      return (await res.json()).result as {
+        upload_url: string;
+        token: string;
+        expires_at: string;
+        command: string;
+      };
+    }
+
+    async function send(token: string | null, body: BodyInit | null = png()) {
+      const { Route } = await import("./blog-image");
+      const h = (Route as unknown as { options: { server: { handlers: RouteHandlers } } }).options
+        .server.handlers;
+      return h.POST({
+        request: new Request("http://localhost/api/manager/blog-image", {
+          method: "POST",
+          headers: token ? { authorization: `Bearer ${token}` } : {},
+          body,
+        }),
+      });
+    }
+
+    beforeEach(() => {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
+      stillManager = true;
+    });
+    afterEach(() => {
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+      stillManager = true;
+      vi.useRealTimers();
+    });
+
+    it("hands out a link that works for an hour, to the stack that was asked", async () => {
+      currentAdmin = fakeBlog([]).db;
+      const before = Date.now();
+      const link = await startUpload({ alt: "The mats" });
+      // These requests arrive on localhost: a local stack's tickets only
+      // verify on itself, so it hands out its own address.
+      expect(link.upload_url).toBe("http://localhost/api/manager/blog-image");
+      expect(link.command).toContain(link.token);
+      expect(link.command).toContain('--data-binary "@$IMAGE_FILE"');
+      const minutes = (Date.parse(link.expires_at) - before) / 60_000;
+      expect(minutes).toBeGreaterThan(59.9);
+      expect(minutes).toBeLessThan(60.1);
+    });
+
+    // Anywhere else (a preview, the lovable.app address, an old domain), the
+    // live site: the one host that does not redirect the bearer header away.
+    it("sends every other host's link to the live site", async () => {
+      currentAdmin = fakeBlog([]).db;
+      const res = await (
+        await handlers()
+      ).POST({
+        request: new Request("https://preview.example.lovable.app/api/manager/agent", {
+          method: "POST",
+          headers: { authorization: `Bearer ${MINTED_TOKEN}`, "content-type": "application/json" },
+          body: JSON.stringify({ action: "start_blog_image_upload", params: {} }),
+        }),
+      });
+      const { result } = await res.json();
+      expect(result.upload_url).toBe("https://utsjitsu.com.au/api/manager/blog-image");
+    });
+
+    it("stores the image sent to it, with the same answer upload_blog_image gives", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload({ post_id: DRAFT_ID, name: "mat", alt: "The mats laid out" });
+      const res = await send(link.token);
+      expect(res.status).toBe(200);
+      const { result, version } = await res.json();
+      expect(version).toBe(AGENT_MANIFEST.version);
+      expect(fake.uploads).toEqual([
+        {
+          path: expect.stringMatching(new RegExp(`^${DRAFT_ID}/.+-mat\\.png$`)),
+          type: "image/png",
+          size: 70,
+        },
+      ]);
+      expect(result).toMatchObject({ type: "image/png", bytes: 70, path: fake.uploads[0].path });
+      expect(result.markdown).toBe(`![The mats laid out](${result.url})`);
+    });
+
+    // A retry whose answer was lost must not store a second copy, and must be
+    // told where the first one went, so it can carry on with nothing more.
+    it("works once, and tells a second upload what the first stored", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload({ alt: "Belt" });
+      const first = await (await send(link.token)).json();
+      const again = await send(link.token);
+      expect(again.status).toBe(409);
+      const { error } = await again.json();
+      expect(error.code).toBe("already_uploaded");
+      expect(error.details).toMatchObject({
+        path: first.result.path,
+        url: first.result.url,
+        markdown: first.result.markdown,
+      });
+      expect(fake.uploads).toHaveLength(1);
+    });
+
+    // Two uploads on one link, both past the "already used?" look before
+    // either stored: the bucket refuses the second, and it must hear what the
+    // first stored rather than a database error.
+    it("tells the loser of a race on one link what the winner stored", async () => {
+      const fake = fakeBlog([], { racedBy: true });
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      const res = await send(link.token);
+      expect(res.status).toBe(409);
+      const { error } = await res.json();
+      expect(error.code).toBe("already_uploaded");
+      expect(error.details.path).toBe(fake.uploads[0].path);
+      expect(fake.uploads).toHaveLength(1);
+    });
+
+    // Over MCP no front door says what address was asked. On a local stack
+    // the only link left is the live site's, which its ticket cannot pass.
+    it("gives no link over MCP from a local stack, and the live one otherwise", async () => {
+      currentAdmin = fakeBlog([]).db;
+      const { dispatch } = await import("@/lib/manager-agent-actions");
+      const before = process.env.SUPABASE_URL;
+      try {
+        process.env.SUPABASE_URL = "http://127.0.0.1:54321";
+        await expect(dispatch("start_blog_image_upload", {}, TOKEN_OWNER)).rejects.toMatchObject({
+          code: "upload_links_unavailable",
+        });
+        process.env.SUPABASE_URL = "https://abcdefghijklmnop.supabase.co";
+        const link = (await dispatch("start_blog_image_upload", {}, TOKEN_OWNER)) as {
+          upload_url: string;
+        };
+        expect(link.upload_url).toBe("https://utsjitsu.com.au/api/manager/blog-image");
+      } finally {
+        if (before === undefined) delete process.env.SUPABASE_URL;
+        else process.env.SUPABASE_URL = before;
+      }
+    });
+
+    it("gives each link its own image", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      expect((await send((await startUpload()).token)).status).toBe(200);
+      expect((await send((await startUpload()).token)).status).toBe(200);
+      expect(fake.uploads).toHaveLength(2);
+    });
+
+    it("refuses an expired link, storing nothing", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse(link.expires_at) + 1000);
+      const res = await send(link.token);
+      expect(res.status).toBe(401);
+      expect((await res.json()).error.code).toBe("link_expired");
+      expect(fake.uploads).toEqual([]);
+    });
+
+    // A retry whose answer was lost, arriving after the hour: it must learn
+    // what its first attempt stored, not be sent off to upload a second copy.
+    it("still tells a late retry what the link stored", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      const first = await (await send(link.token)).json();
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse(link.expires_at) + 1000);
+      const late = await send(link.token);
+      expect(late.status).toBe(409);
+      expect((await late.json()).error.details.path).toBe(first.result.path);
+      expect(fake.uploads).toHaveLength(1);
+    });
+
+    // The link is not a manager credential, and a manager credential is not a
+    // link: neither works at the other's door.
+    it("takes only an upload link, never a manager API token", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      expect((await send(MINTED_TOKEN)).status).toBe(401);
+      expect((await send(null)).status).toBe(401);
+      const link = await startUpload();
+      expect((await post({ action: "list_blog_posts", params: {} }, link.token)).status).toBe(401);
+      expect(fake.uploads).toEqual([]);
+    });
+
+    it("stops working when whoever asked for it is no longer a manager", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      stillManager = false;
+      const res = await send(link.token);
+      expect(res.status).toBe(403);
+      expect(fake.uploads).toEqual([]);
+    });
+
+    it("refuses what is not an image, and leaves the link usable", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      const wrong = await send(link.token, new TextEncoder().encode("<html>not a picture</html>"));
+      expect(wrong.status).toBe(422);
+      expect((await wrong.json()).error.code).toBe("image_rejected");
+      const empty = await send(link.token, null);
+      expect(empty.status).toBe(422);
+      expect(fake.uploads).toEqual([]);
+      expect((await send(link.token)).status).toBe(200);
+    });
+
+    it("refuses an image over 8 MB without storing it", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      const big = new Uint8Array(8 * 1024 * 1024 + 1);
+      big.set(png());
+      const res = await send(link.token, big);
+      expect(res.status).toBe(422);
+      expect(fake.uploads).toEqual([]);
+    });
+
+    it("answers anything but POST with 405", async () => {
+      const { Route } = await import("./blog-image");
+      const h = (Route as unknown as { options: { server: { handlers: RouteHandlers } } }).options
+        .server.handlers;
+      const res = await h.GET({ request: new Request("http://localhost/api/manager/blog-image") });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("allow")).toBe("POST");
+    });
   });
 
   it("will not fetch an address that is not public https", async () => {

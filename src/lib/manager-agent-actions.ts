@@ -43,6 +43,8 @@ import {
   agentGetBlogPostSchema,
   agentSaveBlogPostSchema,
   agentUploadBlogImageSchema,
+  agentStartBlogImageUploadSchema,
+  MAX_BLOG_IMAGE_BYTES,
   agentSaveSiteBannerSchema,
   siteBannerSchema,
 } from "@/lib/validation";
@@ -161,6 +163,7 @@ import {
   BlogSlugTakenError,
   createBlogPostRow,
   deleteBlogPostRow,
+  findBlogImage,
   listBlogPostRows,
   loadBlogPostRow,
   storeBlogImage,
@@ -171,8 +174,19 @@ import {
   blogImageFileName,
   blogImageMarkdown,
   fetchBlogImage,
+  readCapped,
   sniffBlogImageType,
 } from "@/lib/blog-image";
+import {
+  assertBlogImageTicketLive,
+  BlogImageTicketError,
+  blogImageUploadCommand,
+  newBlogImageTicket,
+  readBlogImageTicket,
+  signBlogImageTicket,
+  type BlogImageTicket,
+} from "@/lib/blog-image-ticket";
+import { isLoopbackHost, linkOrigin } from "@/lib/site-origin";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
 /**
@@ -217,7 +231,7 @@ export function json(
  * but confusing, and a trap if a future handler ever dispatches on method.
  * Reject explicitly instead.
  */
-export function methodNotAllowed(): Response {
+export function methodNotAllowed(allow = "GET, POST"): Response {
   return new Response(
     JSON.stringify({
       ok: false,
@@ -228,7 +242,7 @@ export function methodNotAllowed(): Response {
       headers: {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
-        allow: "GET, POST",
+        allow,
       },
     },
   );
@@ -2096,6 +2110,16 @@ async function handleUploadBlogImage(params: unknown) {
     }
     throw e;
   }
+  return storeAgentBlogImage(adminClient, bytes, {
+    post_id: input.post_id,
+    name: input.name,
+    alt: input.alt,
+    sourceUrl: sourceUrl ?? input.url,
+  });
+}
+
+/** The image's type, read off its bytes, or a refusal saying it is none of the four. */
+function agentBlogImageType(bytes: Uint8Array) {
   const type = sniffBlogImageType(bytes);
   if (!type) {
     throw new AgentError(
@@ -2104,24 +2128,228 @@ async function handleUploadBlogImage(params: unknown) {
       "That is not a PNG, JPEG, WebP or GIF image. A post can only show those four.",
     );
   }
-  const name = blogImageFileName(type, input.name, sourceUrl ?? input.url);
-  const db = await adminClient();
-  let stored: { path: string; url: string };
-  try {
-    stored = await storeBlogImage(db, { post_id: input.post_id, name, type, bytes });
-  } catch (e) {
-    throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
-  }
+  return type;
+}
+
+/** What every route into the bucket reports about the image it stored. */
+function agentBlogImageResult(
+  stored: { path: string; url: string },
+  alt: string,
+  extra: { type?: string; bytes?: number },
+) {
   return {
     path: stored.path,
     url: stored.url,
-    markdown: blogImageMarkdown(input.alt || name, stored.url),
-    type,
-    bytes: bytes.byteLength,
+    markdown: blogImageMarkdown(alt, stored.url),
+    ...extra,
   };
 }
 
-export async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
+/**
+ * Check bytes an agent sent are an image a post can show, and store them. `id`
+ * names the stored file's id, for an upload link's ticket; otherwise it is
+ * fresh. The client is fetched only once the bytes pass, so a refused image
+ * never needs the service role.
+ */
+async function storeAgentBlogImage(
+  getDb: () => Promise<MembershipClient>,
+  bytes: Uint8Array,
+  file: { post_id?: string; id?: string; name?: string; alt?: string; sourceUrl?: string },
+) {
+  const type = agentBlogImageType(bytes);
+  const name = blogImageFileName(type, file.name, file.sourceUrl);
+  const db = await getDb();
+  let stored: { path: string; url: string };
+  try {
+    stored = await storeBlogImage(db, { post_id: file.post_id, id: file.id, name, type, bytes });
+  } catch (e) {
+    throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
+  }
+  return agentBlogImageResult(stored, file.alt || name, { type, bytes: bytes.byteLength });
+}
+
+// ---- action: start_blog_image_upload, and the upload it hands out ----
+// Why the link exists and what it may do: src/lib/blog-image-ticket.ts.
+
+/** Whether this server's own database is a local one (development, the e2e suite). */
+function runsOnLocalDatabase(): boolean {
+  try {
+    return isLoopbackHost(new URL(process.env.SUPABASE_URL ?? "").hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Where an upload link sends the bytes. */
+const BLOG_IMAGE_UPLOAD_PATH = "/api/manager/blog-image";
+
+/**
+ * The secret upload links are signed with. Only the server has the
+ * service-role key; see blog-image-ticket.ts for why it is derived from, not
+ * used as, the key.
+ */
+function blogImageTicketSecret(): string {
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret) {
+    throw new AgentError(
+      503,
+      "upload_links_unavailable",
+      "Upload links are not available on this server just now. Send the image with upload_blog_image instead.",
+    );
+  }
+  return secret;
+}
+
+async function handleStartBlogImageUpload(
+  params: unknown,
+  actingAs: string,
+  requestOrigin: string | undefined,
+) {
+  const input = agentStartBlogImageUploadSchema.parse(params);
+  if (!requestOrigin && runsOnLocalDatabase()) {
+    // A local stack's ticket only verifies on itself, and over MCP nothing
+    // says what its address is, so the only link it could give is one to the
+    // live site that the ticket cannot pass. Better no link than a dead one.
+    throw new AgentError(
+      503,
+      "upload_links_unavailable",
+      "This is a local copy of the site, and over MCP it cannot tell what its own address is, so it cannot give an upload link that would work. Call start_blog_image_upload through /api/manager/agent instead, or send the image with upload_blog_image.",
+    );
+  }
+  const ticket = newBlogImageTicket(actingAs, input);
+  const token = await signBlogImageTicket(blogImageTicketSecret(), ticket);
+  // The live address wherever this was asked from, except a loopback stack,
+  // which gets itself: a ticket only verifies on the server that signed it,
+  // and the live site is the one host that takes a credential without
+  // redirecting it away (CLAUDE.md, "The site's address"). Over MCP nothing
+  // says which host was asked, so it is the live site (a local stack was
+  // turned away above).
+  const uploadUrl = `${linkOrigin(requestOrigin)}${BLOG_IMAGE_UPLOAD_PATH}`;
+  return {
+    upload_url: uploadUrl,
+    method: "POST",
+    token,
+    expires_at: new Date(ticket.expires_at).toISOString(),
+    max_bytes: MAX_BLOG_IMAGE_BYTES,
+    command: blogImageUploadCommand(uploadUrl, token),
+    how: "Set the shell variable IMAGE_FILE to the image file's path (IMAGE_FILE='/path/to/photo.jpg', quoted as any path is), then run command exactly as given: it reads the path from the variable, so spaces and apostrophes in it are fine. It sends the file's bytes as the request body, as they are: not base64, not a form. The answer is { ok: true, result: { path, url, markdown } }. This link stores one image and stops working at expires_at.",
+  };
+}
+
+/** The image a used ticket already stored, as the refusal a second upload gets. */
+function alreadyUploaded(stored: { path: string; url: string }, ticket: BlogImageTicket) {
+  const name = stored.path.slice(stored.path.lastIndexOf("/") + 1 + ticket.id.length + 1);
+  return new AgentError(
+    409,
+    "already_uploaded",
+    "This upload link has already stored an image, and works only once. If this was a retry, that image is the one you sent: use the path and markdown here. To add another image, ask for a new link with start_blog_image_upload.",
+    agentBlogImageResult(stored, ticket.alt || name, {}),
+  );
+}
+
+/**
+ * `POST /api/manager/blog-image`: store the image in the request body under an
+ * upload link's ticket. The bearer token is the ticket, never a manager's own
+ * credential, and nothing else is reachable with it.
+ */
+export async function uploadBlogImageWithTicket(request: Request) {
+  const token = bearerToken(request.headers.get("authorization"));
+  if (!token) {
+    throw new AgentError(
+      401,
+      "unauthorized",
+      "Missing upload link token. Send it as Authorization: Bearer <token>, as start_blog_image_upload's command does.",
+    );
+  }
+  let ticket: BlogImageTicket;
+  try {
+    ticket = await readBlogImageTicket(blogImageTicketSecret(), token);
+  } catch (e) {
+    if (e instanceof BlogImageTicketError) throw new AgentError(401, "unauthorized", e.message);
+    throw e;
+  }
+
+  const db = await adminClient();
+  const where = { post_id: ticket.post_id, id: ticket.id };
+  const lookUp = async () => {
+    try {
+      return await findBlogImage(db, where);
+    } catch (e) {
+      throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
+    }
+  };
+  // The role and the "already used?" look run together, to keep a slow
+  // connection's round trips down, but the role is answered first: the link is
+  // only as good as the manager who asked for it is today. The look comes
+  // before the body is read, so a used link costs no upload, and before the
+  // expiry, so a retry that arrives after the hour still learns what its first
+  // attempt stored.
+  const [role, earlier] = await Promise.allSettled([
+    db.rpc("has_role", { _user_id: ticket.issuer, _role: "manager" }),
+    lookUp(),
+  ]);
+  if (role.status === "rejected") throw role.reason;
+  if (role.value.error) throw new AgentError(500, "db_error", role.value.error.message);
+  if (!role.value.data) {
+    throw new AgentError(403, "forbidden", "Whoever asked for this link is no longer a manager.");
+  }
+  if (earlier.status === "rejected") throw earlier.reason;
+  if (earlier.value) throw alreadyUploaded(earlier.value, ticket);
+  try {
+    assertBlogImageTicketLive(ticket);
+  } catch (e) {
+    if (e instanceof BlogImageTicketError) throw new AgentError(401, "link_expired", e.message);
+    throw e;
+  }
+
+  let bytes: Uint8Array;
+  try {
+    bytes = await readCapped(request);
+  } catch (e) {
+    if (e instanceof BlogImageError) throw new AgentError(422, "image_rejected", e.message);
+    // Usually the connection dropped mid-upload, which a retry fixes. Logged,
+    // so that a fault of ours reading the body is not mistaken for one forever.
+    console.error("[blog-image-upload] could not read the body:", e);
+    throw new AgentError(
+      400,
+      "upload_interrupted",
+      "The image did not arrive in full. Send it again with the same link.",
+    );
+  }
+  if (bytes.byteLength === 0) {
+    throw new AgentError(
+      422,
+      "image_rejected",
+      'No image arrived. Send the file itself as the request body (curl --data-binary "@$IMAGE_FILE"), with IMAGE_FILE set to its path.',
+    );
+  }
+  try {
+    return await storeAgentBlogImage(async () => db, bytes, {
+      ...where,
+      name: ticket.name,
+      alt: ticket.alt,
+    });
+  } catch (e) {
+    // Two uploads racing on one link: the other one stored first. The bucket
+    // refuses the second, and it is told what the first stored.
+    if (e instanceof AgentError && e.code === "db_error") {
+      const raced = await lookUp().catch(() => null);
+      if (raced) throw alreadyUploaded(raced, ticket);
+    }
+    throw e;
+  }
+}
+
+/**
+ * Run one action. `requestOrigin` is the address the request came in on, where
+ * a front door knows it; only links an action hands out read it.
+ */
+export async function dispatch(
+  action: ManagerAgentAction,
+  params: unknown,
+  actingAs: string,
+  requestOrigin?: string,
+) {
   switch (action) {
     case "list_users":
       return handleListUsers(params);
@@ -2207,5 +2435,7 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
       return handleDeleteBlogPost(params, actingAs);
     case "upload_blog_image":
       return handleUploadBlogImage(params);
+    case "start_blog_image_upload":
+      return handleStartBlogImageUpload(params, actingAs, requestOrigin);
   }
 }
