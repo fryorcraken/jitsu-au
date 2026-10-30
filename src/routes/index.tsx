@@ -142,7 +142,7 @@ function Home() {
             {
               icon: Dumbbell,
               title: "Fitness through art",
-              body: "You don't need to be fit to start. Drills and conditioning build up week by week.",
+              body: "Drills, conditioning and skill for a sharper mind and stronger body.",
             },
             {
               icon: Award,
