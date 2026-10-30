@@ -32,6 +32,14 @@ import type {
   CalendarSeriesRow,
   EntryDetailsPatch,
 } from "@/lib/calendar-types";
+import type {
+  CancelEventInput,
+  CreateCalendarEntryInput,
+  DeleteEventInput,
+  EventRsvpsInput,
+  StopRepeatingInput,
+  UpdateCalendarEntryInput,
+} from "@/lib/validation";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { SITE_ORIGIN, linkOrigin } from "@/lib/site-origin";
@@ -395,48 +403,105 @@ export const replaceMyCalendarFeedUrl = createServerFn({ method: "POST" })
 // The manager view is a single list of upcoming DATES. A repeating entry shows
 // as its dates (marked "Weekly"), so there is no second list of repeat rules to
 // keep in your head.
+//
+// The manager calendar's reads and writes below are plain functions taking the
+// client, each wrapped by a thin server function that checks the role first.
+// The manager agent API (src/lib/manager-agent-actions.ts) calls the same
+// functions, so the screen and an agent read and write the calendar the same
+// way (CLAUDE.md, "A manager screen and the manager agent API report the same
+// thing").
+
+/** Every date from a month back to six months ahead, each with its RSVP tally. */
+export async function listManagerEventRows(admin: CalendarClient) {
+  await topUpHorizon(admin);
+  const { data, error } = await admin
+    .from("calendar_events")
+    .select(EVENT_COLUMNS)
+    .gte("starts_at", `${dateFromNow(-30)}T00:00:00.000Z`)
+    .lte("starts_at", `${dateFromNow(180)}T23:59:59.999Z`)
+    .order("starts_at", { ascending: true })
+    .limit(1000);
+  if (error) throw new Error(error.message);
+  const events = (data ?? []).map(projectEvent);
+
+  // Attach a per-event RSVP tally so the manager sees interest at a glance.
+  // Chunked: `.in()` becomes a query-string filter, and a few hundred UUIDs
+  // blow past the proxy's request-line limit. A failure here must surface —
+  // silently rendering "0 going" everywhere would be read as "nobody came".
+  const ids = events.map((e) => e.id);
+  const counts = new Map<string, { going: number; maybe: number; declined: number }>();
+  const CHUNK = 100;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data: rsvps, error: rErr } = await admin
+      .from("event_rsvps")
+      .select("event_id, response")
+      .in("event_id", ids.slice(i, i + CHUNK));
+    if (rErr) throw new Error(rErr.message);
+    for (const r of rsvps ?? []) {
+      const tally = counts.get(r.event_id) ?? { going: 0, maybe: 0, declined: 0 };
+      if (r.response === "going") tally.going += 1;
+      else if (r.response === "maybe") tally.maybe += 1;
+      else if (r.response === "declined") tally.declined += 1;
+      counts.set(r.event_id, tally);
+    }
+  }
+  return events.map((e) => ({
+    ...e,
+    rsvps: counts.get(e.id) ?? { going: 0, maybe: 0, declined: 0 },
+  }));
+}
+
 export const listManagerEvents = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    await topUpHorizon(admin);
-    const { data, error } = await admin
-      .from("calendar_events")
-      .select(EVENT_COLUMNS)
-      .gte("starts_at", `${dateFromNow(-30)}T00:00:00.000Z`)
-      .lte("starts_at", `${dateFromNow(180)}T23:59:59.999Z`)
-      .order("starts_at", { ascending: true })
-      .limit(1000);
-    if (error) throw new Error(error.message);
-    const events = (data ?? []).map(projectEvent);
-
-    // Attach a per-event RSVP tally so the manager sees interest at a glance.
-    // Chunked: `.in()` becomes a query-string filter, and a few hundred UUIDs
-    // blow past the proxy's request-line limit. A failure here must surface —
-    // silently rendering "0 going" everywhere would be read as "nobody came".
-    const ids = events.map((e) => e.id);
-    const counts = new Map<string, { going: number; maybe: number; declined: number }>();
-    const CHUNK = 100;
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      const { data: rsvps, error: rErr } = await admin
-        .from("event_rsvps")
-        .select("event_id, response")
-        .in("event_id", ids.slice(i, i + CHUNK));
-      if (rErr) throw new Error(rErr.message);
-      for (const r of rsvps ?? []) {
-        const tally = counts.get(r.event_id) ?? { going: 0, maybe: 0, declined: 0 };
-        if (r.response === "going") tally.going += 1;
-        else if (r.response === "maybe") tally.maybe += 1;
-        else if (r.response === "declined") tally.declined += 1;
-        counts.set(r.event_id, tally);
-      }
-    }
-    return events.map((e) => ({
-      ...e,
-      rsvps: counts.get(e.id) ?? { going: 0, maybe: 0, declined: 0 },
-    }));
+    return listManagerEventRows(await adminClient());
   });
+
+/** Who responded to one date, with names and emails. */
+export async function listEventRsvpRows(admin: CalendarClient, data: EventRsvpsInput) {
+  const { data: rows, error } = await admin
+    .from("event_rsvps")
+    .select("user_id, response, updated_at")
+    .eq("event_id", data.event_id)
+    .order("updated_at", { ascending: false });
+  if (error) throw new Error(error.message);
+
+  const rsvps = rows ?? [];
+  const userIds = [...new Set(rsvps.map((r) => r.user_id))];
+  const nameByUser = new Map<string, string>();
+  const emailByUser = new Map<string, string>();
+  if (userIds.length) {
+    // Names live on profiles; the one email store is auth.users, read via the
+    // service-role-only user_emails RPC.
+    const pdb = admin as unknown as AppClient;
+    const [{ data: profiles, error: pErr }, { data: emails, error: eErr }] = await Promise.all([
+      pdb
+        .from("profiles")
+        .select("user_id, first_name, middle_name, last_name, preferred_name")
+        .in("user_id", userIds),
+      userEmails(pdb, userIds),
+    ]);
+    // Surface these: silently falling back to "Someone" with no email would
+    // look like missing data rather than a broken lookup.
+    if (pErr) throw new Error(pErr.message);
+    if (eErr) throw new Error(eErr.message);
+    // Manager-facing list, so it shows the preferred name in the nickname
+    // position (`Ada "Addy" Lovelace`), matching the other manager views.
+    for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
+    for (const e of emails ?? []) {
+      emailByUser.set(e.user_id, e.email);
+    }
+  }
+
+  return rsvps.map((r) => ({
+    user_id: r.user_id,
+    name: nameByUser.get(r.user_id) || null,
+    email: emailByUser.get(r.user_id) ?? null,
+    response: r.response,
+    updated_at: r.updated_at,
+  }));
+}
 
 /** Manager: who responded to one event, with names and emails. */
 export const listEventRsvps = createServerFn({ method: "POST" })
@@ -444,48 +509,7 @@ export const listEventRsvps = createServerFn({ method: "POST" })
   .inputValidator((d: unknown) => eventRsvpsSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const { data: rows, error } = await admin
-      .from("event_rsvps")
-      .select("user_id, response, updated_at")
-      .eq("event_id", data.event_id)
-      .order("updated_at", { ascending: false });
-    if (error) throw new Error(error.message);
-
-    const rsvps = rows ?? [];
-    const userIds = [...new Set(rsvps.map((r) => r.user_id))];
-    const nameByUser = new Map<string, string>();
-    const emailByUser = new Map<string, string>();
-    if (userIds.length) {
-      // Names live on profiles; the one email store is auth.users, read via the
-      // service-role-only user_emails RPC.
-      const pdb = admin as unknown as AppClient;
-      const [{ data: profiles, error: pErr }, { data: emails, error: eErr }] = await Promise.all([
-        pdb
-          .from("profiles")
-          .select("user_id, first_name, middle_name, last_name, preferred_name")
-          .in("user_id", userIds),
-        userEmails(pdb, userIds),
-      ]);
-      // Surface these: silently falling back to "Someone" with no email would
-      // look like missing data rather than a broken lookup.
-      if (pErr) throw new Error(pErr.message);
-      if (eErr) throw new Error(eErr.message);
-      // Manager-facing list, so it shows the preferred name in the nickname
-      // position (`Ada "Addy" Lovelace`), matching the other manager views.
-      for (const p of profiles ?? []) nameByUser.set(p.user_id, nameWithPreferred(p));
-      for (const e of emails ?? []) {
-        emailByUser.set(e.user_id, e.email);
-      }
-    }
-
-    return rsvps.map((r) => ({
-      user_id: r.user_id,
-      name: nameByUser.get(r.user_id) || null,
-      email: emailByUser.get(r.user_id) ?? null,
-      response: r.response,
-      updated_at: r.updated_at,
-    }));
+    return listEventRsvpRows(await adminClient(), data);
   });
 
 /**
@@ -591,229 +615,258 @@ export async function topUpHorizon(admin: CalendarClient): Promise<void> {
 }
 
 /**
- * Manager: put something on the calendar. One entry point for both a one-off and
- * a weekly entry — repeating is a property of the thing, not a different thing.
+ * Put something on the calendar. One entry point for both a one-off and a weekly
+ * entry — repeating is a property of the thing, not a different thing.
+ * `actingAs` is the manager, recorded as the entry's `created_by`.
  */
+export async function createCalendarEntryRow(
+  admin: CalendarClient,
+  data: CreateCalendarEntryInput,
+  actingAs: string,
+) {
+  const details = {
+    title: data.title,
+    description: data.description ?? null,
+    instructor_name: data.instructor_name ?? null,
+    location: data.location ?? null,
+    visibility: data.visibility,
+    invite_only: data.invite_only,
+    created_by: actingAs,
+  };
+
+  if (data.repeat.type === "never") {
+    const { data: created, error } = await admin
+      .from("calendar_events")
+      .insert({ ...details, starts_at: data.repeat.starts_at, ends_at: data.repeat.ends_at })
+      .select("id")
+      .single();
+    if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
+    return { ok: true as const, id: created.id, repeats: false as const, generated: 1 };
+  }
+
+  const { weekday, start_time, duration_minutes, starts_on, ends_on } = data.repeat;
+  const { data: created, error } = await admin
+    .from("calendar_series")
+    .insert({
+      ...details,
+      weekday,
+      start_time,
+      duration_minutes,
+      starts_on,
+      ends_on: ends_on ?? null,
+    })
+    .select("*")
+    .single();
+  if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
+
+  const generated = await materializeSeries(
+    admin,
+    created as CalendarSeriesRow,
+    starts_on > dateFromNow(0) ? starts_on : dateFromNow(0),
+    dateFromNow(HORIZON_DAYS),
+  );
+  return { ok: true as const, id: created.id, repeats: true as const, generated };
+}
+
+/** Manager: put something on the calendar. */
 export const createCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => createCalendarEntrySchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-
-    const details = {
-      title: data.title,
-      description: data.description ?? null,
-      instructor_name: data.instructor_name ?? null,
-      location: data.location ?? null,
-      visibility: data.visibility,
-      invite_only: data.invite_only,
-      created_by: context.userId,
-    };
-
-    if (data.repeat.type === "never") {
-      const { data: created, error } = await admin
-        .from("calendar_events")
-        .insert({ ...details, starts_at: data.repeat.starts_at, ends_at: data.repeat.ends_at })
-        .select("id")
-        .single();
-      if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
-      return { ok: true as const, id: created.id, repeats: false as const, generated: 1 };
-    }
-
-    const { weekday, start_time, duration_minutes, starts_on, ends_on } = data.repeat;
-    const { data: created, error } = await admin
-      .from("calendar_series")
-      .insert({
-        ...details,
-        weekday,
-        start_time,
-        duration_minutes,
-        starts_on,
-        ends_on: ends_on ?? null,
-      })
-      .select("*")
-      .single();
-    if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
-
-    const generated = await materializeSeries(
-      admin,
-      created as CalendarSeriesRow,
-      starts_on > dateFromNow(0) ? starts_on : dateFromNow(0),
-      dateFromNow(HORIZON_DAYS),
-    );
-    return { ok: true as const, id: created.id, repeats: true as const, generated };
+    return createCalendarEntryRow(await adminClient(), data, context.userId);
   });
 
 /**
- * Manager: edit an entry's details. `id` is always the DATE that was clicked, as
- * it is for cancelEvent. `scope: "event"` touches only that date; `scope:
- * "series"` updates the repeat rule and every date from the clicked one onward,
- * leaving earlier ones as they actually happened. Keying off the clicked date
- * (rather than the series) is what makes "this and all future dates" mean what
- * it says: dates between now and the clicked one are not rewritten.
+ * Edit an entry's details. `id` is always the DATE that was clicked, as it is
+ * for cancelling. `scope: "event"` touches only that date; `scope: "series"`
+ * updates the repeat rule and every date from the clicked one onward, leaving
+ * earlier ones as they actually happened. Keying off the clicked date (rather
+ * than the series) is what makes "this and all future dates" mean what it says:
+ * dates between now and the clicked one are not rewritten.
  */
+export async function updateCalendarEntryRow(
+  admin: CalendarClient,
+  data: UpdateCalendarEntryInput,
+) {
+  const { scope, id, ...fields } = data;
+  const now = new Date().toISOString();
+  // Blank text clears the field rather than storing an empty string.
+  const blankToNull = (v: string | null | undefined) =>
+    v === undefined ? undefined : v && v.trim() ? v : null;
+  // Only the detail columns, which calendar_series and calendar_events share.
+  // Built explicitly rather than spread from `fields`, so a column that exists
+  // on one table and not the other can never leak into the other's update.
+  const patch: EntryDetailsPatch = {
+    ...(fields.title !== undefined && { title: fields.title }),
+    ...(fields.description !== undefined && { description: blankToNull(fields.description) }),
+    ...(fields.instructor_name !== undefined && {
+      instructor_name: blankToNull(fields.instructor_name),
+    }),
+    ...(fields.location !== undefined && { location: blankToNull(fields.location) }),
+    ...(fields.visibility !== undefined && { visibility: fields.visibility }),
+    ...(fields.invite_only !== undefined && { invite_only: fields.invite_only }),
+  };
+  if (Object.keys(patch).length === 0) return { ok: true as const, id, updated: 0 };
+
+  if (scope === "event") {
+    const { error } = await admin
+      .from("calendar_events")
+      .update({ ...patch, updated_at: now })
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+    return { ok: true as const, id, updated: 1 };
+  }
+
+  // Series scope: resolve the clicked date's series, then rewrite from that
+  // date forward. Never earlier: a past date records what actually happened.
+  const { data: ev, error: evErr } = await admin
+    .from("calendar_events")
+    .select("series_id, starts_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (evErr) throw new Error(evErr.message);
+  if (!ev?.series_id) throw new Error("That entry does not repeat.");
+  const from = ev.starts_at > now ? ev.starts_at : now;
+
+  const { error: sErr } = await admin
+    .from("calendar_series")
+    .update({ ...patch, updated_at: now })
+    .eq("id", ev.series_id);
+  if (sErr) throw new Error(sErr.message);
+  const { error: eErr } = await admin
+    .from("calendar_events")
+    .update({ ...patch, updated_at: now })
+    .eq("series_id", ev.series_id)
+    .gte("starts_at", from);
+  if (eErr) throw new Error(eErr.message);
+  return { ok: true as const, id, updated: 1 };
+}
+
+/** Manager: edit an entry's details, for one date or this and every future one. */
 export const updateCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => updateCalendarEntrySchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const { scope, id, ...fields } = data;
-    const now = new Date().toISOString();
-    // Blank text clears the field rather than storing an empty string.
-    const blankToNull = (v: string | null | undefined) =>
-      v === undefined ? undefined : v && v.trim() ? v : null;
-    // Only the detail columns, which calendar_series and calendar_events share.
-    // Built explicitly rather than spread from `fields`, so a column that exists
-    // on one table and not the other can never leak into the other's update.
-    const patch: EntryDetailsPatch = {
-      ...(fields.title !== undefined && { title: fields.title }),
-      ...(fields.description !== undefined && { description: blankToNull(fields.description) }),
-      ...(fields.instructor_name !== undefined && {
-        instructor_name: blankToNull(fields.instructor_name),
-      }),
-      ...(fields.location !== undefined && { location: blankToNull(fields.location) }),
-      ...(fields.visibility !== undefined && { visibility: fields.visibility }),
-      ...(fields.invite_only !== undefined && { invite_only: fields.invite_only }),
-    };
-    if (Object.keys(patch).length === 0) return { ok: true as const, id, updated: 0 };
-
-    if (scope === "event") {
-      const { error } = await admin
-        .from("calendar_events")
-        .update({ ...patch, updated_at: now })
-        .eq("id", id);
-      if (error) throw new Error(error.message);
-      return { ok: true as const, id, updated: 1 };
-    }
-
-    // Series scope: resolve the clicked date's series, then rewrite from that
-    // date forward. Never earlier: a past date records what actually happened.
-    const { data: ev, error: evErr } = await admin
-      .from("calendar_events")
-      .select("series_id, starts_at")
-      .eq("id", id)
-      .maybeSingle();
-    if (evErr) throw new Error(evErr.message);
-    if (!ev?.series_id) throw new Error("That entry does not repeat.");
-    const from = ev.starts_at > now ? ev.starts_at : now;
-
-    const { error: sErr } = await admin
-      .from("calendar_series")
-      .update({ ...patch, updated_at: now })
-      .eq("id", ev.series_id);
-    if (sErr) throw new Error(sErr.message);
-    const { error: eErr } = await admin
-      .from("calendar_events")
-      .update({ ...patch, updated_at: now })
-      .eq("series_id", ev.series_id)
-      .gte("starts_at", from);
-    if (eErr) throw new Error(eErr.message);
-    return { ok: true as const, id, updated: 1 };
+    return updateCalendarEntryRow(await adminClient(), data);
   });
 
 /**
- * Manager: stop a repeating entry. Future dates are removed and the rule is
- * deactivated; past dates stay, because they happened.
+ * Stop a repeating entry. Future dates are removed and the rule is deactivated;
+ * past dates stay, because they happened.
  */
+export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepeatingInput) {
+  const now = new Date().toISOString();
+  const { data: series, error: sReadErr } = await admin
+    .from("calendar_series")
+    .select("starts_on")
+    .eq("id", data.series_id)
+    .maybeSingle();
+  if (sReadErr) throw new Error(sReadErr.message);
+  if (!series) throw new Error("That repeating entry no longer exists.");
+
+  const { error: dErr } = await admin
+    .from("calendar_events")
+    .delete()
+    .eq("series_id", data.series_id)
+    .gte("starts_at", now);
+  if (dErr) throw new Error(dErr.message);
+  // `ends_on` has a CHECK against `starts_on`, so an entry stopped before its
+  // first date ends on that date rather than today. is_active = false is what
+  // actually stops it; the date is only for the record.
+  const today = dateFromNow(0);
+  const { error: sErr } = await admin
+    .from("calendar_series")
+    .update({
+      is_active: false,
+      ends_on: series.starts_on > today ? series.starts_on : today,
+      updated_at: now,
+    })
+    .eq("id", data.series_id);
+  if (sErr) throw new Error(sErr.message);
+  return { ok: true as const };
+}
+
+/** Manager: stop a repeating entry. */
 export const stopRepeating = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => stopRepeatingSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const now = new Date().toISOString();
-    const { data: series, error: sReadErr } = await admin
-      .from("calendar_series")
-      .select("starts_on")
-      .eq("id", data.series_id)
-      .maybeSingle();
-    if (sReadErr) throw new Error(sReadErr.message);
-    if (!series) throw new Error("That repeating entry no longer exists.");
-
-    const { error: dErr } = await admin
-      .from("calendar_events")
-      .delete()
-      .eq("series_id", data.series_id)
-      .gte("starts_at", now);
-    if (dErr) throw new Error(dErr.message);
-    // `ends_on` has a CHECK against `starts_on`, so an entry stopped before its
-    // first date ends on that date rather than today. is_active = false is what
-    // actually stops it; the date is only for the record.
-    const today = dateFromNow(0);
-    const { error: sErr } = await admin
-      .from("calendar_series")
-      .update({
-        is_active: false,
-        ends_on: series.starts_on > today ? series.starts_on : today,
-        updated_at: now,
-      })
-      .eq("id", data.series_id);
-    if (sErr) throw new Error(sErr.message);
-    return { ok: true as const };
+    return stopRepeatingSeries(await adminClient(), data);
   });
+
+/**
+ * Cancel a date, or restore it. With `scope: "series"`, this date and every
+ * later one of the same repeat. The row is always kept.
+ */
+export async function cancelEventRows(admin: CalendarClient, data: CancelEventInput) {
+  const now = new Date().toISOString();
+  const status = data.cancelled ? "cancelled" : "scheduled";
+
+  if (data.scope === "event") {
+    const { error } = await admin
+      .from("calendar_events")
+      .update({ status, updated_at: now })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true as const, id: data.id, cancelled: data.cancelled };
+  }
+
+  // Series scope: this date and every future one. `id` is the event that was
+  // clicked, so resolve its series first.
+  const { data: ev, error: evErr } = await admin
+    .from("calendar_events")
+    .select("series_id, starts_at")
+    .eq("id", data.id)
+    .maybeSingle();
+  if (evErr) throw new Error(evErr.message);
+  if (!ev?.series_id) throw new Error("That entry does not repeat.");
+  const { error } = await admin
+    .from("calendar_events")
+    .update({ status, updated_at: now })
+    .eq("series_id", ev.series_id)
+    .gte("starts_at", ev.starts_at);
+  if (error) throw new Error(error.message);
+  return { ok: true as const, id: data.id, cancelled: data.cancelled };
+}
 
 export const cancelEvent = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => cancelEventSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-    const now = new Date().toISOString();
-    const status = data.cancelled ? "cancelled" : "scheduled";
-
-    if (data.scope === "event") {
-      const { error } = await admin
-        .from("calendar_events")
-        .update({ status, updated_at: now })
-        .eq("id", data.id);
-      if (error) throw new Error(error.message);
-      return { ok: true as const, id: data.id, cancelled: data.cancelled };
-    }
-
-    // Series scope: this date and every future one. `id` is the event that was
-    // clicked, so resolve its series first.
-    const { data: ev, error: evErr } = await admin
-      .from("calendar_events")
-      .select("series_id, starts_at")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (evErr) throw new Error(evErr.message);
-    if (!ev?.series_id) throw new Error("That entry does not repeat.");
-    const { error } = await admin
-      .from("calendar_events")
-      .update({ status, updated_at: now })
-      .eq("series_id", ev.series_id)
-      .gte("starts_at", ev.starts_at);
-    if (error) throw new Error(error.message);
-    return { ok: true as const, id: data.id, cancelled: data.cancelled };
+    return cancelEventRows(await adminClient(), data);
   });
+
+/** Delete one date outright, for a mistake made before anybody turned up. */
+export async function deleteEventRow(admin: CalendarClient, data: DeleteEventInput) {
+  // Check-ins cascade with the event, and their credits do NOT come back:
+  // deleting a class five people were checked in to would silently burn five
+  // sessions with no record that it happened. Delete is for a mistake made
+  // before anyone turned up; once they have, cancelling is the honest move
+  // (it keeps the row, the attendance and the RSVPs).
+  const { count, error: cErr } = await admin
+    .from("session_checkins")
+    .select("id", { count: "exact", head: true })
+    .eq("event_id", data.id);
+  if (cErr) throw new Error(cErr.message);
+  if ((count ?? 0) > 0) {
+    throw new Error(
+      `${count} ${count === 1 ? "person has" : "people have"} been checked in to this class, so deleting it would take their sessions with it. Cancel it instead.`,
+    );
+  }
+
+  const { error } = await admin.from("calendar_events").delete().eq("id", data.id);
+  if (error) throw new Error(error.message);
+  return { ok: true as const, id: data.id };
+}
 
 export const deleteEvent = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => deleteEventSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
-    const admin = await adminClient();
-
-    // Check-ins cascade with the event, and their credits do NOT come back:
-    // deleting a class five people were checked in to would silently burn five
-    // sessions with no record that it happened. Delete is for a mistake made
-    // before anyone turned up; once they have, cancelling is the honest move
-    // (it keeps the row, the attendance and the RSVPs).
-    const { count, error: cErr } = await admin
-      .from("session_checkins")
-      .select("id", { count: "exact", head: true })
-      .eq("event_id", data.id);
-    if (cErr) throw new Error(cErr.message);
-    if ((count ?? 0) > 0) {
-      throw new Error(
-        `${count} ${count === 1 ? "person has" : "people have"} been checked in to this class, so deleting it would take their sessions with it. Cancel it instead.`,
-      );
-    }
-
-    const { error } = await admin.from("calendar_events").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
-    return { ok: true as const, id: data.id };
+    return deleteEventRow(await adminClient(), data);
   });
