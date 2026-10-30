@@ -50,7 +50,12 @@ export const Route = createFileRoute("/api/manager/agent")({
           }
           const action = classified.action;
 
-          const result = await dispatch(action as ManagerAgentAction, body?.params ?? {}, actingAs);
+          const result = await dispatch(
+            action as ManagerAgentAction,
+            body?.params ?? {},
+            actingAs,
+            new URL(request.url).origin,
+          );
           // The version travels on EVERY response, not just the manifest. A
           // client that read the manifest at the start of a long import and
           // cannot re-read it mid-run would otherwise meet "2" as an

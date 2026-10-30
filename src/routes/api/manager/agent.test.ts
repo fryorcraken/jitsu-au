@@ -2336,16 +2336,35 @@ describe("manager agent route: the blog", () => {
       vi.useRealTimers();
     });
 
-    it("hands out a link to the live site that works for an hour", async () => {
+    it("hands out a link that works for an hour, to the stack that was asked", async () => {
       currentAdmin = fakeBlog([]).db;
       const before = Date.now();
       const link = await startUpload({ alt: "The mats" });
-      expect(link.upload_url).toBe("https://utsjitsu.com.au/api/manager/blog-image");
+      // These requests arrive on localhost: a local stack's tickets only
+      // verify on itself, so it hands out its own address.
+      expect(link.upload_url).toBe("http://localhost/api/manager/blog-image");
       expect(link.command).toContain(link.token);
-      expect(link.command).toContain("--data-binary @IMAGE_FILE");
+      expect(link.command).toContain("--data-binary '@IMAGE_FILE'");
       const minutes = (Date.parse(link.expires_at) - before) / 60_000;
       expect(minutes).toBeGreaterThan(59.9);
       expect(minutes).toBeLessThan(60.1);
+    });
+
+    // Anywhere else (a preview, the lovable.app address, an old domain), the
+    // live site: the one host that does not redirect the bearer header away.
+    it("sends every other host's link to the live site", async () => {
+      currentAdmin = fakeBlog([]).db;
+      const res = await (
+        await handlers()
+      ).POST({
+        request: new Request("https://preview.example.lovable.app/api/manager/agent", {
+          method: "POST",
+          headers: { authorization: `Bearer ${MINTED_TOKEN}`, "content-type": "application/json" },
+          body: JSON.stringify({ action: "start_blog_image_upload", params: {} }),
+        }),
+      });
+      const { result } = await res.json();
+      expect(result.upload_url).toBe("https://utsjitsu.com.au/api/manager/blog-image");
     });
 
     it("stores the image sent to it, with the same answer upload_blog_image gives", async () => {
@@ -2403,6 +2422,21 @@ describe("manager agent route: the blog", () => {
       expect(res.status).toBe(401);
       expect((await res.json()).error.code).toBe("link_expired");
       expect(fake.uploads).toEqual([]);
+    });
+
+    // A retry whose answer was lost, arriving after the hour: it must learn
+    // what its first attempt stored, not be sent off to upload a second copy.
+    it("still tells a late retry what the link stored", async () => {
+      const fake = fakeBlog([]);
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      const first = await (await send(link.token)).json();
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse(link.expires_at) + 1000);
+      const late = await send(link.token);
+      expect(late.status).toBe(409);
+      expect((await late.json()).error.details.path).toBe(first.result.path);
+      expect(fake.uploads).toHaveLength(1);
     });
 
     // The link is not a manager credential, and a manager credential is not a

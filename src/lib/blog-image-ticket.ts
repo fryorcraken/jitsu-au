@@ -22,7 +22,14 @@
 //   so a second upload with the same ticket is refused, and is told the path of
 //   the image the first one stored (that is usually a retry whose answer was
 //   lost, and the image it wanted is already there). No database table is
-//   needed: the bucket itself records that the link was used.
+//   needed: the bucket itself records that the link was used. That answer is
+//   given even after the link has expired, so a retry that arrives late is not
+//   told to start again and store a second copy.
+//
+//   The one gap, accepted: the image's extension comes from its bytes, so two
+//   uploads RACING on one link with files of different types land at
+//   different names and both are stored. Only the link's holder can do that,
+//   and all it costs is an unused file in the bucket.
 // - **It lasts an hour** (`BLOG_IMAGE_TICKET_TTL_MINUTES`), long enough for a
 //   slow phone connection, short enough that a ticket left in a transcript is
 //   dead by the time anyone reads it.
@@ -105,8 +112,22 @@ function fromBase64Url(text: string): Uint8Array<ArrayBuffer> {
   );
 }
 
-async function signingKey(secret: string): Promise<CryptoKey> {
-  if (!secret) throw new Error("No secret to sign upload links with.");
+/** The derived key per secret, so each request does not derive it again. */
+const keys = new Map<string, Promise<CryptoKey>>();
+
+function signingKey(secret: string): Promise<CryptoKey> {
+  if (!secret) return Promise.reject(new Error("No secret to sign upload links with."));
+  let key = keys.get(secret);
+  if (!key) {
+    key = deriveSigningKey(secret);
+    // A failed derivation is not kept, or it would fail every later request.
+    key.catch(() => keys.delete(secret));
+    keys.set(secret, key);
+  }
+  return key;
+}
+
+async function deriveSigningKey(secret: string): Promise<CryptoKey> {
   const subtle = webCrypto().subtle;
   const base = await subtle.importKey("raw", new TextEncoder().encode(secret), "HKDF", false, [
     "deriveKey",
@@ -168,15 +189,12 @@ export async function signBlogImageTicket(
 const INVALID = "That upload link is not valid. Ask for a new one with start_blog_image_upload.";
 
 /**
- * The ticket a bearer token carries, once its signature is checked and it has
- * not expired. Throws `BlogImageTicketError`. Says nothing about whether it has
- * been used: that is the bucket's to answer.
+ * The ticket a bearer token carries, once its signature is checked. Throws
+ * `BlogImageTicketError("invalid")`. Says nothing about whether it has expired
+ * (`assertBlogImageTicketLive`) or been used (the bucket's to answer), because
+ * a used link is answered with what it stored, expired or not.
  */
-export async function readBlogImageTicket(
-  secret: string,
-  token: string,
-  now: number = Date.now(),
-): Promise<BlogImageTicket> {
+export async function readBlogImageTicket(secret: string, token: string): Promise<BlogImageTicket> {
   if (!token.startsWith(BLOG_IMAGE_TICKET_PREFIX)) {
     throw new BlogImageTicketError("invalid", INVALID);
   }
@@ -204,34 +222,38 @@ export async function readBlogImageTicket(
   } catch {
     throw new BlogImageTicketError("invalid", INVALID);
   }
-  const expiresAt = parsed.e * 1000;
-  if (expiresAt <= now) {
-    throw new BlogImageTicketError(
-      "expired",
-      `That upload link has expired (they last ${BLOG_IMAGE_TICKET_TTL_MINUTES} minutes). Ask for a new one with start_blog_image_upload.`,
-    );
-  }
   return {
     id: parsed.i,
     issuer: parsed.u,
     ...(parsed.p && { post_id: parsed.p }),
     ...(parsed.n && { name: parsed.n }),
     ...(parsed.a && { alt: parsed.a }),
-    expires_at: expiresAt,
+    expires_at: parsed.e * 1000,
   };
+}
+
+/** Throws `BlogImageTicketError("expired")` once the ticket's hour is up. */
+export function assertBlogImageTicketLive(ticket: BlogImageTicket, now: number = Date.now()): void {
+  if (ticket.expires_at <= now) {
+    throw new BlogImageTicketError(
+      "expired",
+      `That upload link has expired (they last ${BLOG_IMAGE_TICKET_TTL_MINUTES} minutes). Ask for a new one with start_blog_image_upload.`,
+    );
+  }
 }
 
 /**
  * The command the assistant runs in its sandbox, with the file's path left as
  * IMAGE_FILE for it to fill in. Single quotes throughout: the token and the
- * address hold nothing a shell would expand.
+ * address hold nothing a shell would expand, and a phone's file names often
+ * hold spaces ("IMG 2041.jpg").
  */
 export function blogImageUploadCommand(uploadUrl: string, token: string): string {
   return [
     "curl -sS -X POST",
     `-H 'Authorization: Bearer ${token}'`,
     "-H 'Content-Type: application/octet-stream'",
-    "--data-binary @IMAGE_FILE",
+    "--data-binary '@IMAGE_FILE'",
     `'${uploadUrl}'`,
   ].join(" ");
 }

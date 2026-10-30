@@ -178,6 +178,7 @@ import {
   sniffBlogImageType,
 } from "@/lib/blog-image";
 import {
+  assertBlogImageTicketLive,
   BlogImageTicketError,
   blogImageUploadCommand,
   newBlogImageTicket,
@@ -185,7 +186,7 @@ import {
   signBlogImageTicket,
   type BlogImageTicket,
 } from "@/lib/blog-image-ticket";
-import { SITE_ORIGIN } from "@/lib/site-origin";
+import { linkOrigin } from "@/lib/site-origin";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
 /**
@@ -2144,17 +2145,21 @@ function agentBlogImageResult(
   };
 }
 
-/** Check bytes an agent sent are an image a post can show, and store them. */
+/**
+ * Check bytes an agent sent are an image a post can show, and store them. `id`
+ * names the stored file's id, for an upload link's ticket; otherwise it is
+ * fresh.
+ */
 async function storeAgentBlogImage(
   db: MembershipClient,
   bytes: Uint8Array,
-  file: { post_id?: string; name?: string; alt?: string; sourceUrl?: string },
+  file: { post_id?: string; id?: string; name?: string; alt?: string; sourceUrl?: string },
 ) {
   const type = agentBlogImageType(bytes);
   const name = blogImageFileName(type, file.name, file.sourceUrl);
   let stored: { path: string; url: string };
   try {
-    stored = await storeBlogImage(db, { post_id: file.post_id, name, type, bytes });
+    stored = await storeBlogImage(db, { post_id: file.post_id, id: file.id, name, type, bytes });
   } catch (e) {
     throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
   }
@@ -2184,14 +2189,20 @@ function blogImageTicketSecret(): string {
   return secret;
 }
 
-async function handleStartBlogImageUpload(params: unknown, actingAs: string) {
+async function handleStartBlogImageUpload(
+  params: unknown,
+  actingAs: string,
+  requestOrigin: string | undefined,
+) {
   const input = agentStartBlogImageUploadSchema.parse(params);
   const ticket = newBlogImageTicket(actingAs, input);
   const token = await signBlogImageTicket(blogImageTicketSecret(), ticket);
-  // The live address, wherever this was asked from. It is the one host that
-  // takes a credential without redirecting it away (CLAUDE.md, "The site's
-  // address"), and a ticket only verifies on the server that signed it.
-  const uploadUrl = `${SITE_ORIGIN}${BLOG_IMAGE_UPLOAD_PATH}`;
+  // The live address wherever this was asked from, except a loopback stack,
+  // which gets itself: a ticket only verifies on the server that signed it,
+  // and the live site is the one host that takes a credential without
+  // redirecting it away (CLAUDE.md, "The site's address"). Over MCP nothing
+  // says which host was asked, so it is always the live site.
+  const uploadUrl = `${linkOrigin(requestOrigin)}${BLOG_IMAGE_UPLOAD_PATH}`;
   return {
     upload_url: uploadUrl,
     method: "POST",
@@ -2232,13 +2243,7 @@ export async function uploadBlogImageWithTicket(request: Request) {
   try {
     ticket = await readBlogImageTicket(blogImageTicketSecret(), token);
   } catch (e) {
-    if (e instanceof BlogImageTicketError) {
-      throw new AgentError(
-        401,
-        e.reason === "expired" ? "link_expired" : "unauthorized",
-        e.message,
-      );
-    }
+    if (e instanceof BlogImageTicketError) throw new AgentError(401, "unauthorized", e.message);
     throw e;
   }
 
@@ -2261,15 +2266,26 @@ export async function uploadBlogImageWithTicket(request: Request) {
       throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
     }
   };
-  // Checked before the body is read, so a used link costs no upload.
+  // Checked before the body is read, so a used link costs no upload, and
+  // before the expiry, so a retry that arrives after the hour still learns
+  // what its first attempt stored.
   const earlier = await lookUp();
   if (earlier) throw alreadyUploaded(earlier, ticket);
+  try {
+    assertBlogImageTicketLive(ticket);
+  } catch (e) {
+    if (e instanceof BlogImageTicketError) throw new AgentError(401, "link_expired", e.message);
+    throw e;
+  }
 
   let bytes: Uint8Array;
   try {
-    bytes = await readCapped(request, MAX_BLOG_IMAGE_BYTES);
+    bytes = await readCapped(request);
   } catch (e) {
     if (e instanceof BlogImageError) throw new AgentError(422, "image_rejected", e.message);
+    // Usually the connection dropped mid-upload, which a retry fixes. Logged,
+    // so that a fault of ours reading the body is not mistaken for one forever.
+    console.error("[blog-image-upload] could not read the body:", e);
     throw new AgentError(
       400,
       "upload_interrupted",
@@ -2280,25 +2296,32 @@ export async function uploadBlogImageWithTicket(request: Request) {
     throw new AgentError(
       422,
       "image_rejected",
-      "No image arrived. Send the file itself as the request body (curl --data-binary @IMAGE_FILE).",
+      "No image arrived. Send the file itself as the request body (curl --data-binary '@IMAGE_FILE').",
     );
   }
-  const type = agentBlogImageType(bytes);
-  const name = blogImageFileName(type, ticket.name);
-  let stored: { path: string; url: string };
   try {
-    stored = await storeBlogImage(db, { ...where, name, type, bytes });
+    return await storeAgentBlogImage(db, bytes, { ...where, name: ticket.name, alt: ticket.alt });
   } catch (e) {
     // Two uploads racing on one link: the other one stored first. The bucket
     // refuses the second, and it is told what the first stored.
-    const raced = await lookUp().catch(() => null);
-    if (raced) throw alreadyUploaded(raced, ticket);
-    throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
+    if (e instanceof AgentError && e.code === "db_error") {
+      const raced = await lookUp().catch(() => null);
+      if (raced) throw alreadyUploaded(raced, ticket);
+    }
+    throw e;
   }
-  return agentBlogImageResult(stored, ticket.alt || name, { type, bytes: bytes.byteLength });
 }
 
-export async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
+/**
+ * Run one action. `requestOrigin` is the address the request came in on, where
+ * a front door knows it; only links an action hands out read it.
+ */
+export async function dispatch(
+  action: ManagerAgentAction,
+  params: unknown,
+  actingAs: string,
+  requestOrigin?: string,
+) {
   switch (action) {
     case "list_users":
       return handleListUsers(params);
@@ -2385,6 +2408,6 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
     case "upload_blog_image":
       return handleUploadBlogImage(params);
     case "start_blog_image_upload":
-      return handleStartBlogImageUpload(params, actingAs);
+      return handleStartBlogImageUpload(params, actingAs, requestOrigin);
   }
 }

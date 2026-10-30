@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertBlogImageTicketLive,
   BLOG_IMAGE_TICKET_PREFIX,
   BLOG_IMAGE_TICKET_TTL_MINUTES,
   BlogImageTicketError,
@@ -34,7 +35,9 @@ describe("blog image upload tickets", () => {
     expect(BLOG_IMAGE_TICKET_TTL_MINUTES).toBe(60);
     const token = await signBlogImageTicket(SECRET, ticket);
     expect(token.startsWith(BLOG_IMAGE_TICKET_PREFIX)).toBe(true);
-    expect(await readBlogImageTicket(SECRET, token, NOW + 59 * 60_000)).toEqual(ticket);
+    const read = await readBlogImageTicket(SECRET, token);
+    expect(read).toEqual(ticket);
+    expect(() => assertBlogImageTicketLive(read, NOW + 59 * 60_000)).not.toThrow();
   });
 
   it("gives every link its own id", () => {
@@ -44,11 +47,20 @@ describe("blog image upload tickets", () => {
     expect(a).not.toHaveProperty("post_id");
   });
 
-  it("stops working when the hour is up", async () => {
+  // Expiry is a separate check from the signature, so a used link can still
+  // be answered with what it stored after its hour is up.
+  it("stops working when the hour is up, but can still be read", async () => {
     const token = await signBlogImageTicket(SECRET, newBlogImageTicket(ISSUER, {}, NOW));
-    const e = await refusal(readBlogImageTicket(SECRET, token, NOW + 60 * 60_000 + 1000));
-    expect(e.reason).toBe("expired");
-    expect(e.message).toMatch(/start_blog_image_upload/);
+    const read = await readBlogImageTicket(SECRET, token);
+    let e: unknown;
+    try {
+      assertBlogImageTicketLive(read, NOW + 60 * 60_000 + 1000);
+    } catch (err) {
+      e = err;
+    }
+    expect(e).toBeInstanceOf(BlogImageTicketError);
+    expect((e as BlogImageTicketError).reason).toBe("expired");
+    expect((e as BlogImageTicketError).message).toMatch(/start_blog_image_upload/);
   });
 
   // The whole point of the signature: the contents are the caller's to read,
@@ -63,14 +75,14 @@ describe("blog image upload tickets", () => {
       .replace(/\//g, "_")
       .replace(/=+$/, "");
     const e = await refusal(
-      readBlogImageTicket(SECRET, `${BLOG_IMAGE_TICKET_PREFIX}${forged}.${sig}`, NOW),
+      readBlogImageTicket(SECRET, `${BLOG_IMAGE_TICKET_PREFIX}${forged}.${sig}`),
     );
     expect(e.reason).toBe("invalid");
   });
 
   it("refuses a ticket signed with another key", async () => {
     const token = await signBlogImageTicket("another-key", newBlogImageTicket(ISSUER, {}, NOW));
-    expect((await refusal(readBlogImageTicket(SECRET, token, NOW))).reason).toBe("invalid");
+    expect((await refusal(readBlogImageTicket(SECRET, token))).reason).toBe("invalid");
   });
 
   it.each([
@@ -80,7 +92,7 @@ describe("blog image upload tickets", () => {
     ["characters outside base64url", `${BLOG_IMAGE_TICKET_PREFIX}a+b.c/d`],
     ["nothing", ""],
   ])("refuses %s", async (_label, token) => {
-    expect((await refusal(readBlogImageTicket(SECRET, token, NOW))).reason).toBe("invalid");
+    expect((await refusal(readBlogImageTicket(SECRET, token))).reason).toBe("invalid");
   });
 
   it("will not sign with no secret", async () => {
@@ -92,7 +104,7 @@ describe("blog image upload tickets", () => {
       "https://utsjitsu.com.au/api/manager/blog-image",
       "utsu_x.y",
     );
-    expect(cmd).toContain("--data-binary @IMAGE_FILE");
+    expect(cmd).toContain("--data-binary '@IMAGE_FILE'");
     expect(cmd).toContain("-H 'Authorization: Bearer utsu_x.y'");
     expect(cmd.endsWith("'https://utsjitsu.com.au/api/manager/blog-image'")).toBe(true);
   });

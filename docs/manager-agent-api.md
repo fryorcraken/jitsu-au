@@ -527,22 +527,35 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
     raw bytes to `/api/manager/blog-image`
     (`src/routes/api/manager/blog-image.ts`) with the link's token as its
     bearer header, and gets back the same `path` / `url` / `markdown`. What
-    the token is and is not, all in `src/lib/blog-image-ticket.ts`: - **Not a manager credential.** It is a signed ticket (HMAC, key derived
-    by HKDF from the service-role key), and storing one image is all it can
-    do. That endpoint takes no other credential, and the agent endpoint does
-    not take a ticket. The upload re-checks that the manager who asked still
-    holds the role. - **Works once, for an hour.** The image is stored under the ticket's own
-    id, which the upload looks for first, so a second use is `409
-already_uploaded` with the first image's `path` / `url` / `markdown` in
-    `error.details` (usually a retry whose answer was lost). No table holds
-    tickets: the bucket is the record. A rejected or interrupted upload
-    stores nothing, so the same link can be used again. - **The link is always `SITE_ORIGIN`**, wherever it was asked from: a
-    ticket only verifies on the server that signed it, and the live address
-    is the one host that does not redirect a bearer header away. - **The sandbox has to be allowed to reach the site.** claude.ai's code
-    execution only reaches package registries by default, so the manager adds
-    the club's domain to its allowed domains once. Nothing on our side can do
-    that for them; the manifest tells the assistant to say so rather than
-    fall back to typing base64.
+    the token is and is not, all in `src/lib/blog-image-ticket.ts`:
+    - **Not a manager credential.** It is a signed ticket (HMAC, key derived
+      by HKDF from the service-role key), and storing one image is all it can
+      do. That endpoint takes no other credential, and the agent endpoint does
+      not take a ticket. The upload re-checks that the manager who asked still
+      holds the role.
+    - **Works once, for an hour.** The image is stored under the ticket's own
+      id, which the upload looks for first, so a second use is
+      `409 already_uploaded` with the first image's `path` / `url` /
+      `markdown` in `error.details` (usually a retry whose answer was lost).
+      That answer is given even after the hour is up, so a late retry is not
+      told to upload again. No table holds tickets: the bucket is the record.
+      A rejected or interrupted upload stores nothing, so the same link can be
+      used again. The one gap: two uploads racing on one link with files of
+      different types both land, because the file's extension is part of its
+      name. Only the link's holder can do that, and all it costs is an extra
+      unused file.
+    - **The link points at `SITE_ORIGIN`**, wherever it was asked from, by
+      `linkOrigin`: a ticket only verifies on the server that signed it, and
+      the live address is the one host that does not redirect a bearer header
+      away. A loopback stack asked over HTTP gets a link to itself. Over MCP
+      the SDK does not say which host was asked, so it is always the live
+      site.
+    - **The sandbox has to be allowed to reach the site.** claude.ai's code
+      execution only reaches package registries by default, so the manager adds
+      the club's domain to its allowed domains once. Nothing on our side can do
+      that for them; the manifest tells the assistant to say so rather than
+      fall back to typing base64.
+
   - **`delete_blog_post` has no confirm flag**, like `delete_invoice`: it is the
     caller's job to ask the manager first. It removes the post's comments with
     it (`ON DELETE CASCADE`), and writes an audit line to the server log.
