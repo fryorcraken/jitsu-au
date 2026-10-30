@@ -23,7 +23,7 @@
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
-    "@hookform/resolvers": "^5.9.2",
+    "@hookform/resolvers": "^6.0.2",
     "@lovable.dev/email-js": "0.6.0",
     "@lovable.dev/mcp-js": "^3.3.1",
     "@lovable.dev/webhooks-js": "^0.0.3",

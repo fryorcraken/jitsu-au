@@ -664,6 +664,13 @@ So upgrade the three together, to versions that agree, and keep them exact.
 `bun run typecheck` is the check that proves it — a duplicated router is
 invisible to `bun run build`.
 
+⚠️ **`@tanstack/react-start` 1.169 removes `.inputValidator()`** from server
+functions, with no alias, in favour of `.validator()`. Every server function
+here uses the old name, and so does the code Lovable writes, so going past the
+1.168 line is a rename across the repo plus a check that Lovable's editor
+writes the new name too. Until then, stay on 1.168.x. The build will not warn
+you: a removed builder method only fails at runtime, or under `typecheck`.
+
 ## Conventions & style
 
 - **Formatting (Prettier):** `printWidth: 100`, semicolons, **double quotes**,
