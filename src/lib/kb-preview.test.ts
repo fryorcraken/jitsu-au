@@ -78,6 +78,35 @@ describe("articlePreview", () => {
     expect(articlePreview(SYLLABUS, "wrist-lock").truncated).toBe(false);
   });
 
+  // The bug that shipped: the club's technique lists sit straight under their
+  // headings with no blank line, which makes heading and list one block, and
+  // every card for one of them said nothing was written there.
+  it("keeps a list written straight under its heading", () => {
+    const body = [
+      "## Strikes",
+      "",
+      "### Open hand",
+      "- Palm heel jab and cross",
+      "- Forearm (inner/outer)",
+      "",
+      "### Closed fists",
+      "- Jab",
+    ].join("\n");
+    const preview = articlePreview(body, "open-hand");
+    expect(preview.heading).toBe("Open hand");
+    expect(preview.markdown).toBe("- Palm heel jab and cross\n- Forearm (inner/outer)");
+    expect(preview.truncated).toBe(false);
+
+    // And a parent section still runs on through its children.
+    expect(articlePreview(body, "strikes").markdown).toContain("- Jab");
+  });
+
+  it("still says nothing is there when nothing is", () => {
+    expect(articlePreview("### Open hand\n\n### Closed fists\n- Jab", "open-hand").markdown).toBe(
+      "",
+    );
+  });
+
   it("answers to a pinned anchor", () => {
     const preview = articlePreview("## How grading works {#grading}\n\nTwice a year.", "grading");
     expect(preview.heading).toBe("How grading works");

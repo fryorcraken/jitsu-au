@@ -48,34 +48,48 @@ export function articlePreview(bodyMd: string, hash?: string): KbPreview {
   const fragment = hash ? `#${hash.replace(/^#/, "")}` : "";
   const target = fragment ? findHeadingForHash(fragment, headings) : null;
 
-  let start = 0;
-  let end = blocks.length;
+  let passage = blocks.map((block) => block.markdown);
   if (target) {
     const blockIndex = new Map(blocks.map((block) => [block.id, block.index]));
     const headingIndex = blockIndex.get(target.blockId) ?? 0;
-    // Start AFTER the heading block: the card already titles itself with it.
-    start = headingIndex + 1;
     const nextHeading = headings.find(
       (heading) =>
         (blockIndex.get(heading.blockId) ?? 0) > headingIndex && heading.depth <= target.depth,
     );
-    if (nextHeading) end = blockIndex.get(nextHeading.blockId) ?? end;
+    const end = nextHeading
+      ? (blockIndex.get(nextHeading.blockId) ?? blocks.length)
+      : blocks.length;
+
+    // The heading LINE comes off, not the heading's whole block: the card
+    // already titles itself with it. A block is whatever sits between blank
+    // lines, and a list written straight under its heading with no blank line
+    // between them is one block with the heading:
+    //
+    //   ### Open hand
+    //   - Palm heel jab and cross
+    //
+    // Most of the club's technique lists are written that way. Dropping the
+    // whole block showed "nothing is written under this heading" for every one.
+    const rest = blocks[headingIndex].markdown.split("\n").slice(1).join("\n").trim();
+    passage = [
+      ...(rest ? [rest] : []),
+      ...blocks.slice(headingIndex + 1, end).map((block) => block.markdown),
+    ];
   }
 
-  const passage = blocks.slice(start, end);
   const shown: string[] = [];
   let chars = 0;
-  for (const block of passage) {
+  for (const markdown of passage) {
     // The first block always goes in, however long: an empty card for a
     // passage that opens with one long paragraph would be the preview failing
     // at the only thing it is for. After that, a block goes in only if it
     // fits, so one long one cannot carry the card far past the budget.
     if (shown.length > 0) {
       if (shown.length >= PREVIEW_MAX_BLOCKS) break;
-      if (chars + block.markdown.length > PREVIEW_MAX_CHARS) break;
+      if (chars + markdown.length > PREVIEW_MAX_CHARS) break;
     }
-    shown.push(block.markdown);
-    chars += block.markdown.length;
+    shown.push(markdown);
+    chars += markdown.length;
   }
 
   return {
