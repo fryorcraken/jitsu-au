@@ -9,6 +9,7 @@
 // and on the server to actually spend it, so the warning a manager reads and the
 // credit that moves can never disagree.
 import { CLUB_TIME_ZONE, clubLocalDate } from "./calendar";
+import { ageOn } from "./dates";
 import { membershipStatusLabel } from "./status-labels";
 import { isUnpaid } from "./validation";
 import type { CheckInWarning, CoverageSource } from "./validation";
@@ -420,21 +421,4 @@ export function rosterHouseholdFields(input: {
     guardian_name: input.guardianName,
     age: isDependant ? ageOn(input.dateOfBirth, input.now ?? new Date()) : null,
   };
-}
-
-/**
- * Whole years from `dateOfBirth` to `now`, or null when there is no usable date.
- *
- * Not derived from a day count: a leap year makes that wrong by a day around a
- * birthday, and "10" turning into "9" on the wrong morning is exactly the kind
- * of small wrongness a manager stops trusting the column over.
- */
-function ageOn(dateOfBirth: string | null, now: Date): number | null {
-  if (!dateOfBirth) return null;
-  const born = new Date(`${dateOfBirth}T00:00:00Z`);
-  if (Number.isNaN(born.getTime())) return null;
-  let age = now.getUTCFullYear() - born.getUTCFullYear();
-  const monthDiff = now.getUTCMonth() - born.getUTCMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && now.getUTCDate() < born.getUTCDate())) age -= 1;
-  return age >= 0 ? age : null;
 }
