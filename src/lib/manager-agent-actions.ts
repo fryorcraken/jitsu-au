@@ -217,7 +217,7 @@ export function json(
  * but confusing, and a trap if a future handler ever dispatches on method.
  * Reject explicitly instead.
  */
-export function methodNotAllowed(): Response {
+export function methodNotAllowed(allow = "GET, POST"): Response {
   return new Response(
     JSON.stringify({
       ok: false,
@@ -228,7 +228,7 @@ export function methodNotAllowed(): Response {
       headers: {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
-        allow: "GET, POST",
+        allow,
       },
     },
   );
@@ -2096,6 +2096,16 @@ async function handleUploadBlogImage(params: unknown) {
     }
     throw e;
   }
+  return storeAgentBlogImage(await adminClient(), bytes, {
+    post_id: input.post_id,
+    name: input.name,
+    alt: input.alt,
+    sourceUrl: sourceUrl ?? input.url,
+  });
+}
+
+/** The image's type, read off its bytes, or a refusal saying it is none of the four. */
+function agentBlogImageType(bytes: Uint8Array) {
   const type = sniffBlogImageType(bytes);
   if (!type) {
     throw new AgentError(
@@ -2104,21 +2114,38 @@ async function handleUploadBlogImage(params: unknown) {
       "That is not a PNG, JPEG, WebP or GIF image. A post can only show those four.",
     );
   }
-  const name = blogImageFileName(type, input.name, sourceUrl ?? input.url);
-  const db = await adminClient();
-  let stored: { path: string; url: string };
-  try {
-    stored = await storeBlogImage(db, { post_id: input.post_id, name, type, bytes });
-  } catch (e) {
-    throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
-  }
+  return type;
+}
+
+/** What every route into the bucket reports about the image it stored. */
+function agentBlogImageResult(
+  stored: { path: string; url: string },
+  alt: string,
+  extra: { type?: string; bytes?: number },
+) {
   return {
     path: stored.path,
     url: stored.url,
-    markdown: blogImageMarkdown(input.alt || name, stored.url),
-    type,
-    bytes: bytes.byteLength,
+    markdown: blogImageMarkdown(alt, stored.url),
+    ...extra,
   };
+}
+
+/** Check bytes an agent sent are an image a post can show, and store them. */
+async function storeAgentBlogImage(
+  db: MembershipClient,
+  bytes: Uint8Array,
+  file: { post_id?: string; name?: string; alt?: string; sourceUrl?: string },
+) {
+  const type = agentBlogImageType(bytes);
+  const name = blogImageFileName(type, file.name, file.sourceUrl);
+  let stored: { path: string; url: string };
+  try {
+    stored = await storeBlogImage(db, { post_id: file.post_id, name, type, bytes });
+  } catch (e) {
+    throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
+  }
+  return agentBlogImageResult(stored, file.alt || name, { type, bytes: bytes.byteLength });
 }
 
 export async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
