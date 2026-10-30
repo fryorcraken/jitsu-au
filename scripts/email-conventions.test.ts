@@ -87,7 +87,13 @@ describe("sending email", () => {
     const offenders = sourceFiles().filter((file) => {
       if (file === IDENTITY) return false;
       const source = read(file);
-      return source.includes("notify.jitsu.au") || /const SITE_NAME\s*=/.test(source);
+      // The current sending domain, and the one it replaced in October 2026,
+      // so a stale copy of the old address cannot hide anywhere either.
+      return (
+        source.includes("notify.utsjitsu.com.au") ||
+        source.includes("notify.jitsu.au") ||
+        /const SITE_NAME\s*=/.test(source)
+      );
     });
     expect(offenders, `import SENDER_DOMAIN / FROM / SITE_NAME from ${IDENTITY}`).toEqual([]);
   });

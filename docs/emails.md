@@ -14,11 +14,14 @@ goes, and whether it could be put back together later from the database alone.
 Every email goes out through **`sendEmail`** in `src/lib/send-email.server.ts`,
 and every email is signed by the identity in `src/lib/email-sender.ts`:
 
-- **From:** `UTS Jitsu <noreply@notify.jitsu.au>`. `notify.jitsu.au` is the
-  sending domain (Mailgun, via Lovable), and the `From` address has to sit on it
-  so DKIM and SPF align under DMARC. It stays on `jitsu.au` even though the site
-  itself moved to `utsjitsu.com.au`: it moves only if the sending setup moves
-  with it.
+- **From:** `UTS Jitsu <noreply@notify.utsjitsu.com.au>`. `notify.utsjitsu.com.au`
+  is the sending domain (Lovable Emails, delegated to Lovable's nameservers),
+  and the `From` address has to sit on it so DKIM and SPF align under DMARC. It
+  replaced `notify.jitsu.au` in October 2026, following the site's own move to
+  `utsjitsu.com.au`. The constant must always name the domain the project's
+  Lovable email setup is configured for, and a build changing it must not be
+  published until that domain shows as verified in More -> Emails, or every
+  email, sign-in links included, is refused.
 - **Name:** `SITE_NAME` ("UTS Jitsu"), used in subjects and greetings.
 - **Links:** built on `SITE_ORIGIN` from `src/lib/seo.ts`, the site's one
   canonical origin.
