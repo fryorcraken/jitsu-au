@@ -151,4 +151,15 @@ describe("an interest registration under its limit", () => {
     });
     expect(insert).toHaveBeenCalledOnce();
   });
+  it("does not promise an email on a retry of a registration already filed", async () => {
+    // The first attempt's confirmation may have been held back by a cap, and
+    // this call cannot tell, so it must not say "we'll email you" (#52).
+    limitPublicForm.mockResolvedValue(undefined);
+    const insert = vi.fn().mockResolvedValue({ error: { code: "23505", message: "dup" } });
+    createClient.mockReturnValue({ from: () => ({ insert }) });
+    const fn = (await handler("interest")) as unknown as Runnable;
+
+    await expect(fn.run(interest)).resolves.toEqual({ ok: true, duplicate: true, emailed: false });
+    expect(sendInterestEmails).not.toHaveBeenCalled();
+  });
 });

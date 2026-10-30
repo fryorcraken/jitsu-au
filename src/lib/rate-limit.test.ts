@@ -66,13 +66,18 @@ describe("networkKey", () => {
 });
 
 describe("describeWait", () => {
-  it("rounds up, so nobody is told to come back before they can", () => {
+  it("rounds minutes up, so nobody is told to come back before they can", () => {
     expect(describeWait(1)).toBe("a minute");
     expect(describeWait(61)).toBe("about 2 minutes");
     expect(describeWait(25 * 60)).toBe("about 25 minutes");
+    expect(describeWait(59 * 60 + 1)).toBe("about an hour");
+  });
+
+  it("rounds hours to the nearest, so a minute past the hour is not two hours", () => {
     expect(describeWait(60 * 60)).toBe("about an hour");
-    expect(describeWait(60 * 60 + 1)).toBe("about 2 hours");
-    expect(describeWait(19 * 3600)).toBe("about 19 hours");
+    expect(describeWait(61 * 60)).toBe("about an hour");
+    expect(describeWait(90 * 60)).toBe("about 2 hours");
+    expect(describeWait(19 * 3600 - 600)).toBe("about 19 hours");
   });
 });
 

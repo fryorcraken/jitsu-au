@@ -71,10 +71,11 @@ export const submitInterest = createServerFn({ method: "POST" })
     if (error) {
       // This exact registration is already filed. Report success (it IS
       // recorded) and, crucially, do not send the emails a second time. Nor
-      // claim they never went: the first attempt sent them, as far as anyone
-      // here can tell.
+      // promise one: this call sent nothing and cannot tell whether the first
+      // attempt's confirmation went or was held back by a cap (#52), so the
+      // page points at its own button instead.
       if (error.code === UNIQUE_VIOLATION)
-        return { ok: true as const, duplicate: true, emailed: true };
+        return { ok: true as const, duplicate: true, emailed: false };
       throw new Error(error.message);
     }
 

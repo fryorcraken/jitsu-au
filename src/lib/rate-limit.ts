@@ -137,12 +137,17 @@ export function networkKey(ip: string | null | undefined): string | null {
   return `${groups.slice(0, 4).join(":")}::/64`;
 }
 
-/** "about 25 minutes", "about 3 hours": how long somebody is asked to wait. */
+/**
+ * "about 25 minutes", "about 3 hours": how long somebody is asked to wait.
+ * Minutes round up, so nobody under an hour is told to come back too soon;
+ * hours round to the nearest, since "about" covers the rest and rounding up
+ * would call 61 minutes "about 2 hours".
+ */
 export function describeWait(seconds: number): string {
   const minutes = Math.max(1, Math.ceil(seconds / 60));
   if (minutes === 1) return "a minute";
   if (minutes < 60) return `about ${minutes} minutes`;
-  const hours = Math.ceil(minutes / 60);
+  const hours = Math.round(minutes / 60);
   return hours === 1 ? "about an hour" : `about ${hours} hours`;
 }
 
