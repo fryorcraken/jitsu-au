@@ -23,7 +23,7 @@ export const Route = createFileRoute("/about")({
 const pillars = [
   {
     title: "Our approach to self-defence",
-    body: "Our focus is practical self-defence through Japanese Jiu-Jitsu. We train hard: techniques are tested against a partner who resists, because that is how you find out they work. We also train safely. Resistance builds up as your skill does, and the moment someone taps or shows discomfort, their partner stops.",
+    body: "Our focus is practical self-defence through Japanese Jiu-Jitsu. We train hard: techniques are tested against a partner who resists, because that is how you find out they work. We also train safely. Resistance builds up as your skill does, and you're always in control: tap and your partner stops.",
   },
   {
     title: "An inclusive community",
