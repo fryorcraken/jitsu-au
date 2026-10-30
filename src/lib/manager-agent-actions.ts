@@ -43,6 +43,8 @@ import {
   agentGetBlogPostSchema,
   agentSaveBlogPostSchema,
   agentUploadBlogImageSchema,
+  agentStartBlogImageUploadSchema,
+  MAX_BLOG_IMAGE_BYTES,
   agentSaveSiteBannerSchema,
   siteBannerSchema,
 } from "@/lib/validation";
@@ -161,6 +163,7 @@ import {
   BlogSlugTakenError,
   createBlogPostRow,
   deleteBlogPostRow,
+  findBlogImage,
   listBlogPostRows,
   loadBlogPostRow,
   storeBlogImage,
@@ -171,8 +174,18 @@ import {
   blogImageFileName,
   blogImageMarkdown,
   fetchBlogImage,
+  readCapped,
   sniffBlogImageType,
 } from "@/lib/blog-image";
+import {
+  BlogImageTicketError,
+  blogImageUploadCommand,
+  newBlogImageTicket,
+  readBlogImageTicket,
+  signBlogImageTicket,
+  type BlogImageTicket,
+} from "@/lib/blog-image-ticket";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
 /**
@@ -2148,6 +2161,143 @@ async function storeAgentBlogImage(
   return agentBlogImageResult(stored, file.alt || name, { type, bytes: bytes.byteLength });
 }
 
+// ---- action: start_blog_image_upload, and the upload it hands out ----
+// Why the link exists and what it may do: src/lib/blog-image-ticket.ts.
+
+/** Where an upload link sends the bytes. */
+const BLOG_IMAGE_UPLOAD_PATH = "/api/manager/blog-image";
+
+/**
+ * The secret upload links are signed with. Only the server has the
+ * service-role key; see blog-image-ticket.ts for why it is derived from, not
+ * used as, the key.
+ */
+function blogImageTicketSecret(): string {
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret) {
+    throw new AgentError(
+      503,
+      "upload_links_unavailable",
+      "Upload links are not available on this server just now. Send the image with upload_blog_image instead.",
+    );
+  }
+  return secret;
+}
+
+async function handleStartBlogImageUpload(params: unknown, actingAs: string) {
+  const input = agentStartBlogImageUploadSchema.parse(params);
+  const ticket = newBlogImageTicket(actingAs, input);
+  const token = await signBlogImageTicket(blogImageTicketSecret(), ticket);
+  // The live address, wherever this was asked from. It is the one host that
+  // takes a credential without redirecting it away (CLAUDE.md, "The site's
+  // address"), and a ticket only verifies on the server that signed it.
+  const uploadUrl = `${SITE_ORIGIN}${BLOG_IMAGE_UPLOAD_PATH}`;
+  return {
+    upload_url: uploadUrl,
+    method: "POST",
+    token,
+    expires_at: new Date(ticket.expires_at).toISOString(),
+    max_bytes: MAX_BLOG_IMAGE_BYTES,
+    command: blogImageUploadCommand(uploadUrl, token),
+    how: "Run command in a shell with IMAGE_FILE replaced by the image file's path. Send the file's bytes as the request body, as they are: not base64, not a form. The answer is { ok: true, result: { path, url, markdown } }. This link stores one image and stops working at expires_at.",
+  };
+}
+
+/** The image a used ticket already stored, as the refusal a second upload gets. */
+function alreadyUploaded(stored: { path: string; url: string }, ticket: BlogImageTicket) {
+  const name = stored.path.slice(stored.path.lastIndexOf("/") + 1 + ticket.id.length + 1);
+  return new AgentError(
+    409,
+    "already_uploaded",
+    "This upload link has already stored an image, and works only once. If this was a retry, that image is the one you sent: use the path and markdown here. To add another image, ask for a new link with start_blog_image_upload.",
+    agentBlogImageResult(stored, ticket.alt || name, {}),
+  );
+}
+
+/**
+ * `POST /api/manager/blog-image`: store the image in the request body under an
+ * upload link's ticket. The bearer token is the ticket, never a manager's own
+ * credential, and nothing else is reachable with it.
+ */
+export async function uploadBlogImageWithTicket(request: Request) {
+  const token = bearerToken(request.headers.get("authorization"));
+  if (!token) {
+    throw new AgentError(
+      401,
+      "unauthorized",
+      "Missing upload link token. Send it as Authorization: Bearer <token>, as start_blog_image_upload's command does.",
+    );
+  }
+  let ticket: BlogImageTicket;
+  try {
+    ticket = await readBlogImageTicket(blogImageTicketSecret(), token);
+  } catch (e) {
+    if (e instanceof BlogImageTicketError) {
+      throw new AgentError(
+        401,
+        e.reason === "expired" ? "link_expired" : "unauthorized",
+        e.message,
+      );
+    }
+    throw e;
+  }
+
+  // The link is only as good as the manager who asked for it is today.
+  const db = await adminClient();
+  const { data: isMgr, error: roleErr } = await db.rpc("has_role", {
+    _user_id: ticket.issuer,
+    _role: "manager",
+  });
+  if (roleErr) throw new AgentError(500, "db_error", roleErr.message);
+  if (!isMgr) {
+    throw new AgentError(403, "forbidden", "Whoever asked for this link is no longer a manager.");
+  }
+
+  const where = { post_id: ticket.post_id, id: ticket.id };
+  const lookUp = async () => {
+    try {
+      return await findBlogImage(db, where);
+    } catch (e) {
+      throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
+    }
+  };
+  // Checked before the body is read, so a used link costs no upload.
+  const earlier = await lookUp();
+  if (earlier) throw alreadyUploaded(earlier, ticket);
+
+  let bytes: Uint8Array;
+  try {
+    bytes = await readCapped(request, MAX_BLOG_IMAGE_BYTES);
+  } catch (e) {
+    if (e instanceof BlogImageError) throw new AgentError(422, "image_rejected", e.message);
+    throw new AgentError(
+      400,
+      "upload_interrupted",
+      "The image did not arrive in full. Send it again with the same link.",
+    );
+  }
+  if (bytes.byteLength === 0) {
+    throw new AgentError(
+      422,
+      "image_rejected",
+      "No image arrived. Send the file itself as the request body (curl --data-binary @IMAGE_FILE).",
+    );
+  }
+  const type = agentBlogImageType(bytes);
+  const name = blogImageFileName(type, ticket.name);
+  let stored: { path: string; url: string };
+  try {
+    stored = await storeBlogImage(db, { ...where, name, type, bytes });
+  } catch (e) {
+    // Two uploads racing on one link: the other one stored first. The bucket
+    // refuses the second, and it is told what the first stored.
+    const raced = await lookUp().catch(() => null);
+    if (raced) throw alreadyUploaded(raced, ticket);
+    throw blogAgentError(e, "upload_blog_image_failed", "Could not store the image.");
+  }
+  return agentBlogImageResult(stored, ticket.alt || name, { type, bytes: bytes.byteLength });
+}
+
 export async function dispatch(action: ManagerAgentAction, params: unknown, actingAs: string) {
   switch (action) {
     case "list_users":
@@ -2234,5 +2384,7 @@ export async function dispatch(action: ManagerAgentAction, params: unknown, acti
       return handleDeleteBlogPost(params, actingAs);
     case "upload_blog_image":
       return handleUploadBlogImage(params);
+    case "start_blog_image_upload":
+      return handleStartBlogImageUpload(params, actingAs);
   }
 }
