@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { buildClubJsonLd, buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { beginnerDaysShort, weeklySchedule } from "@/lib/schedule";
 import { VENUE_ADDRESS_SHORT, VENUE_BUILDING, VENUE_NAME } from "@/lib/venue";
-import heroAsset from "@/assets/training1.jpg.asset.json";
+import heroAsset from "@/assets/hero-dscf0691.jpg.asset.json";
 
 export const Route = createFileRoute("/")({
   head: () => ({
