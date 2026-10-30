@@ -34,7 +34,12 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // Spelled out rather than spread from `reactHooks.configs.recommended`:
+      // from v6 that preset also turns on the React Compiler rules, which
+      // flag dozens of working components. Adopting them is a refactor of its
+      // own, not part of a version bump.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       "no-restricted-imports": [
         "error",
         {
@@ -49,6 +54,22 @@ export default tseslint.config(
       ],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
+      // ESLint 10's recommended set asks every rethrow to carry `{ cause: e }`.
+      // Not here: a server function's error is serialized to the browser with
+      // all of its own properties, `cause` included, so following the rule
+      // would ship the raw upstream error a rethrow exists to replace with
+      // words a person can act on. Log the original server side instead.
+      "preserve-caught-error": "off",
+    },
+  },
+  {
+    // A route file exports only `Route` and keeps its page components beside
+    // it, which is TanStack Router's file convention. From v0.5 this rule
+    // flags every such component; hot reload for them is the router plugin's
+    // job (it splits the components out), not something this rule can judge.
+    files: ["src/routes/**/*.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
     },
   },
   eslintPluginPrettier,
