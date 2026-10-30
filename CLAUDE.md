@@ -57,7 +57,7 @@ requests, the CI logs, and the screenshot artifacts.
     run **2026-09-04**: **76 migration files, 2 reported unapplied**, both then
     allowlisted as already-live re-emissions (see below), so the next run
     reports 0 and lists them separately. Also
-    **18 client grants live, 18 expected, 0 unexpected** as of **2026-10-25**,
+    **18 client grants live, 18 expected, 0 unexpected** as of **2026-10-30**,
     read with the query that also sees column, `PUBLIC` and inherited grants,
     and none of those exist. So `supabase/lint/client-grants-expected.txt` is
     verified against production as of that date, not just against the
