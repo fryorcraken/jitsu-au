@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronDown, Download } from "lucide-react";
+import { ChevronDown, Contact, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
@@ -50,6 +50,7 @@ import { emailVerificationLabel, isEmailVerified } from "@/lib/email-verificatio
 import { isSignedUrlFresh, shouldFetchSignedUrl } from "@/lib/signed-url-cache";
 import type { SignedUrlEntry } from "@/lib/signed-url-cache";
 import { getClubUser, setClubUserEmail, setClubUserKitSizes } from "@/lib/club-user.functions";
+import { buildVCard, vCardFileName } from "@/lib/vcard";
 import { attachCheckInCoverage, transferCheckInCoverage } from "@/lib/checkin.functions";
 import { getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
@@ -70,6 +71,36 @@ export const Route = createFileRoute("/_authenticated/manager/users_/$userId")({
 
 type Detail = Awaited<ReturnType<typeof getClubUser>>;
 type Waiver = Detail["waivers"][number];
+
+/**
+ * Hand the browser this person's contact card as a `.vcf` file. On Android
+ * opening the download offers to add it to Contacts, and iOS shows the card
+ * with an "Add to Contacts" button, so no app or account is needed.
+ */
+function downloadContactCard(detail: Detail, userId: string) {
+  const card = buildVCard({
+    ...detail.profile,
+    // A dependant's record often has no guardian name typed on it, but the
+    // household always knows who holds their account. `||` rather than `??`,
+    // because a blank name on the record is no name either.
+    guardian_name: detail.profile.guardian_name?.trim() || detail.household.guardian?.name || null,
+    email: detail.user.email,
+    // The host being browsed, like the calendar link on /account: a card saved
+    // from a preview or a local stack opens that stack's record, not a
+    // production page for an id that does not exist there.
+    url: `${window.location.origin}/manager/users/${userId}`,
+  });
+  const url = URL.createObjectURL(new Blob([card], { type: "text/vcard;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = vCardFileName(detail.profile);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Not revoked straight away: Safari and an installed app hand the download
+  // off after the click returns, and a revoked URL gives them an empty file.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 /** A copy of `record` without `key`. */
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -843,8 +874,13 @@ function ManagerUserPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             {/* Every person has an email (it lives on their login record), so a
-                missing one here means the lookup failed, not that we hold none. */}
-            <span>{summary.email ?? "Email lookup failed"}</span>
+                missing one here means the lookup failed, not that we hold none.
+                It also says what that does to the contact card, which would
+                otherwise sit in somebody's phone for years looking complete. */}
+            <span>
+              {summary.email ??
+                "Email lookup failed, so a contact card downloaded now will not include one. Reload to try again."}
+            </span>
             {/* A dependant has no mailbox of their own, so this is their
                 guardian's address and the page has to say so. Without it a
                 manager reads a child's page and believes they can write to the
@@ -865,6 +901,9 @@ function ManagerUserPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => downloadContactCard(detail, userId)}>
+            <Contact className="mr-1 h-4 w-4" /> Download contact
+          </Button>
           <Button asChild variant="outline">
             <Link to="/manager/users">Back to users</Link>
           </Button>
