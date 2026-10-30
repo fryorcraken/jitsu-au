@@ -20,6 +20,7 @@ import { clearCacheFor } from "../lib/local-cache";
 import { writeLastVisit } from "../lib/last-visit";
 import { isResumablePath } from "../lib/pwa";
 import { canonicalUrl } from "@/lib/seo";
+import { getSiteBanner } from "@/lib/site-banner.functions";
 
 // `data-page-state` marks a page that rendered a boundary instead of itself.
 // The end-to-end tour (e2e/tour/site.spec.ts) treats its presence as a
@@ -169,6 +170,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
     ],
   }),
+  // The site banner (`docs/site-banner.md`), read here so the server draws it
+  // into the page rather than the browser inserting it a round trip later and
+  // pushing everything down. Never throws: a page is never lost to its notice.
+  loader: async () => ({ siteBanner: await getSiteBanner().catch(() => null) }),
+  // A notice changes a few times a term; moving between pages should not
+  // re-ask. A manager's save refreshes it at once (`manager.site-banner.tsx`).
+  staleTime: 5 * 60_000,
   shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,

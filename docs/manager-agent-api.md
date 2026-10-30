@@ -300,6 +300,10 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   turns it off and keeps the message; the merged banner then has to pass
   `siteBannerSchema`, the screen's own rules (`400 invalid_params` otherwise).
   It refuses with `503` rather than merge over a banner it could not read.
+  **Its `link_href` can only be a page on this site** (`400 invalid_params`
+  otherwise): an outside address is set on the screen, because a club-branded
+  link to another site across every page is what a leaked token would want. A
+  stored outside link survives a call that changes other fields.
   **Unlike `get_club_settings`, this one is writable**, deliberately: the banner
   is public text, moves no money and no replies, and is undone by saving again,
   the same footing as `save_blog_post`. Product rules: `docs/site-banner.md`.

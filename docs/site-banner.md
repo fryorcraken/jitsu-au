@@ -10,30 +10,46 @@ on or off; nobody has to change code to do either.
 - **Visitors** see it above the header on every page that uses the public
   layout, until they close it. When it is off, nothing renders at all: no empty
   bar, no gap.
-- **Closing it is per message.** The browser remembers which banner it closed
-  (a fingerprint of the message and the link), so a new message, or the same
-  message with a new link, is shown again to everybody. Turning the same notice
-  off and back on does not bring it back for someone who already closed it.
-- **The link is dropped where following it would hurt.** On the page it points
-  at (on `/register-interest`, a banner linking there still shows its message,
-  the most useful place for "free trials are paused", but not a link to where
-  you already are), and on `/waiver`, where the whole line being a tap target
-  could carry somebody away from a half-filled form with health answers and a
-  signature in it. The message shows on both.
+- **It arrives with the page.** The root route's loader reads it, so the server
+  draws it into the HTML and nothing jumps down when the page finishes loading.
+  That matters on a phone: a bar that appears a second late moves the page
+  under somebody's thumb, and their tap lands on the banner instead.
+- **Closing it is per message, and kept in a cookie.** The cookie holds a
+  fingerprint of the message and the link, and the server reads it before it
+  draws the page, so a closed banner never flashes up again. A new message, or
+  the same message with a new link, is shown again to everybody. Turning the
+  same notice off and back on does not bring it back for someone who already
+  closed it. (A cookie and not localStorage for exactly that reason: the server
+  cannot read localStorage.)
+- **The link is dropped where following it would hurt.** The message still
+  shows in both cases:
+  - on the forms (`/waiver`, `/register-interest`, `/contact`), because the whole
+    line is a tap target and a stray tap would carry somebody away from a form
+    they are partway through. The waiver holds health answers and a signature.
+  - on the page the link points at, since a link to where you already are does
+    nothing useful. A link to a section of that page (`/faq#trial` on `/faq`) is
+    kept, because jumping to it is the point.
+- **A link to this site stays in the app.** A page here, or a full address to
+  this site (`https://utsjitsu.com.au/classes`), moves within the app when
+  tapped rather than reloading it. Other sites open as an ordinary link.
 - **A failed read shows no banner.** It is a notice, not something a visitor is
-  waiting on, so the page renders without it rather than with an error where it
-  would be. The failure is logged.
-- **Changes reach visitors within a few minutes.** The public read is cached
-  for a minute (and an older copy may be served for a few more while it
-  refreshes), and a visitor's open tab keeps what it fetched for five minutes,
-  so every page view is not a database read. The manager who saved sees it on
-  their own device straight away.
+  waiting on, so the page renders without it rather than with an error where
+  it would be. The failure is logged.
+- **When a change reaches people.** Every fresh page load reads the current
+  banner (nothing caches it, because the answer depends on the visitor's cookie
+  and a manager must see their own save). Moving between pages in a tab that is
+  already open reuses what that tab read for up to five minutes. The manager who
+  saved sees it on their next page straight away.
 
 ## Managers
 
 `/manager/site-banner` ("Site banner" in the manager sidebar), and the manager
 agent API's `get_site_banner` / `save_site_banner` (`docs/manager-agent-api.md`).
-Both read and write the same stored value the same way.
+Both read and write the same stored value the same way, with one difference:
+**over the API the link can only be a page on this site.** An outside address
+across the top of every page is what a leaked token would want (a club-branded
+"pay here" link), so that is set on the screen, signed in. A stored outside link
+is kept when an agent changes something else.
 
 - **One switch, a message, and an optional link** (link text plus where it
   goes). One Save puts all of it live together, with a preview that updates as
@@ -67,5 +83,8 @@ Stored as JSON under the `site_banner` key of `club_settings`
 (`docs/database.md`). That table is manager-only under RLS and holds things no
 visitor may see, so visitors do **not** read it directly: `getSiteBanner`
 (`src/lib/site-banner.functions.ts`) reads that one hardcoded key through the
-service role and returns only the parsed banner. It takes no input, so nothing
-a caller sends can widen what it reads. No migration was needed.
+service role and returns only the parsed banner (or null, when it is off or
+this visitor closed it). It takes no input beyond the dismissal cookie, which
+can only make it return less, so nothing a caller sends can widen what it
+reads. The root route's loader (`src/routes/__root.tsx`) calls it. No migration
+was needed.

@@ -1542,6 +1542,29 @@ describe("manager agent route: site banner", () => {
     expect(fake.upserts).toEqual([]);
   });
 
+  // A leaked token must not be able to put a "pay here" link to another site
+  // across the top of every page. That is the screen's job, signed in.
+  it("refuses an outside link over the API, even a valid https one", async () => {
+    const fake = fakeBannerStore(LIVE);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_site_banner",
+      params: { link_href: "https://example.com/pay" },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.issues[0].path).toBe("link_href");
+    expect(fake.upserts).toEqual([]);
+  });
+
+  it("keeps an outside link the screen stored when changing something else", async () => {
+    const stored = { ...LIVE, link_href: "https://example.com/news" };
+    const fake = fakeBannerStore(stored);
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_site_banner", params: { enabled: false } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result.banner).toEqual({ ...stored, enabled: false });
+  });
+
   // Merging a change over a banner we could not read would save a guess.
   it("will not save over a banner it could not read", async () => {
     const fake = fakeBannerStore(undefined, { readFails: true });

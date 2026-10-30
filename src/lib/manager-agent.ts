@@ -328,7 +328,7 @@ export const AGENT_MANIFEST: {
       breaking: false,
       notes: [
         "New action get_site_banner: the notice across the top of every public page, as { banner: { enabled, message, link_label, link_href } }. A banner nobody has set reads as enabled: false with empty strings. 503 settings_unreadable when it cannot be read, rather than an answer of off.",
-        'New action save_site_banner: send any of enabled, message, link_label and link_href; what you leave out keeps its stored value, so {"enabled": false} turns the banner off and keeps its message for next time. It goes live for visitors at once (within a few minutes for one who already has the page open). The message is one line, up to 200 characters. The link is optional, but link_label and link_href come together, and link_href is a page on this site (/register-interest) or a full https:// address. Returns the banner as saved.',
+        "New action save_site_banner: send any of enabled, message, link_label and link_href; what you leave out keeps its stored value, so {\"enabled\": false} turns the banner off and keeps its message for next time. It goes live from each visitor's next page load (moving between pages in a tab already open can keep the old one for a few minutes). The message is one line, up to 200 characters. The link is optional, but link_label and link_href come together, and link_href is a page on this site (/register-interest): an outside address can only be set on the manager's Site banner screen. Returns the banner as saved.",
       ],
     },
     {
@@ -1448,7 +1448,7 @@ export const AGENT_MANIFEST: {
       name: "save_site_banner",
       method: "POST",
       summary:
-        "Change the site banner. Public and immediate: every visitor sees it at the top of every public page until they close it, and a changed message is shown again even to people who closed the old one. Send only the fields you are changing; the rest keep their stored values. Undone by saving again (enabled: false turns it off). 400 invalid_params when the result breaks a rule below; 503 settings_unreadable when the current banner could not be read, so nothing is merged over a guess. Returns the banner as saved.",
+        "Change the site banner. Public and immediate: every visitor sees it at the top of every public page from their next page load until they close it, and a changed message is shown again even to people who closed the old one. Send only the fields you are changing; the rest keep their stored values. Undone by saving again (enabled: false turns it off). 400 invalid_params when the result breaks a rule below; 503 settings_unreadable when the current banner could not be read, so nothing is merged over a guess. Returns the banner as saved.",
       params: [
         { name: "enabled", required: false, description: "true shows the banner, false hides it." },
         {
@@ -1467,7 +1467,7 @@ export const AGENT_MANIFEST: {
           name: "link_href",
           required: false,
           description:
-            "Where the link goes: a page on this site starting with / (like /register-interest) or a full https:// address. Empty for no link. Needs link_label.",
+            "Where the link goes: a page on this site starting with / (like /register-interest or /faq#trial). Empty for no link. Needs link_label. An outside https:// address is refused here (400 invalid_params) and can only be set on the manager's Site banner screen; a stored one is kept when you change other fields.",
         },
       ],
     },

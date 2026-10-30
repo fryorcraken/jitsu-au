@@ -3397,13 +3397,25 @@ export type SiteBanner = z.infer<typeof siteBannerSchema>;
  * what is stored, so "turn it off" is `{ enabled: false }` and keeps the
  * message for next time. The merged banner then passes `siteBannerSchema`, the
  * same rules the screen's save meets.
+ *
+ * One rule is the API's alone: its link can only be a page on this site. An
+ * outside address across the top of every page is exactly what a leaked token
+ * would want (a club-branded "pay here" link), the same reason the bank
+ * account and reply-to are not writable over the API at all. A manager who
+ * wants an outside link sets it on the screen, signed in.
  */
 export const agentSaveSiteBannerSchema = z
   .object({
     enabled: z.boolean().optional(),
     message: z.string().optional(),
     link_label: z.string().optional(),
-    link_href: z.string().optional(),
+    link_href: z
+      .string()
+      .refine((v) => v.trim() === "" || v.trim().startsWith("/"), {
+        message:
+          "Over the API the link is a page on this site, like /register-interest. An outside address is set on the Site banner screen.",
+      })
+      .optional(),
   })
   .strict()
   .refine((p) => Object.keys(p).length > 0, {

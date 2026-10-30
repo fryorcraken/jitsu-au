@@ -9,30 +9,34 @@
 // ⚠️ Bundled to the client like every `*.functions.ts`, so the service-role
 // client is only ever lazy-imported inside the handler.
 import { createServerFn } from "@tanstack/react-start";
+import { readDismissedSiteBanner, siteBannerFingerprint } from "@/lib/site-banner";
 import type { SiteBanner } from "@/lib/validation";
 
 /**
- * The banner to show, or null when it is off. A failed read is also null: the
- * banner is a notice, not something a visitor is waiting on, so the page simply
- * renders without it rather than with an error where the notice would be.
+ * The banner to show this visitor, or null: when it is off, when they already
+ * closed this one (the cookie in `site-banner.ts`), or when it could not be
+ * read. A failed read is null rather than an error because the banner is a
+ * notice, not something a visitor is waiting on, so the page simply renders
+ * without it rather than with an error where the notice would be.
+ *
+ * No cache header, deliberately: the answer depends on the visitor's cookie,
+ * and a manager who has just saved must see their change on the next page,
+ * not one cached a minute ago. It is one primary-key read.
  */
 export const getSiteBanner = createServerFn({ method: "GET" }).handler(
   async (): Promise<SiteBanner | null> => {
-    const [{ supabaseAdmin }, { readSiteBanner }, { setResponseHeader }] = await Promise.all([
+    const [{ supabaseAdmin }, { readSiteBanner }, { getRequestHeader }] = await Promise.all([
       import("@/integrations/supabase/client.server"),
       import("@/lib/club-settings.server"),
       import("@tanstack/react-start/server"),
     ]);
-    // Every public page asks for this, and it changes a few times a term. A
-    // minute's caching (and a few more of serving the old copy while it
-    // refreshes) keeps that from being a database read per page view, at the
-    // cost of a change taking a minute or two to reach everybody.
-    setResponseHeader("cache-control", "public, max-age=60, stale-while-revalidate=300");
     const read = await readSiteBanner(supabaseAdmin);
     if (!read.ok) {
       console.error("[site-banner] could not read the banner; rendering without it");
       return null;
     }
-    return read.banner.enabled ? read.banner : null;
+    if (!read.banner.enabled) return null;
+    const dismissed = readDismissedSiteBanner(getRequestHeader("cookie"));
+    return dismissed === siteBannerFingerprint(read.banner) ? null : read.banner;
   },
 );

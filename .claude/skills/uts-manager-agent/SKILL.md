@@ -704,8 +704,9 @@ means the read failed, **not** that the banner is off.
 `save_site_banner` takes only the fields you are changing; the rest keep their
 stored values, so turning it off keeps the message for next time. The message
 is one line of up to 200 characters. The link is optional, but `link_label` and
-`link_href` go together, and `link_href` is a page on this site (`/classes`) or a
-full `https://` address.
+`link_href` go together, and `link_href` is a page on this site (`/classes`,
+`/faq#trial`). An outside `https://` address is refused here: if the manager
+wants one, tell them it is on the Site banner screen (`/manager/site-banner`).
 
 > **It is public the moment it saves.** Every visitor sees the banner at the top
 > of every public page, and a changed message is shown again even to people who

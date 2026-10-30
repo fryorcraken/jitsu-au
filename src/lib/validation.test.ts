@@ -3172,6 +3172,14 @@ describe("agentSaveSiteBannerSchema", () => {
     expect(agentSaveSiteBannerSchema.parse({ enabled: false })).toEqual({ enabled: false });
   });
 
+  it("takes a page on this site as the link, and refuses another site", () => {
+    expect(agentSaveSiteBannerSchema.safeParse({ link_href: "/faq#trial" }).success).toBe(true);
+    expect(agentSaveSiteBannerSchema.safeParse({ link_href: "" }).success).toBe(true);
+    expect(agentSaveSiteBannerSchema.safeParse({ link_href: "https://example.com" }).success).toBe(
+      false,
+    );
+  });
+
   it("refuses an empty change and an unknown field", () => {
     expect(agentSaveSiteBannerSchema.safeParse({}).success).toBe(false);
     expect(agentSaveSiteBannerSchema.safeParse({ colour: "red" }).success).toBe(false);

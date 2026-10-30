@@ -1,7 +1,6 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +15,6 @@ import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { getSiteBannerSettings, saveClubSettings } from "@/lib/club-settings.functions";
 import { describeLoadError } from "@/lib/load-error";
-import { SITE_BANNER_QUERY_KEY } from "@/lib/site-banner";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
 import {
   SITE_BANNER_LINK_LABEL_MAX,
@@ -102,7 +100,7 @@ function SiteBannerPage() {
  */
 function BannerForm({ initial }: { initial: SiteBanner }) {
   const save = useServerFn(saveClubSettings);
-  const queryClient = useQueryClient();
+  const router = useRouter();
   const send = useResilientSubmit<{ ok: true }>(INTAKE_SUBMIT);
   const [form, setForm] = useState<SiteBanner>(initial);
   const [saved, setSaved] = useState<SiteBanner>(initial);
@@ -137,9 +135,10 @@ function BannerForm({ initial }: { initial: SiteBanner }) {
       setForm(banner);
       setTouched(false);
       send.reset();
-      // The banner on this device refreshes now; other visitors pick it up on
-      // their next visit (it is cached for a few minutes).
-      void queryClient.invalidateQueries({ queryKey: SITE_BANNER_QUERY_KEY });
+      // The root loader keeps the banner for a few minutes between pages, so
+      // refresh it now: the manager's own next page shows what they saved.
+      // Every other visitor gets it on their next page load.
+      void router.invalidate({ filter: (match) => match.routeId === "__root__" });
       toast.success(banner.enabled ? "Saved. The banner is live." : "Saved. The banner is off.");
     }
   }

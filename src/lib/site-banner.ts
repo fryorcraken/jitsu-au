@@ -1,21 +1,29 @@
 // Rules for the site banner across the top of every public page, kept free of
 // React/router/DOM imports so they stay unit-testable. What the banner says is
 // a manager's setting (`docs/site-banner.md`); this decides when a visitor sees
-// it.
+// it, and what its link does.
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import type { SiteBanner } from "@/lib/validation";
 
-/** The react-query key the banner is cached under; a manager's save refreshes it. */
-export const SITE_BANNER_QUERY_KEY = ["site-banner"] as const;
-
 /**
- * localStorage key holding the banner a visitor closed.
+ * Cookie holding the banner a visitor closed.
+ *
+ * A cookie rather than localStorage because the server draws the banner into
+ * the page: it has to know, before it sends a byte, whether this visitor closed
+ * it. With localStorage it could only find out after the page loaded, so the
+ * banner would either arrive late and push the page down, or flash up on every
+ * page for somebody who already closed it.
  *
  * The value is that banner's fingerprint, not a flag. Closing one notice is not
  * agreeing to miss the next, so a new message (or a new link) has a different
  * fingerprint and is shown again, while the same notice turned off and back on
- * stays closed for whoever already closed it.
+ * stays closed for whoever already closed it. Nothing secret, so readable by
+ * the page.
  */
-export const SITE_BANNER_STORAGE_KEY = "uts-site-banner-dismissed";
+export const SITE_BANNER_COOKIE = "uts_site_banner_dismissed";
+
+/** A year: long enough to outlast any one notice. */
+const DISMISS_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 /**
  * A short, stable id for what a banner says. FNV-1a over its text: nothing
@@ -33,49 +41,66 @@ export function siteBannerFingerprint(
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-/** The fingerprint of the banner this visitor closed, if any. */
-export function readDismissedSiteBanner(
-  storage: Pick<Storage, "getItem"> | null | undefined,
-): string | null {
-  try {
-    return storage?.getItem(SITE_BANNER_STORAGE_KEY) ?? null;
-  } catch {
-    // Storage can throw (private mode, disabled cookies): treat as not dismissed.
-    return null;
-  }
-}
-
-/** Remember that this visitor closed the banner with this fingerprint. */
-export function persistDismissedSiteBanner(
-  storage: Pick<Storage, "setItem"> | null | undefined,
-  fingerprint: string,
-): void {
-  try {
-    storage?.setItem(SITE_BANNER_STORAGE_KEY, fingerprint);
-  } catch {
-    // Ignore storage failures: the dismissal simply won't outlive this page.
-  }
-}
-
 /**
- * Pages where the banner's message shows but its link does not. The whole line
- * is a tap target, and on these a stray tap would carry somebody away from a
- * form they are partway through (the waiver holds health answers and a
- * signature). The old free-trial offer was hidden on the waiver for the same
- * reason; a notice is still worth reading there, a link is not.
+ * The fingerprint of the banner this visitor closed, read from a `Cookie`
+ * header (server) or `document.cookie` (browser), which share a format.
  */
-const NO_LINK_PATH_PREFIXES = ["/waiver"] as const;
+export function readDismissedSiteBanner(cookies: string | null | undefined): string | null {
+  for (const part of (cookies ?? "").split(";")) {
+    const [name, ...value] = part.trim().split("=");
+    if (name === SITE_BANNER_COOKIE) return value.join("=") || null;
+  }
+  return null;
+}
+
+/** The `document.cookie` assignment that remembers closing this banner. */
+export function dismissSiteBannerCookie(fingerprint: string, secure: boolean): string {
+  return [
+    `${SITE_BANNER_COOKIE}=${fingerprint}`,
+    "Path=/",
+    `Max-Age=${DISMISS_MAX_AGE_SECONDS}`,
+    "SameSite=Lax",
+    ...(secure ? ["Secure"] : []),
+  ].join("; ");
+}
 
 /**
- * Whether the banner's link should be dropped on this page: on a form-filling
- * page (above), or where the link points at the page the visitor is already
- * on. The message still shows either way (on the register page, "free trials
- * are paused" is the most useful place for it).
+ * The link as an address on this site (`/faq#trial`), or null when it goes
+ * somewhere else. A full address to this site (`https://utsjitsu.com.au/faq`)
+ * counts as this site: it is the same page, and should behave like it.
+ */
+export function siteBannerLocalHref(href: string): string | null {
+  if (href.startsWith("/")) return href;
+  if (href === SITE_ORIGIN || href.startsWith(`${SITE_ORIGIN}/`)) {
+    return href.slice(SITE_ORIGIN.length) || "/";
+  }
+  return null;
+}
+
+/**
+ * Pages where the banner's message shows but its link does not: the forms. The
+ * whole line is a tap target, and on these a stray tap would carry somebody
+ * away from a form they are partway through (the waiver holds health answers
+ * and a signature). The old free-trial offer was hidden on the waiver and the
+ * register page for the same reason; a notice is still worth reading there, a
+ * link is not.
+ */
+const NO_LINK_PATH_PREFIXES = ["/waiver", "/register-interest", "/contact"] as const;
+
+function trimSlash(path: string): string {
+  return path.replace(/\/+$/, "") || "/";
+}
+
+/**
+ * Whether the banner's link should be dropped on this page: on a form (above),
+ * or where the link points at the page the visitor is already on. A link to a
+ * section of this page (`/faq#trial` on `/faq`) is kept, because following it
+ * is useful there. The message shows either way.
  */
 export function shouldDropSiteBannerLink(href: string, pathname: string): boolean {
-  const here = pathname.replace(/\/+$/, "") || "/";
+  const here = trimSlash(pathname);
   if (NO_LINK_PATH_PREFIXES.some((p) => here === p || here.startsWith(`${p}/`))) return true;
-  if (!href.startsWith("/")) return false;
-  const path = href.split(/[?#]/)[0].replace(/\/+$/, "") || "/";
-  return path === here;
+  const local = siteBannerLocalHref(href);
+  if (!local || local.includes("#")) return false;
+  return trimSlash(local.split("?")[0]) === here;
 }

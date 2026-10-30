@@ -1,50 +1,41 @@
-import { useRouterState } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useLoaderData, useRouter, useRouterState } from "@tanstack/react-router";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { X } from "lucide-react";
-import { getSiteBanner } from "@/lib/site-banner.functions";
 import {
-  SITE_BANNER_QUERY_KEY,
-  persistDismissedSiteBanner,
+  dismissSiteBannerCookie,
   readDismissedSiteBanner,
   shouldDropSiteBannerLink,
   siteBannerFingerprint,
+  siteBannerLocalHref,
 } from "@/lib/site-banner";
 import type { SiteBanner as SiteBannerValue } from "@/lib/validation";
 
 /**
  * The slim, dismissible notice above the header on every public page. A
  * manager writes it and turns it on or off at `/manager/site-banner`; when it
- * is off, or could not be read, nothing renders at all.
+ * is off, closed, or could not be read, nothing renders at all.
  *
- * Client-only on purpose: whether this visitor closed it lives in localStorage,
- * so the server render and the first client render both show nothing and the
- * banner appears once both answers are in.
+ * The root route's loader reads it, so the server draws it into the page and
+ * nothing moves when the page loads. That read already leaves out a banner
+ * this visitor closed (the cookie is sent with it), and the cookie is checked
+ * again here for the page-to-page case, where the loader's answer is reused
+ * from before the visitor closed it.
  */
 export function SiteBanner() {
-  const fetchBanner = useServerFn(getSiteBanner);
-  const { data: banner } = useQuery({
-    queryKey: SITE_BANNER_QUERY_KEY,
-    queryFn: () => fetchBanner(),
-    // One read per visit is plenty for a notice that changes a few times a term.
-    staleTime: 5 * 60_000,
-  });
+  const { siteBanner: banner } = useLoaderData({ from: "__root__" });
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // undefined until mounted, so nothing renders before localStorage is read.
-  const [dismissed, setDismissed] = useState<string | null | undefined>(undefined);
+  // Set when closed on this page, so it goes at once without a reload.
+  const [closed, setClosed] = useState<string | null>(null);
 
-  useEffect(() => {
-    setDismissed(readDismissedSiteBanner(window.localStorage));
-  }, []);
-
-  if (!banner || dismissed === undefined) return null;
+  if (!banner) return null;
   const fingerprint = siteBannerFingerprint(banner);
+  const dismissed =
+    closed ?? readDismissedSiteBanner(typeof document === "undefined" ? null : document.cookie);
   if (dismissed === fingerprint) return null;
 
   const dismiss = () => {
-    persistDismissedSiteBanner(window.localStorage, fingerprint);
-    setDismissed(fingerprint);
+    document.cookie = dismissSiteBannerCookie(fingerprint, window.location.protocol === "https:");
+    setClosed(fingerprint);
   };
 
   return <SiteBannerBar banner={banner} pathname={pathname} onDismiss={dismiss} />;
@@ -108,16 +99,65 @@ function BannerText({
     </>
   );
   if (!interactive) return <p className={className}>{content}</p>;
-  // A plain anchor for a page here too, not the router's <Link>: `to` is a
-  // route path, and a manager's `/faq#trial` or `?from=banner` is a URL.
-  const external = !banner.link_href.startsWith("/");
   return (
-    <a
-      href={banner.link_href}
-      rel={external ? "noopener noreferrer" : undefined}
-      className={`${className} hover:underline`}
-    >
+    <BannerLink href={banner.link_href} className={`${className} hover:underline`}>
       {content}
+    </BannerLink>
+  );
+}
+
+/**
+ * The link. A real anchor either way, so it can be opened in a new tab and read
+ * by a screen reader as a link. For a page on this site a plain click is handed
+ * to the router instead, so it is an in-app move rather than a reload of the
+ * whole app on a phone's connection. The router's own <Link> is not used
+ * because its `to` is a route path, and a manager's `/faq#trial` is a URL.
+ */
+function BannerLink({
+  href,
+  className,
+  children,
+}: {
+  href: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const local = siteBannerLocalHref(href);
+  if (local) {
+    return (
+      <LocalBannerLink href={local} className={className}>
+        {children}
+      </LocalBannerLink>
+    );
+  }
+  return (
+    <a href={href} rel="noreferrer" className={className}>
+      {children}
+    </a>
+  );
+}
+
+function LocalBannerLink({
+  href,
+  className,
+  children,
+}: {
+  href: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const router = useRouter();
+  const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    // A modified click (new tab, new window) is the browser's, not ours.
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+      return;
+    }
+    e.preventDefault();
+    void router.navigate({ href });
+  };
+  return (
+    <a href={href} onClick={onClick} className={className}>
+      {children}
     </a>
   );
 }
