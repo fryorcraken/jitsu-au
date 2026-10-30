@@ -14,14 +14,7 @@ import {
  * waiting", and saying so is what stops people closing the tab.
  */
 export type ResilientSubmitStatus =
-  | "idle"
-  | "submitting"
-  | "slow"
-  | "confirming"
-  | "retrying"
-  | "offline"
-  | "failed"
-  | "succeeded";
+  "idle" | "submitting" | "slow" | "confirming" | "retrying" | "offline" | "failed" | "succeeded";
 
 export type ResilientSubmitConfig = {
   attempts: number;

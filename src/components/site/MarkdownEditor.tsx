@@ -88,7 +88,7 @@ export function MarkdownEditor({
     }
     const patch = replacementFor(value, next.text);
     el.setSelectionRange(patch.start, patch.end);
-    let handled = false;
+    let handled: boolean;
     try {
       handled = document.execCommand(patch.insert ? "insertText" : "delete", false, patch.insert);
     } catch {

@@ -242,7 +242,7 @@ export async function fetchBlogImage(
       // Release the connection before the next hop or the refusal.
       await res.body?.cancel().catch(() => {});
       const location = res.headers.get("location");
-      let next: URL | null = null;
+      let next: URL | null;
       try {
         next = location ? new URL(location, current) : null;
       } catch {

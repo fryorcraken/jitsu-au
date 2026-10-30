@@ -193,8 +193,7 @@ describe("who a reply reaches", () => {
 
     const byRecipient = (to: string) =>
       sendLovableEmail.mock.calls.find((c) => (c[0] as { to: string }).to === to)?.[0] as
-        | { reply_to?: string }
-        | undefined;
+        { reply_to?: string } | undefined;
     expect(byRecipient("ada@example.com")?.reply_to).toBeUndefined();
     expect(byRecipient("manager@example.com")?.reply_to).toBe("ada@example.com");
   });

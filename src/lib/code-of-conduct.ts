@@ -273,9 +273,7 @@ export function latestAcceptedVersion(
  */
 export function codeOfConductSummary(
   acceptances:
-    | { version: number; accepted_at: string; signature_name: string }[]
-    | null
-    | undefined,
+    { version: number; accepted_at: string; signature_name: string }[] | null | undefined,
   standard: CodeOfConductStandard,
 ) {
   const top = (acceptances ?? []).reduce<{

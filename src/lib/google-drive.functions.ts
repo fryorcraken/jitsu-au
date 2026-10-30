@@ -407,6 +407,7 @@ export const uploadWaiverToDrive = createServerFn({ method: "POST" })
           // them to pick again instead.
           throw new Error(
             `The Drive folder "${folderName}" is no longer reachable. Pick it again on your account page.`,
+            { cause: e },
           );
         }
         throw e;

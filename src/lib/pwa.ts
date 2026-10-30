@@ -138,8 +138,7 @@ export function resolveLaunchTarget({
   lastVisit,
   now,
 }: LaunchState & { lastVisit: LastVisit | null; now: number }):
-  | { path: string }
-  | { screen: LaunchScreen } {
+  { path: string } | { screen: LaunchScreen } {
   if (
     lastVisit &&
     lastVisit.hasSession === hasSession &&

@@ -50,6 +50,11 @@ the same code, not a second implementation.
   `src/lib/manager-agent-actions.ts`, so an action behaves, refuses and reports
   errors identically over HTTP and MCP. Change actions there, not in either
   front door.
+- **The MCP door accepts a request as large as the largest action input**: a
+  paper waiver's scans, sent as base64. The SDK's own default is 1 MiB, and
+  anything over it gets a 413 before the tool runs, which a waiver scan over
+  about 750 KB used to hit. The figure is derived from the actions' file limits
+  in `src/lib/mcp/limits.ts`, so raising one of those raises it too.
 - **Auth is OAuth, not a minted token.** The assistant registers itself with
   the club's Supabase Auth OAuth 2.1 server, sends the manager to
   `/.lovable/oauth/consent` (`src/routes/[.]lovable.oauth.consent.tsx`) to sign

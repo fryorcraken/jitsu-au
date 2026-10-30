@@ -206,8 +206,7 @@ async function userIdForToken(db: AdminClient, raw: string): Promise<string | nu
 }
 
 export type TokenSettings =
-  | { ok: true; preferences: Record<EmailPreferenceKey, boolean> }
-  | { ok: false };
+  { ok: true; preferences: Record<EmailPreferenceKey, boolean> } | { ok: false };
 
 /**
  * The settings-link token this request is carrying.
