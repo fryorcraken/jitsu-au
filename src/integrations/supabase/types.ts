@@ -1238,6 +1238,10 @@ export type Database = {
       profiles: {
         Row: {
           address: string | null
+          address_postcode: string | null
+          address_state: string | null
+          address_street: string | null
+          address_suburb: string | null
           archived_at: string | null
           archived_by: string | null
           belt_size: string | null
@@ -1272,6 +1276,10 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          address_postcode?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          address_suburb?: string | null
           archived_at?: string | null
           archived_by?: string | null
           belt_size?: string | null
@@ -1306,6 +1314,10 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          address_postcode?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          address_suburb?: string | null
           archived_at?: string | null
           archived_by?: string | null
           belt_size?: string | null
@@ -1504,6 +1516,10 @@ export type Database = {
       waivers: {
         Row: {
           address: string
+          address_postcode: string | null
+          address_state: string | null
+          address_street: string | null
+          address_suburb: string | null
           approval_status: string
           approved_at: string | null
           approved_by: string | null
@@ -1539,6 +1555,10 @@ export type Database = {
         }
         Insert: {
           address: string
+          address_postcode?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          address_suburb?: string | null
           approval_status?: string
           approved_at?: string | null
           approved_by?: string | null
@@ -1574,6 +1594,10 @@ export type Database = {
         }
         Update: {
           address?: string
+          address_postcode?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          address_suburb?: string | null
           approval_status?: string
           approved_at?: string | null
           approved_by?: string | null
@@ -1638,6 +1662,7 @@ export type Database = {
         Returns: boolean
       }
       notification_digest_key: { Args: never; Returns: string }
+      split_au_address: { Args: { line: string }; Returns: string[] }
       user_emails: {
         Args: { _user_ids: string[] }
         Returns: {
