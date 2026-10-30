@@ -8,7 +8,7 @@ import {
   UNKNOWN_LINK_MESSAGE,
   feedTokenVerdict,
 } from "./calendar-feed-token";
-import { SITE_HOST } from "./seo";
+import { SITE_HOST } from "./site-origin";
 
 describe("feedTokenVerdict", () => {
   it("serves a live link, and hands the row back", () => {

@@ -748,11 +748,14 @@ Non-production hosts (Lovable previews, branch deploys) are served a blanket
 ### The site's address
 
 The site is served from **`https://utsjitsu.com.au`**, and that is `SITE_ORIGIN`
-in `src/lib/seo.ts`: every canonical, the sitemap, and every link in every email
+in `src/lib/site-origin.ts`: every canonical, the sitemap, and every link in every email
 come from it (`SITE_HOST` is the same thing without the scheme, for copy). The
-one deliberate exception is the calendar subscription link on `/account`, which
-names the host the member is browsing on, so a local or preview stack hands out
-its own feed; in production that is the same host. `jitsu.au` (the address until October 2026) now
+two links a person carries out of the browser, the calendar subscription on
+`/account` and the endpoint in the manager agent prompt, go through
+`linkOrigin` in `src/lib/site-origin.ts`: they get `SITE_ORIGIN` wherever the
+page is browsed (the club's other domains, a Lovable preview, the lovable.app
+address, all of which run on the live database), except on a loopback host,
+whose stack has its own database and so hands out links to itself. `jitsu.au` (the address until October 2026) now
 redirects there. Three rules follow, and the first one has already cost the club
 its nightly email once:
 
@@ -769,7 +772,13 @@ its nightly email once:
   every subscriber's calendar), and `dependant.jitsu.au` is the reserved
   address domain for dependants. Both stay as they are. The email sender moved
   separately, from `notify.jitsu.au` to `notify.utsjitsu.com.au`, in October
-  2026 (`docs/emails.md`).
+  2026 (`docs/emails.md`). Anything else is a mistake:
+  `src/lib/seo.test.ts` ("the old domain") fails on any other mention of
+  `jitsu.au`, in any case, in every text file under `src/`, `public/`,
+  `scripts/`, `e2e/` and `.claude/skills/`, whether a URL or copy. It skips
+  comments (blanked by file type, so markdown copy that starts with `#` or `*`
+  is still read) and tests, and it does not read `docs/`, where the old name is
+  history. A line that has to name it goes on that test's `ALLOWED` list.
 
 ## Security headers
 

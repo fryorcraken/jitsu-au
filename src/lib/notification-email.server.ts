@@ -35,7 +35,7 @@ import {
 } from "@/lib/notifications";
 import { greetingName, stableCode, type PersonNameParts } from "@/lib/validation";
 import { contactUserIdOf, deliveryEmailFor, loadHouseholdContacts } from "@/lib/household-email";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 import { insuranceReminderKinds } from "@/lib/insurance-reminders";
 
