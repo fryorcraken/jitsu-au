@@ -56,6 +56,7 @@ import {
   isFutureSigningDate,
   isMinorOn,
   isPaperWaiver,
+  isSameOnlineSubmission,
   isUtsStudent,
   managerEmailChangeSchema,
   markNotificationsReadSchema,
@@ -2489,6 +2490,41 @@ describe("isPaperWaiver", () => {
     expect(isPaperWaiver(undefined)).toBe(false);
     expect(isPaperWaiver("paper_upload")).toBe(false);
     expect(isPaperWaiver([{ source: "paper_upload" }])).toBe(false);
+  });
+});
+
+// The public signing endpoint answers a resent submission id with a link to
+// the signed PDF, so the id alone must never be enough to earn it.
+describe("isSameOnlineSubmission", () => {
+  const stored = {
+    signer_meta: { user_agent: "Mozilla/5.0" },
+    email: "ada@example.com",
+    date_of_birth: "1990-04-02",
+  };
+  const retry = { email: "ada@example.com", date_of_birth: "1990-04-02" };
+
+  it("matches a genuine retry carrying the same address and birth date", () => {
+    expect(isSameOnlineSubmission(stored, retry)).toBe(true);
+  });
+
+  it("ignores case and spacing in the address", () => {
+    expect(isSameOnlineSubmission(stored, { ...retry, email: " Ada@Example.com " })).toBe(true);
+  });
+
+  it("refuses a caller who holds the id but not the signer's address", () => {
+    expect(isSameOnlineSubmission(stored, { ...retry, email: "someone@example.com" })).toBe(false);
+    expect(isSameOnlineSubmission(stored, { ...retry, email: "" })).toBe(false);
+  });
+
+  it("refuses a caller who holds the id and address but not the birth date", () => {
+    expect(isSameOnlineSubmission(stored, { ...retry, date_of_birth: "1990-04-03" })).toBe(false);
+  });
+
+  // A paper filing's id is chosen by a manager's script, so it can be guessable.
+  it("never resolves to a paper filing, even when everything else matches", () => {
+    expect(
+      isSameOnlineSubmission({ ...stored, signer_meta: { source: "paper_upload" } }, retry),
+    ).toBe(false);
   });
 });
 
