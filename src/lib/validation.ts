@@ -550,7 +550,7 @@ export type MarkContactMessagesSeenInput = z.infer<typeof markContactMessagesSee
 // reason to keep once it has been dealt with: nothing was signed, nothing is
 // owed, and no record hangs off it. Everything else a person creates is either
 // evidence (a signed waiver) or the club's own history (memberships,
-// attendance), and destroying those is a decision the club has not made yet.
+// attendance), and the club has decided those are never erased.
 // See docs/erasing-personal-data.md.
 
 /** Manager: delete one message from the contact inbox. */
