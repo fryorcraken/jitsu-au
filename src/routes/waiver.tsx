@@ -24,8 +24,8 @@ import {
   auAddressFromRow,
   completeAuAddress,
   draftAddressLine,
+  addressPartsFromLine,
   sameAuAddress,
-  splitAuAddress,
   type AuAddressDraft,
 } from "@/lib/au-address";
 import {
@@ -409,7 +409,7 @@ function Waiver() {
         // The parts when the club has them; otherwise the one line read as
         // parts where that can be done without guessing, and shown above the
         // empty boxes where it cannot.
-        const parts = auAddressFromRow(r) ?? splitAuAddress(r.address);
+        const parts = auAddressFromRow(r) ?? addressPartsFromLine(r.address);
         if (parts) setAddress(auAddressDraft(parts));
         else if (r.address) setAddressOnFile(r.address);
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
@@ -427,7 +427,10 @@ function Waiver() {
         // line in it means "the same", which is the tick's default.
         if (r.guardian_address && !sameAuAddress(r.guardian_address, r.address)) {
           setGuardianSameAddress(false);
-          const guardianParts = splitAuAddress(r.guardian_address);
+          // Stored as its composed line only, so read it back as composed
+          // first: a parent's own "Rose Cottage" or border postcode must not
+          // come back as four empty boxes on every waiver.
+          const guardianParts = addressPartsFromLine(r.guardian_address);
           if (guardianParts) setGuardianAddress(auAddressDraft(guardianParts));
           else setGuardianAddressOnFile(r.guardian_address);
         }
@@ -581,6 +584,7 @@ function Waiver() {
       setPhone(draft.phone);
       setEmail(draft.email);
       setAddress(draft.address);
+      setAddressOnFile(draft.addressOnFile || null);
       setUtsStudentNumber(draft.utsStudentNumber);
       setSmsConsent(draft.smsConsent);
       setGiSize(isGiSize(draft.giSize) ? draft.giSize : "");
@@ -593,6 +597,7 @@ function Waiver() {
       setGuardianRelationship(draft.guardianRelationship);
       setGuardianSameAddress(draft.guardianSameAddress);
       setGuardianAddress(draft.guardianAddress);
+      setGuardianAddressOnFile(draft.guardianAddressOnFile || null);
       setGuardianPhone(draft.guardianPhone);
       setGuardianEmail(draft.guardianEmail);
       setHealth((prev) => ({ ...prev, ...draft.health }));
@@ -647,6 +652,7 @@ function Waiver() {
       signingFor,
       email,
       address,
+      addressOnFile: addressOnFile ?? "",
       utsStudentNumber,
       smsConsent,
       giSize,
@@ -659,6 +665,7 @@ function Waiver() {
       guardianRelationship,
       guardianSameAddress,
       guardianAddress,
+      guardianAddressOnFile: guardianAddressOnFile ?? "",
       guardianPhone,
       guardianEmail,
       health,
@@ -682,6 +689,7 @@ function Waiver() {
       signingFor,
       email,
       address,
+      addressOnFile,
       utsStudentNumber,
       smsConsent,
       giSize,
@@ -694,6 +702,7 @@ function Waiver() {
       guardianRelationship,
       guardianSameAddress,
       guardianAddress,
+      guardianAddressOnFile,
       guardianPhone,
       guardianEmail,
       health,
@@ -1498,11 +1507,10 @@ function Waiver() {
                 <AddressFields
                   idPrefix={ADDRESS_ANCHOR_PREFIX.participant}
                   value={address}
-                  onChange={(next) => {
-                    setAddress(next);
-                    setAddressOnFile(null);
-                  }}
-                  previousLine={addressOnFile}
+                  onChange={setAddress}
+                  // Kept on screen while they copy it into the boxes, and
+                  // gone once the four are complete.
+                  previousLine={completeAuAddress(address) ? null : addressOnFile}
                   fieldProps={fieldProps}
                   fieldMessage={fieldMessage}
                 />
@@ -1599,7 +1607,7 @@ function Waiver() {
                     {fieldMessage("guardian_relationship")}
                   </div>
                 </div>
-                {/* One hint, pointed at by all three inputs (aria-describedby),
+                {/* One hint, pointed at by both inputs (aria-describedby),
                     so somebody who tabs straight into a field hears the rule
                     rather than only seeing it above the group. */}
                 <p id="guardian_contact_hint" className="text-xs text-muted-foreground">
@@ -1674,11 +1682,10 @@ function Waiver() {
                         idPrefix={ADDRESS_ANCHOR_PREFIX.guardian}
                         section="guardian"
                         value={guardianAddress}
-                        onChange={(next) => {
-                          setGuardianAddress(next);
-                          setGuardianAddressOnFile(null);
-                        }}
-                        previousLine={guardianAddressOnFile}
+                        onChange={setGuardianAddress}
+                        previousLine={
+                          completeAuAddress(guardianAddress) ? null : guardianAddressOnFile
+                        }
                         fieldProps={fieldProps}
                         fieldMessage={fieldMessage}
                       />

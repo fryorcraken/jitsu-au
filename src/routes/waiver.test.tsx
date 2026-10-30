@@ -480,14 +480,19 @@ describe("/waiver, prefilling a signed-in parent", () => {
   });
 
   // Somebody whose address the club only has as one line it cannot split
-  // meets four empty boxes, so the line they gave is shown above them.
-  it("shows an address held as one line rather than silently dropping it", async () => {
+  // meets four empty boxes, so the line they gave is shown above them, and
+  // stays there while they copy it in.
+  it("shows an address held as one line, and keeps it there while they copy it", async () => {
+    const user = userEvent.setup();
     authUser = { id: "member-1", email: "ada@example.com" };
     getMyProfile.mockResolvedValue({ first_name: "Ada", address: "1 Broadway Ultimo" });
 
     renderWaiver();
     await waitFor(() => expect(screen.getByText(/1 Broadway Ultimo/)).toBeInTheDocument());
     expect(screen.getByLabelText("Street address")).toHaveValue("");
+
+    await user.type(screen.getByLabelText("Street address"), "1 Broadway");
+    expect(screen.getByText(/We have this address as/)).toBeInTheDocument();
   });
 });
 

@@ -10,7 +10,7 @@ import {
   auAddressFromRow,
   completeAuAddress,
   composeAuAddress,
-  splitAuAddress,
+  addressPartsFromLine,
   type AuAddressDraft,
 } from "@/lib/au-address";
 import { SaveFailure } from "@/components/site/SaveFailure";
@@ -54,7 +54,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
           address_suburb: profile?.address_suburb,
           address_state: profile?.address_state,
           address_postcode: profile?.address_postcode,
-        }) ?? splitAuAddress(profile?.address),
+        }) ?? addressPartsFromLine(profile?.address),
       ),
       addressLine: profile?.address ?? "",
       smsConsent: profile?.sms_whatsapp_consent ?? false,
@@ -102,10 +102,10 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
     ecRelationship !== stored.ecRelationship ||
     ecPhone !== stored.ecPhone;
 
-  // The line on file could not be read as parts and nothing has been typed
-  // over it yet: show it, so the member can see what they told us.
+  // The line on file could not be read as parts: show it while the member
+  // copies it into the boxes, so it is there to read until they are done.
   const previousLine =
-    !addressChanged && !completeAuAddress(stored.address) && stored.addressLine
+    !completeAuAddress(stored.address) && !completeAuAddress(address) && stored.addressLine
       ? stored.addressLine
       : null;
 

@@ -25,7 +25,7 @@ import {
   EMPTY_AU_ADDRESS,
   auAddressDraft,
   isAuState,
-  splitAuAddress,
+  addressPartsFromLine,
   type AuAddressDraft,
 } from "@/lib/au-address";
 
@@ -62,6 +62,12 @@ export type WaiverDraft = {
   email: string;
   /** The participant's address, part by part as typed. */
   address: AuAddressDraft;
+  /**
+   * An address held as one line that could not be read as parts, shown above
+   * the boxes so it is not lost: the club's record of it, or a line typed into
+   * the single box this form had before addresses had parts. "" for none.
+   */
+  addressOnFile: string;
   utsStudentNumber: string;
   smsConsent: boolean;
   /** A gi size code, or "" for not chosen. Optional on the form, so "" is normal. */
@@ -79,6 +85,8 @@ export type WaiverDraft = {
   guardianSameAddress: boolean;
   /** The guardian's own address, used only when the tick above is off. */
   guardianAddress: AuAddressDraft;
+  /** The same as `addressOnFile`, for the guardian's address. */
+  guardianAddressOnFile: string;
   guardianPhone: string;
   guardianEmail: string;
   health: HealthDraft;
@@ -147,7 +155,7 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
   // restored empty rather than binning the whole draft (see `giSize` below for
   // why the version is not bumped for a change like this).
   const address = (v: unknown): AuAddressDraft => {
-    if (typeof v === "string") return auAddressDraft(splitAuAddress(v));
+    if (typeof v === "string") return auAddressDraft(addressPartsFromLine(v));
     if (!v || typeof v !== "object") return { ...EMPTY_AU_ADDRESS };
     const source = v as Record<string, unknown>;
     const state = text(source.state);
@@ -158,6 +166,10 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
       postcode: text(source.postcode),
     };
   };
+  // An old one-line draft address that could not be read as parts: kept, so
+  // it can be shown above the empty boxes instead of vanishing on restore.
+  const unreadLine = (v: unknown): string =>
+    typeof v === "string" && v.trim() && !addressPartsFromLine(v) ? v.trim() : "";
   const acks = (v: unknown): Record<string, boolean> => {
     const source = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
     const out: Record<string, boolean> = {};
@@ -183,6 +195,7 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     phone: text(draft.phone),
     email: text(draft.email),
     address: address(draft.address),
+    addressOnFile: text(draft.addressOnFile) || unreadLine(draft.address),
     utsStudentNumber: text(draft.utsStudentNumber),
     smsConsent: draft.smsConsent === true,
     // Deliberately does NOT bump WAIVER_DRAFT_VERSION: `giSize` is a new
@@ -211,6 +224,7 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
         ? draft.guardianSameAddress
         : !text(draft.guardianAddress as unknown).trim(),
     guardianAddress: address(draft.guardianAddress),
+    guardianAddressOnFile: text(draft.guardianAddressOnFile) || unreadLine(draft.guardianAddress),
     guardianPhone: text(draft.guardianPhone),
     guardianEmail: text(draft.guardianEmail),
     health: health(draft.health),

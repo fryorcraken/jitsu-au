@@ -394,6 +394,12 @@ describe("updateMyProfileSchema", () => {
       expect(() => updateMyProfileSchema.parse({ ...parts, address_state: "Nsw" })).toThrow();
     });
 
+    it("ignores a blank line sent with the parts, which it replaces anyway", () => {
+      expect(updateMyProfileSchema.parse({ ...parts, address: "" }).address).toBe(
+        "1 Broadway, Ultimo NSW 2007",
+      );
+    });
+
     it("still takes a line on its own from an older page", () => {
       expect(updateMyProfileSchema.parse({ address: " 1 Broadway Ultimo " })).toEqual({
         address: "1 Broadway Ultimo",

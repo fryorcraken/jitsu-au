@@ -24,6 +24,7 @@ const blank: WaiverDraft = {
   phone: "",
   email: "",
   address: EMPTY_AU_ADDRESS,
+  addressOnFile: "",
   utsStudentNumber: "",
   smsConsent: false,
   giSize: "",
@@ -36,6 +37,7 @@ const blank: WaiverDraft = {
   guardianRelationship: "",
   guardianSameAddress: true,
   guardianAddress: EMPTY_AU_ADDRESS,
+  guardianAddressOnFile: "",
   guardianPhone: "",
   guardianEmail: "",
   health: { drugs: null, blackouts: null, device: null, impairments: null, other: null },
@@ -238,6 +240,8 @@ describe("addresses in a draft", () => {
     delete old.guardianSameAddress;
     const restored = parseDraft(JSON.stringify(old));
     expect(restored?.address).toEqual(EMPTY_AU_ADDRESS);
+    // ...but not lost: the page shows it above the boxes to copy from.
+    expect(restored?.addressOnFile).toBe("1 Broadway Ultimo");
     expect(restored?.guardianSameAddress).toBe(true);
     // The rest of the form is still there.
     expect(restored?.firstName).toBe("Ada");

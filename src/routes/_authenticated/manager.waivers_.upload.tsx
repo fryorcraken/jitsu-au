@@ -237,8 +237,11 @@ function UploadPaperWaiverPage() {
     const addressParts = completeAuAddress(address);
     const guardianParts =
       needsGuardian && !guardianSameAddress ? completeAuAddress(guardianAddress) : null;
-    if (!addressParts || (needsGuardian && !guardianSameAddress && !guardianParts)) {
-      setAddressAttempted(true);
+    const addressesComplete =
+      Boolean(addressParts) && !(needsGuardian && !guardianSameAddress && !guardianParts);
+    // Cleared once both are in, so a later edit is not flagged before Sign.
+    setAddressAttempted(!addressesComplete);
+    if (!addressesComplete) {
       // Straight to the box that is wrong, not the top of its block.
       const prefix = addressParts ? "guardian_address" : "address";
       const draft = addressParts ? guardianAddress : address;

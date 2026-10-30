@@ -110,6 +110,36 @@ export function splitAuAddress(line: string | null | undefined): AuAddress | nul
   return { street, suburb, state, postcode };
 }
 
+/**
+ * Read back a line this app composed itself (`composeAuAddress`), or `null`.
+ *
+ * The exact inverse of the composition, with none of `splitAuAddress`'s
+ * guards, because there is nothing to guess: a line in exactly this shape was
+ * made from parts somebody entered. That matters for the guardian's address,
+ * which is stored as its composed line only. Read with `splitAuAddress`, a
+ * street with no number ("Rose Cottage") or a border postcode (Barooga NSW
+ * 3644) would come back as nothing, and the parent would retype it on every
+ * waiver. Only for offering a line back to somebody to check, never for
+ * deciding what gets stored.
+ */
+export function readComposedAuAddress(line: string | null | undefined): AuAddress | null {
+  if (!line || CONTROL.test(line)) return null;
+  const m = /^(.+), ([^,]+) (ACT|NSW|NT|QLD|SA|TAS|VIC|WA) ([0-9]{4})$/.exec(line);
+  if (!m) return null;
+  const parts = { street: m[1], suburb: m[2], state: m[3] as AuState, postcode: m[4] };
+  // Only if it would be accepted as parts, so a line that merely looks right
+  // (a digit in the "suburb") is not handed back as something it is not.
+  return auAddressSchema.safeParse(parts).success ? parts : null;
+}
+
+/**
+ * The parts to offer somebody for an address the club holds as a line: the
+ * line as composed, else the line read without guessing, else nothing.
+ */
+export function addressPartsFromLine(line: string | null | undefined): AuAddress | null {
+  return readComposedAuAddress(line) ?? splitAuAddress(line);
+}
+
 /** The draft to show for an address the club holds, or an empty one. */
 export function auAddressDraft(a: AuAddress | null): AuAddressDraft {
   return a ? { ...a } : { ...EMPTY_AU_ADDRESS };
@@ -198,30 +228,35 @@ export function auAddressProblems(d: AuAddressDraft): AuAddressProblem[] {
  * `*_address_parts_valid` constraints, so a submission is refused here in
  * words rather than by a constraint name after the insert.
  */
-export const auAddressSchema = z.object({
-  street: z
-    .string()
-    .trim()
-    .min(1, "Please give the street address.")
-    .max(AU_ADDRESS_LIMITS.street, "Please keep the street address under 200 characters.")
-    .refine((v) => !CONTROL.test(v), "Please keep the street address on one line."),
-  suburb: z
-    .string()
-    .trim()
-    .min(1, "Please give the suburb.")
-    .max(AU_ADDRESS_LIMITS.suburb, "Please keep the suburb under 60 characters.")
-    // No digit and no comma: no suburb has either, and either would make the
-    // composed line read back as a different address.
-    .refine(
-      (v) => !CONTROL.test(v) && !/[0-9,]/.test(v),
-      "Just the suburb name here. The street goes in the line above.",
-    ),
-  state: z.enum(AU_STATES, { message: "Please choose a state." }),
-  postcode: z
-    .string()
-    .trim()
-    .regex(/^[0-9]{4}$/, "A postcode is four digits."),
-});
+export const auAddressSchema = z
+  .object({
+    street: z
+      .string()
+      .trim()
+      .min(1, "Please give the street address.")
+      .max(AU_ADDRESS_LIMITS.street, "Please keep the street address under 200 characters.")
+      .refine((v) => !CONTROL.test(v), "Please keep the street address on one line."),
+    suburb: z
+      .string()
+      .trim()
+      .min(1, "Please give the suburb.")
+      .max(AU_ADDRESS_LIMITS.suburb, "Please keep the suburb under 60 characters.")
+      // No digit and no comma: no suburb has either, and either would make the
+      // composed line read back as a different address.
+      .refine(
+        (v) => !CONTROL.test(v) && !/[0-9,]/.test(v),
+        "Just the suburb name here. The street goes in the line above.",
+      ),
+    state: z.enum(AU_STATES, { message: "Please choose a state." }),
+    postcode: z
+      .string()
+      .trim()
+      .regex(/^[0-9]{4}$/, "A postcode is four digits."),
+  })
+  // Strict, so a key nobody reads (a `unit`, a `country`) is refused rather
+  // than silently dropped: dropping it would put a shorter address than the
+  // one sent onto a signed waiver. The agent API is who sends extra keys.
+  .strict();
 
 /**
  * The address a submission carries, as the line to store and the parts beside

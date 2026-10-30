@@ -11,7 +11,9 @@ import {
   composeAuAddress,
   draftAddressLine,
   EMPTY_AU_ADDRESS,
+  addressPartsFromLine,
   isBlankAuAddress,
+  readComposedAuAddress,
   postcodeStateNote,
   resolveAddressInput,
   sameAuAddress,
@@ -320,5 +322,43 @@ describe("postcodeStateNote", () => {
     expect(postcodeStateNote(barooga)).not.toBeNull();
     expect(auAddressProblems(barooga)).toEqual([]);
     expect(completeAuAddress(barooga)).toEqual(barooga);
+  });
+});
+
+describe("readComposedAuAddress", () => {
+  // Lines this app composed from parts somebody entered. splitAuAddress
+  // refuses both of these on purpose, which is why the guardian's address,
+  // stored only as its line, has to be read back this way.
+  it.each([
+    [{ street: "Rose Cottage", suburb: "Glebe", state: "NSW", postcode: "2037" }],
+    [{ street: "Lot 12", suburb: "Barooga", state: "NSW", postcode: "3644" }],
+  ] as const)("reads back %j", (parts) => {
+    const line = composeAuAddress(parts);
+    expect(splitAuAddress(line)).toBeNull();
+    expect(readComposedAuAddress(line)).toEqual(parts);
+    expect(addressPartsFromLine(line)).toEqual(parts);
+  });
+
+  it("reads nothing that is not exactly the composed shape", () => {
+    expect(readComposedAuAddress("1 Broadway, Ultimo, NSW 2007")).toBeNull();
+    expect(readComposedAuAddress("1 Broadway Ultimo NSW 2007")).toBeNull();
+    expect(readComposedAuAddress("Unit 3, 12 Smith St Pyrmont NSW 2009")).toBeNull();
+  });
+
+  it("falls back to the careful split for a line somebody typed", () => {
+    expect(addressPartsFromLine("5 Quay St, Haymarket nsw 2000, Australia")).toEqual({
+      street: "5 Quay St",
+      suburb: "Haymarket",
+      state: "NSW",
+      postcode: "2000",
+    });
+  });
+});
+
+describe("auAddressSchema refuses keys it does not read", () => {
+  // Dropping a `unit` silently would put a shorter address on a signed waiver.
+  it("refuses a unit or a country rather than dropping it", () => {
+    expect(auAddressSchema.safeParse({ ...broadway, unit: "3" }).success).toBe(false);
+    expect(auAddressSchema.safeParse({ ...broadway, country: "AU" }).success).toBe(false);
   });
 });

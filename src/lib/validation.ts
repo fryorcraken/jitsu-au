@@ -4262,7 +4262,10 @@ export const updateMyProfileSchema = z
     address_suburb: auAddressSchema.shape.suburb.optional(),
     address_state: auAddressSchema.shape.state.optional(),
     address_postcode: auAddressSchema.shape.postcode.optional(),
-    address: z.string().trim().min(1).max(300).optional(),
+    // Only checked when it arrives on its own (the refine below): sent with
+    // the parts it is replaced by the line composed from them, so refusing
+    // the save over it would be refusing something about to be thrown away.
+    address: z.string().trim().optional(),
     sms_whatsapp_consent: z.boolean().optional(),
     // Deliberately NOT nullable, unlike the kit sizes and the two names. The
     // column's null means "the club has never asked this person", which stops
@@ -4299,6 +4302,13 @@ export const updateMyProfileSchema = z
         .map((part) => part === undefined)
         .every((absent, _i, all) => absent === all[0]),
     { message: "Please give the whole address: street, suburb, state and postcode." },
+  )
+  .refine(
+    (patch) =>
+      patch.address_street !== undefined ||
+      patch.address === undefined ||
+      (patch.address.length >= 1 && patch.address.length <= 300),
+    { message: "Please give an address of up to 300 characters.", path: ["address"] },
   )
   .transform((patch) => {
     const { address_street, address_suburb, address_state, address_postcode } = patch;
