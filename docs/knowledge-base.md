@@ -143,6 +143,10 @@ reader to the fees part of the grading article without them having to find it.
 - **Every heading has an anchor**, and it is the heading's own words, lowercased
   with anything else turned into hyphens. `## How grading works` answers to
   `#how-grading-works`. Two headings with the same words get `-2`, `-3`.
+  A heading counts whether or not there is a blank line around it, as long as
+  its `#` is at the very start of the line. Until October 2026 one needed a
+  blank line above it, and three belt pages written without them showed 1 to 3
+  of their 10 to 12 sections in "On this page".
 - **Link to one with an ordinary Markdown link.** `[the fees](/kb/belts#fees)`
   from another article, `[the fees](#fees)` inside the same one. There is no
   special syntax, because there does not need to be.
@@ -385,7 +389,9 @@ sidebar label) writes no version at all. Otherwise every reordering would tell
 every reader the article had been updated.
 
 Comments are anchored to a **block** (a paragraph, heading, list, or code fence),
-by a hash of that block's own **text** rather than its position. The consequences
+by a hash of that block's own **text** rather than its position. Blocks are
+separated by blank lines, and a heading is always a block of its own even with
+none around it. The consequences
 are what a reader actually notices:
 
 - Inserting or deleting a paragraph elsewhere leaves every other comment exactly

@@ -32,6 +32,27 @@ describe("normalizeBlockText", () => {
 });
 
 describe("splitBlocks", () => {
+  // Authors write headings straight under the text above them and put the text
+  // straight under the heading. Markdown renders a heading either way, so the
+  // split has to agree, or the heading gets no anchor and no contents entry.
+  it("makes every heading a block of its own, blank lines or not", () => {
+    const blocks = splitBlocks(
+      "## Techniques\n### Throws\n- O Goshi\n- Uki Goshi\n### Locks\n- Kote Gaeshi",
+    );
+    expect(blocks.map((b) => b.markdown)).toEqual([
+      "## Techniques",
+      "### Throws",
+      "- O Goshi\n- Uki Goshi",
+      "### Locks",
+      "- Kote Gaeshi",
+    ]);
+  });
+
+  it("leaves a heading-looking line inside code, or indented in a list item, alone", () => {
+    expect(splitBlocks("```\n# not a heading\nstill code\n```")).toHaveLength(1);
+    expect(splitBlocks("- item\n  ### nested\n  more")).toHaveLength(1);
+  });
+
   it("splits on blank lines and numbers blocks in reading order", () => {
     const blocks = splitBlocks("# Rules\n\nWash your gi.\n\nClip your nails.");
     expect(blocks.map((b) => b.markdown)).toEqual(["# Rules", "Wash your gi.", "Clip your nails."]);

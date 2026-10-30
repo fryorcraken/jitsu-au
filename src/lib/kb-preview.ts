@@ -48,34 +48,37 @@ export function articlePreview(bodyMd: string, hash?: string): KbPreview {
   const fragment = hash ? `#${hash.replace(/^#/, "")}` : "";
   const target = fragment ? findHeadingForHash(fragment, headings) : null;
 
-  let start = 0;
-  let end = blocks.length;
+  let passage = blocks;
   if (target) {
+    // `splitBlocks` gives every heading a block of its own, so the section is
+    // simply the blocks after its heading, up to the next heading at the same
+    // depth or shallower. The heading block itself is left out: the card
+    // already titles itself with it.
+    const headingIndex = blocks.findIndex((block) => block.id === target.blockId);
     const blockIndex = new Map(blocks.map((block) => [block.id, block.index]));
-    const headingIndex = blockIndex.get(target.blockId) ?? 0;
-    // Start AFTER the heading block: the card already titles itself with it.
-    start = headingIndex + 1;
     const nextHeading = headings.find(
       (heading) =>
         (blockIndex.get(heading.blockId) ?? 0) > headingIndex && heading.depth <= target.depth,
     );
-    if (nextHeading) end = blockIndex.get(nextHeading.blockId) ?? end;
+    const end = nextHeading
+      ? (blockIndex.get(nextHeading.blockId) ?? blocks.length)
+      : blocks.length;
+    passage = blocks.slice(headingIndex + 1, end);
   }
 
-  const passage = blocks.slice(start, end);
   const shown: string[] = [];
   let chars = 0;
-  for (const block of passage) {
+  for (const { markdown } of passage) {
     // The first block always goes in, however long: an empty card for a
     // passage that opens with one long paragraph would be the preview failing
     // at the only thing it is for. After that, a block goes in only if it
     // fits, so one long one cannot carry the card far past the budget.
     if (shown.length > 0) {
       if (shown.length >= PREVIEW_MAX_BLOCKS) break;
-      if (chars + block.markdown.length > PREVIEW_MAX_CHARS) break;
+      if (chars + markdown.length > PREVIEW_MAX_CHARS) break;
     }
-    shown.push(block.markdown);
-    chars += block.markdown.length;
+    shown.push(markdown);
+    chars += markdown.length;
   }
 
   return {
