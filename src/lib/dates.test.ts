@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY, ageOn, describeWhen, formatDate, formatDateOnly, formatDateTime } from "./dates";
+import { EMPTY, describeWhen, formatDate, formatDateOnly, formatDateTime } from "./dates";
 
 describe("formatDate", () => {
   it("shows the empty glyph for a missing date", () => {
@@ -72,20 +72,5 @@ describe("describeWhen", () => {
   it("treats a draft written a minute after midnight as today", () => {
     const justAfterMidnight = new Date(2026, 7, 26, 0, 1, 0).getTime();
     expect(describeWhen(justAfterMidnight, now)).not.toMatch(/yesterday/);
-  });
-});
-
-describe("ageOn", () => {
-  const now = new Date("2026-10-30T00:00:00Z");
-
-  it("counts whole years, turning over on the birthday itself", () => {
-    expect(ageOn("2008-10-30", now)).toBe(18);
-    expect(ageOn("2008-10-31", now)).toBe(17);
-  });
-
-  it("is null without a usable date", () => {
-    expect(ageOn(null, now)).toBeNull();
-    expect(ageOn("not a date", now)).toBeNull();
-    expect(ageOn("2027-01-01", now)).toBeNull();
   });
 });

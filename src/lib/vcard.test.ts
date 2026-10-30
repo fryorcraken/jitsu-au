@@ -143,20 +143,47 @@ describe("buildVCard", () => {
       NOW,
     );
     expect(contactLines(card).filter((l) => l.startsWith("TEL"))).toEqual([
-      "TEL;TYPE=X-Guardian and emergency:0400 000 003",
+      "TEL;TYPE=X-Guardian-Emergency:0400 000 003",
     ]);
   });
 
-  it("knows a number written internationally is the same number", () => {
+  it.each(["+61 400 000 003", "0061 400 000 003", "+61 (0)400 000 003"])(
+    "knows %s is the same number as 0400 000 003",
+    (international) => {
+      const card = buildVCard(
+        minor({
+          phone: "0400 000 003",
+          guardian_phone: international,
+          emergency_contact_phone: null,
+        }),
+        NOW,
+      );
+      expect(contactLines(card).filter((l) => l.startsWith("TEL"))).toEqual([
+        "TEL;TYPE=X-Guardian:0400 000 003",
+      ]);
+    },
+  );
+
+  it("keeps an adult's own mobile as theirs when it is also their emergency number", () => {
+    const card = buildVCard(person({ emergency_contact_phone: "0400 000 001" }), NOW);
+    expect(contactLines(card).filter((l) => l.startsWith("TEL"))).toEqual([
+      "TEL;TYPE=X-Mobile-Emergency:0400 000 001",
+    ]);
+  });
+
+  it("keeps a teenager's own mobile as theirs when they are on a parent's account", () => {
     const card = buildVCard(
-      minor({
-        phone: "0400 000 003",
-        guardian_phone: "+61 400 000 003",
+      person({
+        guardian_user_id: GUARDIAN,
+        date_of_birth: "2009-03-01",
+        phone: "0400 000 005",
+        guardian_phone: "0400 000 003",
         emergency_contact_phone: null,
       }),
       NOW,
     );
     expect(contactLines(card).filter((l) => l.startsWith("TEL"))).toEqual([
+      "TEL;TYPE=CELL:0400 000 005",
       "TEL;TYPE=X-Guardian:0400 000 003",
     ]);
   });
@@ -203,6 +230,14 @@ describe("buildVCard", () => {
     expect(buildVCard(minor({ ...grownUp, date_of_birth: "2008-10-31" }), NOW)).toContain(
       "TEL;TYPE=X-Guardian:0400 000 003",
     );
+    // The 18th birthday is Sydney's date: 8am there on the 30th is still the
+    // 29th in UTC, and they are already an adult.
+    expect(
+      buildVCard(
+        minor({ ...grownUp, date_of_birth: "2008-10-30" }),
+        new Date("2026-10-29T21:00:00Z"),
+      ),
+    ).not.toContain("Guardian");
     // With no birthday on file, the tick is all there is to go on.
     expect(buildVCard(minor({ ...grownUp, date_of_birth: null }), NOW)).toContain(
       "TEL;TYPE=X-Guardian:0400 000 003",

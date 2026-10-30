@@ -16,13 +16,14 @@
 // ⚠️ What is NOT on the card is a decision, not an oversight. A contact card
 // leaves the club's systems the moment it is saved: it syncs to the manager's
 // own Google or iCloud account and goes wherever their phone backs up to. So it
-// carries how to reach somebody and nothing else. Medical notes, consents, the
-// student number and kit sizes stay on the person page.
+// carries how to reach somebody, plus the birthday a contact card is expected
+// to have, and nothing else. Medical notes, consents, the student number and
+// kit sizes stay on the person page.
 
-import { ageOn } from "@/lib/dates";
+import { clubLocalDate } from "@/lib/calendar";
 import { isDependant } from "@/lib/household";
 import { escapeIcsText, foldIcsLine } from "@/lib/ics";
-import { profileFullName } from "@/lib/validation";
+import { isMinorOn, profileFullName } from "@/lib/validation";
 
 export type VCardPerson = {
   first_name: string | null;
@@ -68,12 +69,13 @@ function nameWithRelationship(name: string | null, relationship: string | null):
 }
 
 /**
- * A TYPE label Android shows beside a number. Parameter values may not carry
- * `;`, `:`, `,` or a double quote (RFC 2425 §5.8.2), so anything outside
- * letters, digits, spaces and hyphens is dropped rather than escaped.
+ * A TYPE label Android shows beside a number. An extension type is `X-`
+ * followed by letters, digits and hyphens only (RFC 2426 §4, `x-name`), so
+ * labels are joined with hyphens ("Guardian-Emergency") and anything else is
+ * dropped: an importer stricter than Android's may otherwise discard the line.
  */
-function customType(label: string): string {
-  return `X-${label.replace(/[^A-Za-z0-9 -]/g, "").trim()}`;
+function customType(labels: string[]): string {
+  return `X-${labels.map((l) => l.replace(/[^A-Za-z0-9]/g, "")).join("-")}`;
 }
 
 type ContactPoint = { value: string; type: string };
@@ -85,15 +87,17 @@ type ContactPoint = { value: string; type: string };
  * the guardian field and the emergency field. Three entries for one number, the
  * first calling it the child's mobile, is exactly how a manager ends up
  * believing they can ring a ten-year-old. So a value written twice becomes one
- * entry carrying every label it came in with ("Guardian and emergency"), and
+ * entry carrying every label it came in with ("Guardian-Emergency"), and
  * anything that is one of `guardians` is labelled Guardian whichever slot it
- * came in through. `ownType` is for a value that is only the person's own.
+ * came in through. An entry with no label is the person's own: alone it is
+ * `ownType`, and beside other labels it is called `ownLabel`, so an adult who
+ * gave their own mobile as their emergency number keeps it as their mobile.
  */
 function contactPoints(
   entries: { value: string | null; label: string | null }[],
   guardians: (string | null)[],
   key: (value: string) => string,
-  ownType: string,
+  own: { type: string; label: string },
 ): ContactPoint[] {
   const guardianKeys = new Set(guardians.map(clean).flatMap((g) => (g ? [key(g)] : [])));
   const byKey = new Map<string, { value: string; labels: string[] }>();
@@ -107,25 +111,29 @@ function contactPoints(
       point = { value, labels: guardianKeys.has(k) ? ["Guardian"] : [] };
       byKey.set(k, point);
     }
-    if (entry.label && !point.labels.includes(entry.label)) point.labels.push(entry.label);
+    // The person's own, unless it is their guardian's: that is the whole point.
+    const label = entry.label ?? (guardianKeys.has(k) ? null : own.label);
+    if (label && !point.labels.includes(label)) point.labels.push(label);
   }
   return [...byKey.values()].map(({ value, labels }) => ({
     value,
-    type: labels.length
-      ? customType(labels.map((l, i) => (i === 0 ? l : l.toLowerCase())).join(" and "))
-      : ownType,
+    type:
+      labels.length === 0 || (labels.length === 1 && labels[0] === own.label)
+        ? own.type
+        : customType(labels),
   }));
 }
 
 /**
  * The digits that identify a phone number, so one number typed two ways is
  * still one number. An Australian number written internationally drops its
- * trunk 0 after the 61 ("+61 400 000 001" is "0400 000 001"), so that form is
- * put back to the national one.
+ * trunk 0 after the 61, so "+61 400 000 001", "0061 400 000 001" and
+ * "+61 (0)400 000 001" are all put back to "0400000001".
  */
 function phoneKey(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  return digits.length === 11 && digits.startsWith("61") ? `0${digits.slice(2)}` : digits;
+  const digits = phone.replace(/\D/g, "").replace(/^00/, "");
+  const national = /^610?(\d{9})$/.exec(digits);
+  return national ? `0${national[1]}` : digits;
 }
 
 /**
@@ -154,10 +162,10 @@ export function buildVCard(p: VCardPerson, now: Date = new Date()): string {
   // account holder has one only while they are still a minor: `is_minor` is
   // the tick on the waiver they signed, so somebody who signed at 17 still
   // carries it at 20, and their parent's details do not belong in a manager's
-  // phone as the contact for an adult. Without a birthday the tick is all
-  // there is to go on.
-  const age = ageOn(p.date_of_birth, now);
-  const hasGuardian = dependant || (age === null ? p.is_minor : age < 18);
+  // phone as the contact for an adult. Their 18th birthday is the club's date,
+  // in Sydney, not UTC's. Without a birthday the tick is all there is to go on.
+  const hasGuardian =
+    dependant || (p.date_of_birth ? isMinorOn(p.date_of_birth, clubLocalDate(now)) : p.is_minor);
   const guardianPhone = hasGuardian ? p.guardian_phone : null;
   const guardianEmail = hasGuardian ? p.guardian_email : null;
 
@@ -167,10 +175,13 @@ export function buildVCard(p: VCardPerson, now: Date = new Date()): string {
       { value: guardianPhone, label: "Guardian" },
       { value: p.emergency_contact_phone, label: "Emergency" },
     ],
-    // A dependant's own number is their account holder's.
-    [guardianPhone, dependant ? p.phone : null],
+    // A dependant's own number is usually their account holder's, but a
+    // teenager on a parent's account can have a mobile of their own. The
+    // guardian's number on file settles which; without one, the number is
+    // taken to be the account holder's, since that is who the club reaches.
+    [guardianPhone, dependant && !clean(guardianPhone) ? p.phone : null],
     phoneKey,
-    "CELL",
+    { type: "CELL", label: "Mobile" },
   );
   for (const tel of phones) add(`TEL;TYPE=${tel.type}:${text(tel.value)}`);
 
@@ -185,7 +196,7 @@ export function buildVCard(p: VCardPerson, now: Date = new Date()): string {
     // holder's, so it is labelled as theirs rather than passed off as the child's.
     [guardianEmail, dependant ? p.email : null],
     (email) => email.toLowerCase(),
-    "HOME",
+    { type: "HOME", label: "Home" },
   );
   for (const email of emails) add(`EMAIL;TYPE=${email.type}:${text(email.value)}`);
 

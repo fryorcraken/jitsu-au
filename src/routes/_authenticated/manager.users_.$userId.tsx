@@ -874,8 +874,13 @@ function ManagerUserPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             {/* Every person has an email (it lives on their login record), so a
-                missing one here means the lookup failed, not that we hold none. */}
-            <span>{summary.email ?? "Email lookup failed"}</span>
+                missing one here means the lookup failed, not that we hold none.
+                It also says what that does to the contact card, which would
+                otherwise sit in somebody's phone for years looking complete. */}
+            <span>
+              {summary.email ??
+                "Email lookup failed, so a contact card downloaded now will not include one. Reload to try again."}
+            </span>
             {/* A dependant has no mailbox of their own, so this is their
                 guardian's address and the page has to say so. Without it a
                 manager reads a child's page and believes they can write to the
@@ -907,18 +912,6 @@ function ManagerUserPage() {
           </Button>
         </div>
       </div>
-
-      {/* Every person has an email, so none here means the lookup failed. A
-          contact card downloaded now would still have their phone and address
-          and sit in somebody's phone for years looking complete, so this says
-          so before the click, and stays on screen rather than fading as a
-          toast would. */}
-      {!summary.email ? (
-        <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
-          We could not look up their email, so a contact card downloaded now will not include one.
-          Reload the page to try again.
-        </p>
-      ) : null}
 
       <EmailCard
         userId={userId}
