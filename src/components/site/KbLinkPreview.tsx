@@ -15,7 +15,7 @@
 // The markdown renderer is passed in rather than imported, because the card is
 // itself rendered from `kb-markdown.tsx`'s link override, and importing that
 // module back from here would make the two depend on each other.
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Portal } from "@radix-ui/react-hover-card";
 import { ArrowRight } from "lucide-react";
@@ -46,6 +46,35 @@ export function KbLinkPreview({ slug, hash, samePage = false, renderMarkdown, ch
   const [open, setOpen] = useState(false);
   const pointerType = useRef<string>("");
   const triggerRef = useRef<HTMLAnchorElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const pendingClose = useRef<((event: MouseEvent) => void) | null>(null);
+
+  const cancelPendingClose = () => {
+    if (pendingClose.current) document.removeEventListener("click", pendingClose.current, true);
+    pendingClose.current = null;
+  };
+
+  // A finger put down outside the card is usually the start of a scroll, not a
+  // tap, and a scroll ends without a click. So a touch outside closes the card
+  // on the click that follows it, if one does; a mouse press closes it at once.
+  // Radix's dismiss layer worked this way itself until 1.2, which dropped the
+  // wait for every component except dialogs and popovers.
+  const closeOnNextClick = () => {
+    cancelPendingClose();
+    const onClick = (event: MouseEvent) => {
+      pendingClose.current = null;
+      const target = event.target as Node;
+      if (cardRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    pendingClose.current = onClick;
+    document.addEventListener("click", onClick, { capture: true, once: true });
+  };
+
+  useEffect(() => {
+    if (!open) cancelPendingClose();
+    return cancelPendingClose;
+  }, [open]);
 
   return (
     <HoverCard open={open} onOpenChange={setOpen} openDelay={350} closeDelay={150}>
@@ -82,6 +111,7 @@ export function KbLinkPreview({ slug, hash, samePage = false, renderMarkdown, ch
           italics. */}
       <Portal>
         <HoverCardContent
+          ref={cardRef}
           align="start"
           collisionPadding={16}
           className="w-80 max-w-[calc(100vw-2rem)] p-0"
@@ -90,7 +120,13 @@ export function KbLinkPreview({ slug, hash, samePage = false, renderMarkdown, ch
           // second tap reopens the card instead of following the link, so a
           // touch reader could never get through.
           onPointerDownOutside={(event) => {
-            if (triggerRef.current?.contains(event.target as Node)) event.preventDefault();
+            if (triggerRef.current?.contains(event.target as Node)) {
+              event.preventDefault();
+              return;
+            }
+            if (event.detail.originalEvent.pointerType === "mouse") return;
+            event.preventDefault();
+            closeOnNextClick();
           }}
         >
           <PreviewBody
