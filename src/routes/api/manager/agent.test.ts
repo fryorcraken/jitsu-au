@@ -1443,6 +1443,120 @@ describe("manager agent route: club settings", () => {
   });
 });
 
+describe("manager agent route: site banner", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A fake `club_settings` store holding (or failing to read) the banner. */
+  function fakeBannerStore(stored: unknown, opts: { readFails?: boolean } = {}) {
+    const upserts: Record<string, unknown>[] = [];
+    return {
+      upserts,
+      db: {
+        from: (table: string) => {
+          if (table !== "club_settings") throw new Error(`unexpected table ${table}`);
+          return {
+            select: () => ({
+              eq: (_col: string, key: string) => ({
+                maybeSingle: () =>
+                  Promise.resolve(
+                    opts.readFails
+                      ? { data: null, error: { message: "connection reset" } }
+                      : ok(
+                          key === "site_banner" && stored !== undefined
+                            ? { value: JSON.stringify(stored) }
+                            : null,
+                        ),
+                  ),
+              }),
+            }),
+            upsert: (row: Record<string, unknown>) => {
+              upserts.push(row);
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      },
+    };
+  }
+
+  const LIVE = {
+    enabled: true,
+    message: "Free trials are paused for now.",
+    link_label: "Register your interest",
+    link_href: "/register-interest",
+  };
+
+  it("reads a banner nobody has set as off", async () => {
+    currentAdmin = fakeBannerStore(undefined).db;
+    const res = await post({ action: "get_site_banner", params: {} });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({
+      banner: { enabled: false, message: "", link_label: "", link_href: "" },
+    });
+  });
+
+  it("answers a failed read with a retryable 503, not an answer of off", async () => {
+    currentAdmin = fakeBannerStore(undefined, { readFails: true }).db;
+    const res = await post({ action: "get_site_banner", params: {} });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("30");
+    expect((await res.json()).error.code).toBe("settings_unreadable");
+  });
+
+  it("turns the banner off and keeps its message for next time", async () => {
+    const fake = fakeBannerStore(LIVE);
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_site_banner", params: { enabled: false } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result.banner).toEqual({ ...LIVE, enabled: false });
+    expect(fake.upserts).toHaveLength(1);
+    expect(fake.upserts[0].key).toBe("site_banner");
+    expect(JSON.parse(fake.upserts[0].value as string)).toEqual({ ...LIVE, enabled: false });
+  });
+
+  it("refuses to switch on a banner with no message, and writes nothing", async () => {
+    const fake = fakeBannerStore(undefined);
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_site_banner", params: { enabled: true } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("invalid_params");
+    expect(fake.upserts).toEqual([]);
+  });
+
+  it("refuses a link that is not a page here or an https address", async () => {
+    const fake = fakeBannerStore(LIVE);
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "save_site_banner",
+      params: { link_href: "javascript:alert(1)" },
+    });
+    expect(res.status).toBe(400);
+    expect(fake.upserts).toEqual([]);
+  });
+
+  // Merging a change over a banner we could not read would save a guess.
+  it("will not save over a banner it could not read", async () => {
+    const fake = fakeBannerStore(undefined, { readFails: true });
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_site_banner", params: { message: "Hello" } });
+    expect(res.status).toBe(503);
+    expect(fake.upserts).toEqual([]);
+  });
+
+  it("refuses an empty call rather than saving nothing", async () => {
+    const fake = fakeBannerStore(LIVE);
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_site_banner", params: {} });
+    expect(res.status).toBe(400);
+    expect(fake.upserts).toEqual([]);
+  });
+});
+
 describe("manager agent route: resend_email", () => {
   beforeEach(() => {
     vi.resetModules();

@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { DEFAULT_INVOICE_INSTRUCTIONS } from "./validation";
-import { getInvoiceInstructions, readClubPaymentDetails } from "./club-settings.server";
+import {
+  getInvoiceInstructions,
+  readClubPaymentDetails,
+  readSiteBanner,
+} from "./club-settings.server";
 
 const ACCOUNT = {
   account_name: "UTS Jitsu Club Inc",
@@ -113,5 +117,29 @@ describe("getInvoiceInstructions", () => {
     await expect(getInvoiceInstructions(erroringAdmin())).resolves.toBe(
       DEFAULT_INVOICE_INSTRUCTIONS,
     );
+  });
+});
+
+describe("readSiteBanner", () => {
+  const LIVE = { enabled: true, message: "Hi", link_label: "", link_href: "" };
+
+  it("reads a stored banner", async () => {
+    expect(await readSiteBanner(settingsAdmin(JSON.stringify(LIVE)))).toEqual({
+      ok: true,
+      banner: LIVE,
+    });
+  });
+
+  it("reads a banner nobody has set as off, which is a real answer", async () => {
+    expect(await readSiteBanner(settingsAdmin(null))).toEqual({
+      ok: true,
+      banner: { enabled: false, message: "", link_label: "", link_href: "" },
+    });
+  });
+
+  // The manager screen must not show an empty form over a notice that is live.
+  it("keeps a failed read apart from an unset banner", async () => {
+    expect(await readSiteBanner(erroringAdmin())).toEqual({ ok: false, banner: null });
+    expect(await readSiteBanner(throwingAdmin)).toEqual({ ok: false, banner: null });
   });
 });

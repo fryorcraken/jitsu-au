@@ -290,6 +290,19 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   redirect members to somebody else, and nothing on screen would show it. A
   manager changes them on the screen, signed in, after a confirm. What the
   reply-to does: `docs/emails.md`.
+- `get_site_banner` / `save_site_banner` (`"29"`) — the notice across the top
+  of every public page, read and written through `loadSiteBanner` and
+  `writeClubSetting` in `src/lib/club-settings.functions.ts`, the same calls
+  `/manager/site-banner` makes. `get_site_banner` returns `{ banner }`, off when
+  nobody has set one, or `503 settings_unreadable` (with a `Retry-After`).
+  `save_site_banner` takes any of `enabled`, `message`, `link_label` and
+  `link_href` and merges them over what is stored, so `{ "enabled": false }`
+  turns it off and keeps the message; the merged banner then has to pass
+  `siteBannerSchema`, the screen's own rules (`400 invalid_params` otherwise).
+  It refuses with `503` rather than merge over a banner it could not read.
+  **Unlike `get_club_settings`, this one is writable**, deliberately: the banner
+  is public text, moves no money and no replies, and is undone by saving again,
+  the same footing as `save_blog_post`. Product rules: `docs/site-banner.md`.
 - `resend_email` (`"22"`) — `{ kind, record_id, client_submission_id? }` sends
   one email again through `resendEmail` in `src/lib/email-resend.functions.ts`,
   the function the screens' Resend buttons post to, so the email is rebuilt from
@@ -605,7 +618,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"28"`.
+test so the bump is a deliberate edit, and the current value is `"29"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

@@ -309,7 +309,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "28",
+  version: "29",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -322,6 +322,15 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "29",
+      // Purely additive: two new actions. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "New action get_site_banner: the notice across the top of every public page, as { banner: { enabled, message, link_label, link_href } }. A banner nobody has set reads as enabled: false with empty strings. 503 settings_unreadable when it cannot be read, rather than an answer of off.",
+        'New action save_site_banner: send any of enabled, message, link_label and link_href; what you leave out keeps its stored value, so {"enabled": false} turns the banner off and keeps its message for next time. It goes live for visitors at once (within a few minutes for one who already has the page open). The message is one line, up to 200 characters. The link is optional, but link_label and link_href come together, and link_href is a page on this site (/register-interest) or a full https:// address. Returns the banner as saved.',
+      ],
+    },
     {
       version: "28",
       // Three new response fields; nothing that worked before changes.
@@ -1427,6 +1436,40 @@ export const AGENT_MANIFEST: {
       summary:
         "Read the club-wide settings: email_reply_to (where a reply to any club email goes, or null when unset) and payment_details (the bank account members pay into, or null when not published). 503 settings_unreadable when they could not be read: that is not the same as nothing being set, so retry rather than treating it as empty.",
       params: [],
+    },
+    {
+      name: "get_site_banner",
+      method: "POST",
+      summary:
+        "Read the site banner, the one-line notice across the top of every public page: { banner: { enabled, message, link_label, link_href } }. Off (enabled: false) when nobody has set one; the message may still be there while it is off. 503 settings_unreadable when it could not be read, which is not the same as it being off.",
+      params: [],
+    },
+    {
+      name: "save_site_banner",
+      method: "POST",
+      summary:
+        "Change the site banner. Public and immediate: every visitor sees it at the top of every public page until they close it, and a changed message is shown again even to people who closed the old one. Send only the fields you are changing; the rest keep their stored values. Undone by saving again (enabled: false turns it off). 400 invalid_params when the result breaks a rule below; 503 settings_unreadable when the current banner could not be read, so nothing is merged over a guess. Returns the banner as saved.",
+      params: [
+        { name: "enabled", required: false, description: "true shows the banner, false hides it." },
+        {
+          name: "message",
+          required: false,
+          description:
+            "One line, up to 200 characters; line breaks become spaces. Required (non-empty) while enabled is true.",
+        },
+        {
+          name: "link_label",
+          required: false,
+          description:
+            "The underlined link text after the message, up to 60 characters. Empty for no link. Needs link_href.",
+        },
+        {
+          name: "link_href",
+          required: false,
+          description:
+            "Where the link goes: a page on this site starting with / (like /register-interest) or a full https:// address. Empty for no link. Needs link_label.",
+        },
+      ],
     },
     {
       name: "resend_email",

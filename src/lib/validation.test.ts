@@ -8,6 +8,11 @@ import {
   clubReplyToSchema,
   parseClubReplyTo,
   saveClubSettingsSchema,
+  SITE_BANNER_MESSAGE_MAX,
+  SITE_BANNER_OFF,
+  agentSaveSiteBannerSchema,
+  parseSiteBanner,
+  siteBannerSchema,
   agentGetWaiverTemplateSchema,
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
@@ -3042,6 +3047,125 @@ describe("clubReplyToSchema", () => {
     expect(saveClubSettingsSchema.safeParse({ key: "something_else", value: "x" }).success).toBe(
       false,
     );
+  });
+});
+
+describe("siteBannerSchema", () => {
+  const LIVE = {
+    enabled: true,
+    message: "Free trials are paused for now.",
+    link_label: "Register your interest",
+    link_href: "/register-interest",
+  };
+
+  it("accepts a banner with a link to a page on this site", () => {
+    expect(siteBannerSchema.parse(LIVE)).toEqual(LIVE);
+  });
+
+  it("accepts a full https address as the link", () => {
+    const external = { ...LIVE, link_href: "https://example.com/news" };
+    expect(siteBannerSchema.safeParse(external).success).toBe(true);
+  });
+
+  it("accepts a banner with no link, the link fields defaulting to empty", () => {
+    expect(siteBannerSchema.parse({ enabled: true, message: "Closed Monday." })).toEqual({
+      enabled: true,
+      message: "Closed Monday.",
+      link_label: "",
+      link_href: "",
+    });
+  });
+
+  it("keeps the message on one line", () => {
+    const parsed = siteBannerSchema.parse({ ...LIVE, message: "  Closed\n\nMonday.  " });
+    expect(parsed.message).toBe("Closed Monday.");
+  });
+
+  it("refuses to switch on a banner with nothing to say", () => {
+    const result = siteBannerSchema.safeParse({ ...LIVE, message: "   " });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual(["message"]);
+  });
+
+  it("keeps a message while the banner is off, and allows none", () => {
+    expect(siteBannerSchema.safeParse({ ...LIVE, enabled: false }).success).toBe(true);
+    expect(siteBannerSchema.safeParse(SITE_BANNER_OFF).success).toBe(true);
+  });
+
+  it("refuses a message longer than one line can hold", () => {
+    const long = "a".repeat(SITE_BANNER_MESSAGE_MAX + 1);
+    expect(siteBannerSchema.safeParse({ ...LIVE, message: long }).success).toBe(false);
+  });
+
+  it("wants the link text and its address together", () => {
+    const noHref = siteBannerSchema.safeParse({ ...LIVE, link_href: "" });
+    expect(noHref.error?.issues.map((i) => i.path[0])).toEqual(["link_href"]);
+    const noLabel = siteBannerSchema.safeParse({ ...LIVE, link_label: "" });
+    expect(noLabel.error?.issues.map((i) => i.path[0])).toEqual(["link_label"]);
+  });
+
+  it("refuses a link that could take a visitor somewhere unsafe", () => {
+    for (const href of [
+      "javascript:alert(1)",
+      "http://example.com",
+      "//example.com",
+      "register-interest",
+      "/register interest",
+      "data:text/html,hi",
+    ]) {
+      expect(siteBannerSchema.safeParse({ ...LIVE, link_href: href }).success, href).toBe(false);
+    }
+  });
+
+  it("is saved under its own key", () => {
+    expect(saveClubSettingsSchema.parse({ key: "site_banner", value: LIVE })).toEqual({
+      key: "site_banner",
+      value: LIVE,
+    });
+    expect(saveClubSettingsSchema.safeParse({ key: "site_banner", value: "hi" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("parseSiteBanner", () => {
+  it("reads unset as off", () => {
+    expect(parseSiteBanner(null)).toEqual(SITE_BANNER_OFF);
+    expect(parseSiteBanner("")).toEqual(SITE_BANNER_OFF);
+  });
+
+  it("reads back a stored banner", () => {
+    const stored = { enabled: true, message: "Hi", link_label: "", link_href: "" };
+    expect(parseSiteBanner(JSON.stringify(stored))).toEqual(stored);
+  });
+
+  // Showing a half-valid banner to every visitor is worse than showing none.
+  it("reads anything that would not pass today's rules as off", () => {
+    expect(parseSiteBanner("{not json")).toEqual(SITE_BANNER_OFF);
+    expect(parseSiteBanner(JSON.stringify({ enabled: true, message: "" }))).toEqual(
+      SITE_BANNER_OFF,
+    );
+    expect(
+      parseSiteBanner(
+        JSON.stringify({
+          enabled: true,
+          message: "Hi",
+          link_label: "Go",
+          link_href: "javascript:x",
+        }),
+      ),
+    ).toEqual(SITE_BANNER_OFF);
+  });
+});
+
+describe("agentSaveSiteBannerSchema", () => {
+  it("takes any one field on its own", () => {
+    expect(agentSaveSiteBannerSchema.parse({ enabled: false })).toEqual({ enabled: false });
+  });
+
+  it("refuses an empty change and an unknown field", () => {
+    expect(agentSaveSiteBannerSchema.safeParse({}).success).toBe(false);
+    expect(agentSaveSiteBannerSchema.safeParse({ colour: "red" }).success).toBe(false);
   });
 });
 
