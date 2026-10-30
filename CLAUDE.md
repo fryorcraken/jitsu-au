@@ -806,9 +806,14 @@ bar. Its `no-store` is load-bearing rather than precautionary, because a cached
 redirect would hand one person's `Set-Cookie` to the next. The cookie's own
 attributes and lifetime are in `src/lib/email-settings-session.ts`.
 
+- **On Lovable's hosting the `no-referrer` never reaches the browser**: the
+  token paths arrive with `strict-origin-when-cross-origin`, over ours.
+  The tokens stay safe because no token URL is ever a page, and the two HTML
+  documents that can appear at one carry a `no-referrer` meta tag. The evidence
+  and the rule are in the `security-headers.ts` module comment.
 - **Adding a route that takes a token in its path?** Add its prefix to
   `TOKEN_PATH_PREFIXES` and to `public/_headers`. `security-headers.test.ts`
-  fails if the two disagree.
+  fails if the two disagree. If the route renders HTML, it needs the meta tag too.
 - **A route's own headers win.** The middleware only fills in `cache-control`
   when the route did not set one, so the calendar feed keeps the
   `private, max-age=300` its subscribers poll against.

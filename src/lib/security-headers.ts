@@ -38,6 +38,29 @@
  * `security-headers.test.ts` fails if the two drift apart. The no-store matters
  * more there than here: that file covers the case where this middleware never
  * ran, so nothing else would keep a URL with a credential in it out of a cache.
+ *
+ * On Lovable's hosting the `no-referrer` does NOT reach the browser. Checked on
+ * 2026-10-30: the live token paths answer `strict-origin-when-cross-origin`,
+ * although the calendar 404 still carries the no-store that only this module
+ * adds there, and a local production build sends `no-referrer` correctly. The
+ * platform's own responses carry the same value too: `jitsu.au/<any path>` is a
+ * 302 to the new host that never reaches this app, and it says
+ * `strict-origin-when-cross-origin`. So the hosting layer puts that value on
+ * responses, over ours. What cannot be told from outside, and Lovable does not
+ * document, is whether it is the platform's own default or our `/*` rule in
+ * `public/_headers` applied after the app; the redirect points at the former.
+ * Only removing the rule, publishing and re-checking would settle it, and the
+ * fix below does not depend on the answer.
+ *
+ * What keeps the tokens out of a `Referer` is therefore not this header. It is
+ * that no token URL is ever a page: the email-settings link and the
+ * verification link are redirects, and the feed is a calendar file. The two
+ * HTML documents that CAN end up at a token URL, the server's error page and
+ * the service worker's offline card, each carry
+ * `<meta name="referrer" content="no-referrer">`, which a browser obeys
+ * whatever header arrived. A route that renders HTML at a token URL needs the
+ * same tag. Re-check with `curl -I` on a token path, not on `/`, which tells
+ * you nothing about these rules.
  */
 
 /** What everything gets: the origin cross-site, the full URL same-site. */

@@ -9,6 +9,7 @@ import {
   carriesTokenInPath,
   referrerPolicyFor,
 } from "./security-headers";
+import { renderErrorPage } from "./error-page";
 
 describe("carriesTokenInPath", () => {
   it("recognises the three routes that take a token in the path", () => {
@@ -193,5 +194,37 @@ describe("public/_headers", () => {
     // no-store over `/*` would strip the asset caching Nitro generates into
     // this same file at build time.
     expect(rules[0]?.headers["cache-control"]).toBeUndefined();
+  });
+});
+
+describe("the HTML documents that can render at a token URL", () => {
+  // The hosting layer replaces this module's `no-referrer` header with its own
+  // value (see the module comment), so on these two pages the meta tag is what
+  // actually keeps the token out of a `Referer`. It has to come before the
+  // first thing on the page that makes a request, or that request goes first.
+  const documents = {
+    "the server's error page": renderErrorPage(),
+    "the offline card": readFileSync(join(process.cwd(), "public/offline.html"), "utf8"),
+  };
+  const META = '<meta name="referrer" content="no-referrer" />';
+
+  for (const [name, html] of Object.entries(documents)) {
+    it(`${name} sends no referrer, whatever header arrived`, () => {
+      const meta = html.indexOf(META);
+      expect(meta, name).toBeGreaterThan(-1);
+      const firstRequest = html.search(/\s(href|src)=/);
+      if (firstRequest > -1) expect(meta, name).toBeLessThan(firstRequest);
+    });
+  }
+});
+
+describe("the offline card reaching installed apps", () => {
+  // The host serves offline.html with no cache-control, so a worker that
+  // precaches through the browser's HTTP cache can store the old copy, and the
+  // meta tag above would never reach an install. `reload` goes to the network.
+  const sw = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");
+
+  it("precaches the shell past the browser's HTTP cache", () => {
+    expect(sw).toMatch(/new Request\(url, \{ cache: "reload" \}\)/);
   });
 });
