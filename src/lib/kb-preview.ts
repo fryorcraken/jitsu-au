@@ -48,12 +48,14 @@ export function articlePreview(bodyMd: string, hash?: string): KbPreview {
   const fragment = hash ? `#${hash.replace(/^#/, "")}` : "";
   const target = fragment ? findHeadingForHash(fragment, headings) : null;
 
-  let passage: string[];
-  if (!target) {
-    passage = blocks.map((block) => block.markdown);
-  } else {
+  let passage = blocks;
+  if (target) {
+    // `splitBlocks` gives every heading a block of its own, so the section is
+    // simply the blocks after its heading, up to the next heading at the same
+    // depth or shallower. The heading block itself is left out: the card
+    // already titles itself with it.
+    const headingIndex = blocks.findIndex((block) => block.id === target.blockId);
     const blockIndex = new Map(blocks.map((block) => [block.id, block.index]));
-    const headingIndex = blockIndex.get(target.blockId) ?? 0;
     const nextHeading = headings.find(
       (heading) =>
         (blockIndex.get(heading.blockId) ?? 0) > headingIndex && heading.depth <= target.depth,
@@ -61,32 +63,12 @@ export function articlePreview(bodyMd: string, hash?: string): KbPreview {
     const end = nextHeading
       ? (blockIndex.get(nextHeading.blockId) ?? blocks.length)
       : blocks.length;
-
-    // The heading LINE comes off, not the heading's whole block: the card
-    // already titles itself with it. A block is whatever sits between blank
-    // lines, and a list written straight under its heading with no blank line
-    // between them is one block with the heading:
-    //
-    //   ### Open hand
-    //   - Palm heel jab and cross
-    //
-    // Most of the club's technique lists are written that way. Dropping the
-    // whole block showed "nothing is written under this heading" for every one.
-    const { text, endsSection } = sectionStart(
-      blocks[headingIndex].markdown.replace(/^[^\n]*\n?/, ""),
-      target.depth,
-    );
-    passage = [
-      ...(text ? [text] : []),
-      // A sibling heading packed into the same block ends the section there,
-      // so nothing after the block belongs to it either.
-      ...(endsSection ? [] : blocks.slice(headingIndex + 1, end).map((block) => block.markdown)),
-    ];
+    passage = blocks.slice(headingIndex + 1, end);
   }
 
   const shown: string[] = [];
   let chars = 0;
-  for (const markdown of passage) {
+  for (const { markdown } of passage) {
     // The first block always goes in, however long: an empty card for a
     // passage that opens with one long paragraph would be the preview failing
     // at the only thing it is for. After that, a block goes in only if it
@@ -105,46 +87,6 @@ export function articlePreview(bodyMd: string, hash?: string): KbPreview {
     truncated: shown.length < passage.length,
     missingSection: fragment ? missingSectionFragment(fragment, headings) : null,
   };
-}
-
-/**
- * What follows a heading's own line inside its block, cut at a heading of the
- * same depth or shallower if one is packed in there too.
- *
- * `extractHeadings` only sees a heading that opens a block, so a sibling
- * written with no blank line above it (`- Palm\n### Closed fists`) is not a
- * boundary it knows about, and the card would run on into the next section.
- * Lines inside a code fence are code, not headings.
- *
- * Only blank lines come off the ends. A plain `.trim()` would strip the indent
- * from an indented code block on the first line and turn it into a paragraph,
- * the same reason `splitBlocks` does not use one.
- */
-function sectionStart(rest: string, depth: number): { text: string; endsSection: boolean } {
-  const lines = rest.split("\n");
-  let fence: string | null = null;
-  let cut = lines.length;
-  for (let i = 0; i < lines.length; i++) {
-    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i]);
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0];
-      if (fence === null) fence = marker;
-      else if (fence === marker) fence = null;
-      continue;
-    }
-    if (fence !== null) continue;
-    const heading = /^ {0,3}(#{1,6})\s/.exec(lines[i]);
-    if (heading && heading[1].length <= depth) {
-      cut = i;
-      break;
-    }
-  }
-  const text = lines
-    .slice(0, cut)
-    .join("\n")
-    .replace(/^(?:[ \t]*\n)+/, "")
-    .replace(/(?:\n[ \t]*)+$/, "");
-  return { text: text.trim() ? text : "", endsSection: cut < lines.length };
 }
 
 /**

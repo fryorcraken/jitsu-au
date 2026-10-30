@@ -103,7 +103,7 @@ describe("articlePreview", () => {
 
   // The same club style on both sides of a list: no blank line above the
   // next heading either. The section still stops at its sibling.
-  it("stops at a sibling heading packed into the same block", () => {
+  it("stops at a sibling heading written with no blank line above it", () => {
     const body =
       "## Strikes\n\n### Open hand\n- Palm\n### Closed fists\n- Jab\n\n## Kicks\n\n- Mae geri";
     const preview = articlePreview(body, "open-hand");
@@ -111,9 +111,9 @@ describe("articlePreview", () => {
     expect(preview.truncated).toBe(false);
   });
 
-  it("keeps a deeper heading packed into the block, and stops at none inside code", () => {
+  it("keeps a deeper heading written tight, and stops at none inside code", () => {
     const body = "## Strikes\n- Intro\n### Open hand\n- Palm\n\n## Kicks";
-    expect(articlePreview(body, "strikes").markdown).toBe("- Intro\n### Open hand\n- Palm");
+    expect(articlePreview(body, "strikes").markdown).toBe("- Intro\n\n### Open hand\n\n- Palm");
 
     const fenced = "## Example\n```\n# not a heading\n```\n\nAfter.";
     expect(articlePreview(fenced, "example").markdown).toBe("```\n# not a heading\n```\n\nAfter.");
