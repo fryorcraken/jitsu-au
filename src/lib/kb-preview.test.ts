@@ -101,6 +101,30 @@ describe("articlePreview", () => {
     expect(articlePreview(body, "strikes").markdown).toContain("- Jab");
   });
 
+  // The same club style on both sides of a list: no blank line above the
+  // next heading either. The section still stops at its sibling.
+  it("stops at a sibling heading packed into the same block", () => {
+    const body =
+      "## Strikes\n\n### Open hand\n- Palm\n### Closed fists\n- Jab\n\n## Kicks\n\n- Mae geri";
+    const preview = articlePreview(body, "open-hand");
+    expect(preview.markdown).toBe("- Palm");
+    expect(preview.truncated).toBe(false);
+  });
+
+  it("keeps a deeper heading packed into the block, and stops at none inside code", () => {
+    const body = "## Strikes\n- Intro\n### Open hand\n- Palm\n\n## Kicks";
+    expect(articlePreview(body, "strikes").markdown).toBe("- Intro\n### Open hand\n- Palm");
+
+    const fenced = "## Example\n```\n# not a heading\n```\n\nAfter.";
+    expect(articlePreview(fenced, "example").markdown).toBe("```\n# not a heading\n```\n\nAfter.");
+  });
+
+  // A plain trim would take the indent off and turn the code into a paragraph.
+  it("keeps an indented code block under a heading as code", () => {
+    const preview = articlePreview("### Example\n    const a = 1;\n    const b = 2;", "example");
+    expect(preview.markdown).toBe("    const a = 1;\n    const b = 2;");
+  });
+
   it("still says nothing is there when nothing is", () => {
     expect(articlePreview("### Open hand\n\n### Closed fists\n- Jab", "open-hand").markdown).toBe(
       "",
