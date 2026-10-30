@@ -1322,8 +1322,15 @@ you can send `data` directly, so you will rarely need it.
 scripts/agent.sh start_blog_image_upload '{"name":"mats.jpg","alt":"The mats laid out for grading"}'
 ```
 
-The result's `command` is a `curl` that POSTs the file's raw bytes to the link:
-replace `IMAGE_FILE` with the path and run it. The answer is
+The result's `command` is a `curl` that POSTs the file's raw bytes to the link.
+It reads the path from a shell variable, so set that and run it as given:
+
+```bash
+IMAGE_FILE='mats.jpg'
+# then paste the result's command
+```
+
+The answer is
 `{ "ok": true, "result": { path, url, markdown } }`, as `upload_blog_image`'s.
 The link stores one image and lasts 60 minutes. Using it again is
 `409 already_uploaded` with that image's `path` and `markdown` in

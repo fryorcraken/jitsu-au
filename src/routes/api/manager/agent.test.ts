@@ -6,6 +6,7 @@
 // true of createServerFn handlers.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { AGENT_MANIFEST } from "@/lib/manager-agent";
 
 type Result<T> = { data: T | null; error: { message: string } | null };
 const ok = <T>(data: T): Result<T> => ({ data, error: null });
@@ -1942,9 +1943,17 @@ describe("manager agent route: the blog", () => {
    * filters each chain applies rather than ignoring them, so a save that wrote
    * the wrong row or a slug check that matched nothing would show.
    */
-  function fakeBlog(seed: Row[], opts: { afterFirstRead?: (rows: Row[]) => void } = {}) {
+  function fakeBlog(
+    seed: Row[],
+    opts: {
+      afterFirstRead?: (rows: Row[]) => void;
+      /** Another upload lands at the same path just before the first one does. */
+      racedBy?: boolean;
+    } = {},
+  ) {
     const rows = seed.map((r) => ({ ...r }));
     let reads = 0;
+    let raced = false;
     const uploads: { path: string; type: string; size: number }[] = [];
     const removed: string[] = [];
     const query = (op: "select" | "update" | "delete", patch?: Row) => {
@@ -2008,12 +2017,16 @@ describe("manager agent route: the blog", () => {
           from: (bucket: string) => {
             if (bucket !== "blog-media") throw new Error(`unexpected bucket ${bucket}`);
             return {
-              upload: (path: string, bytes: Uint8Array, opts: { contentType: string }) => {
+              upload: (path: string, bytes: Uint8Array, up: { contentType: string }) => {
+                if (opts.racedBy && !raced) {
+                  raced = true;
+                  uploads.push({ path, type: up.contentType, size: 1 });
+                }
                 // As the bucket does with upsert off: a path is written once.
                 if (uploads.some((u) => u.path === path)) {
                   return Promise.resolve({ error: { message: "The resource already exists" } });
                 }
-                uploads.push({ path, type: opts.contentType, size: bytes.byteLength });
+                uploads.push({ path, type: up.contentType, size: bytes.byteLength });
                 return Promise.resolve({ error: null });
               },
               list: (folder: string, opts: { search: string }) =>
@@ -2344,7 +2357,7 @@ describe("manager agent route: the blog", () => {
       // verify on itself, so it hands out its own address.
       expect(link.upload_url).toBe("http://localhost/api/manager/blog-image");
       expect(link.command).toContain(link.token);
-      expect(link.command).toContain("--data-binary '@IMAGE_FILE'");
+      expect(link.command).toContain('--data-binary "@$IMAGE_FILE"');
       const minutes = (Date.parse(link.expires_at) - before) / 60_000;
       expect(minutes).toBeGreaterThan(59.9);
       expect(minutes).toBeLessThan(60.1);
@@ -2373,7 +2386,8 @@ describe("manager agent route: the blog", () => {
       const link = await startUpload({ post_id: DRAFT_ID, name: "mat", alt: "The mats laid out" });
       const res = await send(link.token);
       expect(res.status).toBe(200);
-      const { result } = await res.json();
+      const { result, version } = await res.json();
+      expect(version).toBe(AGENT_MANIFEST.version);
       expect(fake.uploads).toEqual([
         {
           path: expect.stringMatching(new RegExp(`^${DRAFT_ID}/.+-mat\\.png$`)),
@@ -2402,6 +2416,43 @@ describe("manager agent route: the blog", () => {
         markdown: first.result.markdown,
       });
       expect(fake.uploads).toHaveLength(1);
+    });
+
+    // Two uploads on one link, both past the "already used?" look before
+    // either stored: the bucket refuses the second, and it must hear what the
+    // first stored rather than a database error.
+    it("tells the loser of a race on one link what the winner stored", async () => {
+      const fake = fakeBlog([], { racedBy: true });
+      currentAdmin = fake.db;
+      const link = await startUpload();
+      const res = await send(link.token);
+      expect(res.status).toBe(409);
+      const { error } = await res.json();
+      expect(error.code).toBe("already_uploaded");
+      expect(error.details.path).toBe(fake.uploads[0].path);
+      expect(fake.uploads).toHaveLength(1);
+    });
+
+    // Over MCP no front door says what address was asked. On a local stack
+    // the only link left is the live site's, which its ticket cannot pass.
+    it("gives no link over MCP from a local stack, and the live one otherwise", async () => {
+      currentAdmin = fakeBlog([]).db;
+      const { dispatch } = await import("@/lib/manager-agent-actions");
+      const before = process.env.SUPABASE_URL;
+      try {
+        process.env.SUPABASE_URL = "http://127.0.0.1:54321";
+        await expect(dispatch("start_blog_image_upload", {}, TOKEN_OWNER)).rejects.toMatchObject({
+          code: "upload_links_unavailable",
+        });
+        process.env.SUPABASE_URL = "https://abcdefghijklmnop.supabase.co";
+        const link = (await dispatch("start_blog_image_upload", {}, TOKEN_OWNER)) as {
+          upload_url: string;
+        };
+        expect(link.upload_url).toBe("https://utsjitsu.com.au/api/manager/blog-image");
+      } finally {
+        if (before === undefined) delete process.env.SUPABASE_URL;
+        else process.env.SUPABASE_URL = before;
+      }
     });
 
     it("gives each link its own image", async () => {

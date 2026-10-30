@@ -12,7 +12,7 @@ export const API_TOKEN_PREFIX = "utsj_";
 export const TOKEN_PREVIEW_LEN = API_TOKEN_PREFIX.length + 8;
 
 /** Access the platform Web Crypto implementation (Workers, Node 20+, jsdom). */
-function webCrypto(): Crypto {
+export function webCrypto(): Crypto {
   const c = (globalThis as { crypto?: Crypto }).crypto;
   if (!c?.subtle) throw new Error("Web Crypto is not available in this runtime.");
   return c;

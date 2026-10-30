@@ -8,6 +8,7 @@
 // works nowhere else. Why it exists, and what keeps it to one image within the
 // hour: src/lib/blog-image-ticket.ts. The answer has the agent API's envelope.
 import { createFileRoute } from "@tanstack/react-router";
+import { AGENT_MANIFEST } from "@/lib/manager-agent";
 import {
   errorResponse,
   json,
@@ -20,7 +21,10 @@ export const Route = createFileRoute("/api/manager/blog-image")({
     handlers: {
       POST: async ({ request }) => {
         try {
-          return json({ ok: true, result: await uploadBlogImageWithTicket(request) });
+          const result = await uploadBlogImageWithTicket(request);
+          // The version travels on every response here too, as on the agent
+          // endpoint, so a client comparing it per call is not left guessing.
+          return json({ ok: true, version: AGENT_MANIFEST.version, result });
         } catch (e) {
           return errorResponse(e);
         }

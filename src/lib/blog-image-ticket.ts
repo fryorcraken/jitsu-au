@@ -35,7 +35,12 @@
 //   dead by the time anyone reads it.
 // - **It answers to its issuer's role today.** The upload re-checks that the
 //   manager who asked for the link still holds the role, as a minted API token
-//   does on every call.
+//   does on every call. It is NOT tied to the credential it was asked for with:
+//   revoking a leaked API token (or an assistant's sign-in) leaves the links
+//   already minted with it working until their hour is up. Closing that would
+//   mean a ticket naming its token and a lookup per upload, and what it guards
+//   is an hour of storing pictures that show nowhere until a manager publishes
+//   them, so it is accepted. Removing somebody's manager role does void them.
 //
 // The ticket is signed rather than stored: an HMAC over its contents, with a
 // key derived (HKDF, a fixed label) from the service-role key, which only the
@@ -45,6 +50,7 @@
 //
 // Pure apart from Web Crypto, so all of it runs under the unit tests.
 import { z } from "zod";
+import { webCrypto } from "@/lib/manager-api-tokens";
 
 /** Human-recognisable prefix, distinct from a manager API token's `utsj_`. */
 export const BLOG_IMAGE_TICKET_PREFIX = "utsu_";
@@ -90,12 +96,6 @@ export class BlogImageTicketError extends Error {
     super(message);
     this.name = "BlogImageTicketError";
   }
-}
-
-function webCrypto(): Crypto {
-  const c = (globalThis as { crypto?: Crypto }).crypto;
-  if (!c?.subtle) throw new Error("Web Crypto is not available in this runtime.");
-  return c;
 }
 
 function toBase64Url(bytes: Uint8Array): string {
@@ -243,17 +243,19 @@ export function assertBlogImageTicketLive(ticket: BlogImageTicket, now: number =
 }
 
 /**
- * The command the assistant runs in its sandbox, with the file's path left as
- * IMAGE_FILE for it to fill in. Single quotes throughout: the token and the
- * address hold nothing a shell would expand, and a phone's file names often
- * hold spaces ("IMG 2041.jpg").
+ * The command the assistant runs in its sandbox, after setting the shell
+ * variable IMAGE_FILE to the file's path. The path is read from a variable,
+ * not pasted into the command, because a phone's file names hold spaces and
+ * apostrophes ("Sam's grading.jpg") that would end a quoted string early; a
+ * double-quoted expansion passes any of them through. The token and the
+ * address hold nothing a shell would expand, so they are single-quoted.
  */
 export function blogImageUploadCommand(uploadUrl: string, token: string): string {
   return [
     "curl -sS -X POST",
     `-H 'Authorization: Bearer ${token}'`,
     "-H 'Content-Type: application/octet-stream'",
-    "--data-binary '@IMAGE_FILE'",
+    '--data-binary "@$IMAGE_FILE"',
     `'${uploadUrl}'`,
   ].join(" ");
 }

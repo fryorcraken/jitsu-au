@@ -532,7 +532,12 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
       by HKDF from the service-role key), and storing one image is all it can
       do. That endpoint takes no other credential, and the agent endpoint does
       not take a ticket. The upload re-checks that the manager who asked still
-      holds the role.
+      holds the role. It is not tied to the credential it was asked with, so
+      revoking a leaked API token or an assistant's sign-in leaves links
+      already minted with it working until their hour is up; removing the
+      manager role does void them. Accepted, because tying it would cost a
+      lookup per upload to guard an hour of storing pictures that show
+      nowhere until a manager publishes them.
     - **Works once, for an hour.** The image is stored under the ticket's own
       id, which the upload looks for first, so a second use is
       `409 already_uploaded` with the first image's `path` / `url` /
@@ -548,8 +553,13 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
       `linkOrigin`: a ticket only verifies on the server that signed it, and
       the live address is the one host that does not redirect a bearer header
       away. A loopback stack asked over HTTP gets a link to itself. Over MCP
-      the SDK does not say which host was asked, so it is always the live
-      site.
+      the SDK does not say which host was asked, so it is the live site, and
+      a local stack (its own database on a loopback host) refuses with
+      `503 upload_links_unavailable` rather than hand out a link its ticket
+      cannot pass.
+    - **The command reads the file's path from a shell variable**
+      (`--data-binary "@$IMAGE_FILE"`), because a pasted path with an
+      apostrophe in it would end a quoted string early.
     - **The sandbox has to be allowed to reach the site.** claude.ai's code
       execution only reaches package registries by default, so the manager adds
       the club's domain to its allowed domains once. Nothing on our side can do

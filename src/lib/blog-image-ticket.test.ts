@@ -104,7 +104,7 @@ describe("blog image upload tickets", () => {
       "https://utsjitsu.com.au/api/manager/blog-image",
       "utsu_x.y",
     );
-    expect(cmd).toContain("--data-binary '@IMAGE_FILE'");
+    expect(cmd).toContain('--data-binary "@$IMAGE_FILE"');
     expect(cmd).toContain("-H 'Authorization: Bearer utsu_x.y'");
     expect(cmd.endsWith("'https://utsjitsu.com.au/api/manager/blog-image'")).toBe(true);
   });

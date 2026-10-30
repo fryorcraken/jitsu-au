@@ -74,7 +74,7 @@ export function linkOrigin(requestOrigin: string | null | undefined): string {
   return isLoopbackHost(url.hostname) ? url.origin : SITE_ORIGIN;
 }
 
-function isLoopbackHost(hostname: string): boolean {
+export function isLoopbackHost(hostname: string): boolean {
   const name = hostname.toLowerCase();
   return (
     name === "localhost" ||
