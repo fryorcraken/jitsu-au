@@ -58,6 +58,25 @@ const FIXTURE_PATH = resolve(
  */
 const PERSONA_PASSWORD = "local-club-fixture-password";
 
+/**
+ * The four address columns for a fixture address written as the app composes
+ * it ("<street>, <suburb> <STATE> <postcode>"), so a seeded waiver looks like
+ * one signed on today's form: parts AND the line made from them, which the
+ * database insists agree (`waivers_address_matches_parts`). Profiles need
+ * none of this, because the database reads their parts out of the line.
+ */
+function addressColumns(line) {
+  const m = /^(.*), ([^,]+) (ACT|NSW|NT|QLD|SA|TAS|VIC|WA) (\d{4})$/.exec(line);
+  if (!m) throw new Error(`fixture address is not in the composed shape: ${line}`);
+  return {
+    address: line,
+    address_street: m[1],
+    address_suburb: m[2],
+    address_state: m[3],
+    address_postcode: m[4],
+  };
+}
+
 /** RFC 2606 reserves example.com, so no fixture address can ever reach anyone. */
 const PERSONAS = {
   manager: { email: "manager@example.com", firstName: "Priya", lastName: "Raman" },
@@ -488,7 +507,7 @@ function dependantWaiver({ waiverId, userId, person, signedDaysAgo }) {
     // whole point of the fixture.
     email: PERSONAS.member.email,
     phone: person.contact.phone,
-    address: person.contact.address,
+    ...addressColumns(person.contact.address),
     date_of_birth: person.dateOfBirth,
     emergency_contact_name: person.contact.emergencyContactName,
     emergency_contact_relationship: person.contact.emergencyContactRelationship,
@@ -519,7 +538,7 @@ await insert("waivers", [
     preferred_name: MEMBER_PREFERRED_NAME,
     email: PERSONAS.member.email,
     phone: "0400 000 002",
-    address: "42 Harris Street, Pyrmont NSW 2009",
+    ...addressColumns("42 Harris Street, Pyrmont NSW 2009"),
     date_of_birth: "1999-11-02",
     uts_student_number: "12345678",
     emergency_contact_name: "Ada Okafor",
@@ -543,7 +562,7 @@ await insert("waivers", [
     last_name: PERSONAS.applicant.lastName,
     email: PERSONAS.applicant.email,
     phone: "0400 000 003",
-    address: "9 Quay Street, Haymarket NSW 2000",
+    ...addressColumns("9 Quay Street, Haymarket NSW 2000"),
     date_of_birth: "2001-06-21",
     emergency_contact_name: "Lin Zhang",
     emergency_contact_relationship: "Parent",

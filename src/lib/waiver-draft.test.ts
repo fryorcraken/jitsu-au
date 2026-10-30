@@ -11,6 +11,7 @@ import {
   writeDraft,
   type WaiverDraft,
 } from "./waiver-draft";
+import { EMPTY_ADDRESS } from "./au-address";
 
 const blank: WaiverDraft = {
   submissionId: "3f7c1a2e-9b4d-4c8a-8e21-5d6f0a1b2c3d",
@@ -22,7 +23,8 @@ const blank: WaiverDraft = {
   dob: "",
   phone: "",
   email: "",
-  address: "",
+  address: EMPTY_ADDRESS,
+  addressOnFile: "",
   utsStudentNumber: "",
   smsConsent: false,
   giSize: "",
@@ -33,7 +35,9 @@ const blank: WaiverDraft = {
   ecIsGuardian: true,
   guardianName: "",
   guardianRelationship: "",
-  guardianAddress: "",
+  guardianSameAddress: true,
+  guardianAddress: EMPTY_ADDRESS,
+  guardianAddressOnFile: "",
   guardianPhone: "",
   guardianEmail: "",
   health: { drugs: null, blackouts: null, device: null, impairments: null, other: null },
@@ -54,7 +58,13 @@ const filled: WaiverDraft = {
   dob: "1990-12-10",
   phone: "0400000000",
   email: "ada@example.com",
-  address: "1 Broadway, Ultimo NSW",
+  address: {
+    ...EMPTY_ADDRESS,
+    street: "1 Broadway",
+    suburb: "Ultimo",
+    state: "NSW",
+    postcode: "2007",
+  },
   smsConsent: true,
   giSize: "4",
   martialArtsExperience: "2 years BJJ",
@@ -200,5 +210,86 @@ describe("readDraft / writeDraft / clearDraft", () => {
   it("returns null rather than throwing on leftover junk", () => {
     sessionStorage.setItem(WAIVER_DRAFT_KEY, "{not json");
     expect(readDraft()).toBeNull();
+  });
+});
+
+describe("addresses in a draft", () => {
+  it("keeps the parts of both addresses across a reload", () => {
+    const draft: WaiverDraft = {
+      ...filled,
+      guardianSameAddress: false,
+      guardianAddress: {
+        ...EMPTY_ADDRESS,
+        street: "9 Quay St",
+        suburb: "Haymarket",
+        state: "",
+        postcode: "20",
+      },
+    };
+    expect(parseDraft(serializeDraft(draft))).toEqual(draft);
+  });
+
+  it("reads a draft written before addresses had parts, without binning it", () => {
+    const old = JSON.parse(serializeDraft(filled));
+    old.address = "1 Broadway, Ultimo NSW 2007";
+    old.guardianAddress = "9 Quay St, Haymarket NSW 2000";
+    delete old.guardianSameAddress;
+    const restored = parseDraft(JSON.stringify(old));
+    expect(restored?.address).toMatchObject({
+      street: "1 Broadway",
+      suburb: "Ultimo",
+      state: "NSW",
+      postcode: "2007",
+    });
+    expect(restored?.guardianSameAddress).toBe(false);
+    expect(restored?.guardianAddress.suburb).toBe("Haymarket");
+  });
+
+  it("restores an old one-line address it cannot split as empty boxes", () => {
+    const old = JSON.parse(serializeDraft(filled));
+    old.address = "1 Broadway Ultimo";
+    old.guardianAddress = "";
+    delete old.guardianSameAddress;
+    const restored = parseDraft(JSON.stringify(old));
+    expect(restored?.address).toEqual(EMPTY_ADDRESS);
+    // ...but not lost: the page shows it above the boxes to copy from.
+    expect(restored?.addressOnFile).toBe("1 Broadway Ultimo");
+    expect(restored?.guardianSameAddress).toBe(true);
+    // The rest of the form is still there.
+    expect(restored?.firstName).toBe("Ada");
+  });
+
+  it("drops a state the form does not offer", () => {
+    const stored = JSON.parse(serializeDraft(filled));
+    stored.address.state = "XYZ";
+    expect(parseDraft(JSON.stringify(stored))?.address.state).toBe("");
+  });
+});
+
+describe("an address outside Australia in a draft", () => {
+  it("keeps the tick, the free-text state and the country across a reload", () => {
+    const draft: WaiverDraft = {
+      ...filled,
+      address: {
+        overseas: true,
+        street: "10 Downing St",
+        suburb: "London",
+        state: "England",
+        postcode: "SW1A 2AA",
+        country: "United Kingdom",
+      },
+    };
+    expect(parseDraft(serializeDraft(draft))?.address).toEqual(draft.address);
+  });
+});
+
+describe("draftHasContent and the address", () => {
+  // Anything typed into the address is a start worth offering back.
+  it.each([
+    ["only a state picked", { ...EMPTY_ADDRESS, state: "VIC" }],
+    ["only the outside-Australia tick", { ...EMPTY_ADDRESS, overseas: true }],
+    ["only a country", { ...EMPTY_ADDRESS, overseas: true, country: "Japan" }],
+  ])("counts %s as started", (_why, address) => {
+    expect(draftHasContent({ ...blank, address })).toBe(true);
   });
 });
