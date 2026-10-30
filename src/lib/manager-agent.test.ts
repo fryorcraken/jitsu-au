@@ -500,7 +500,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("29");
+    expect(AGENT_MANIFEST.version).toBe("30");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -540,6 +540,17 @@ describe("AGENT_MANIFEST", () => {
     }
   });
 
+  it("announces the site banner actions", () => {
+    const entry = AGENT_MANIFEST.changes.find((c) => c.version === "29")!;
+    expect(entry.breaking).toBe(false);
+    const notes = entry.notes.join(" ");
+    expect(notes).toMatch(/get_site_banner/);
+    expect(notes).toMatch(/save_site_banner/);
+    // The merge is the thing a caller would otherwise get wrong: turning the
+    // banner off must not look like it needs the message sent again.
+    expect(notes).toMatch(/keeps its stored value/);
+  });
+
   it("announces the name parts get_user's profile now carries", () => {
     const entry = AGENT_MANIFEST.changes.find((c) => c.version === "28")!;
     expect(entry.breaking).toBe(false);
@@ -550,7 +561,7 @@ describe("AGENT_MANIFEST", () => {
   });
 
   it("announces file_waiver's address in parts, and that a single line still works", () => {
-    const entry = AGENT_MANIFEST.changes.find((c) => c.version === "29")!;
+    const entry = AGENT_MANIFEST.changes.find((c) => c.version === "30")!;
     expect(entry.breaking).toBe(false);
     const notes = entry.notes.join(" ");
     expect(notes).toMatch(/address_parts/);

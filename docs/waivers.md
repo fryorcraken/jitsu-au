@@ -420,6 +420,14 @@ phone, often at the gym. The page is built so that ends in a definite answer.
 - **Retrying is safe** because every attempt carries the same
   `client_submission_id`, which the server looks up before doing any work. One
   signed waiver, one set of emails, however many times it is sent.
+- **The id alone never unlocks a waiver.** Signing needs no login, and the
+  answer to a retry is a link to the signed PDF, so the server only treats a
+  resent id as "already signed" when the saved row is an online signing (never a
+  paper filing, whose id a manager's script chose) and carries the same email
+  and date of birth as the request (`isSameOnlineSubmission`). A genuine retry
+  resends the same payload, so it always matches. Anything else is refused
+  before any work with a plain "try again", and the page then starts a fresh
+  submission so that "Try again" files what is on the form.
 - **Saved and "copy ready" are separate facts.** `submitWaiverWithPdf` returns
   `{ ok, waiver_id, pdf_url, pdf_ready }`. Nothing after the waiver row is
   inserted throws: a pdf-lib or storage failure comes back as `pdf_ready: false`

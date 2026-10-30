@@ -19,7 +19,12 @@ import {
   stopRepeatingSchema,
   updateCalendarEntrySchema,
 } from "@/lib/validation";
-import { CLUB_TIME_ZONE, diffOccurrences, generateOccurrences } from "@/lib/calendar";
+import {
+  CLUB_TIME_ZONE,
+  diffOccurrences,
+  generateOccurrences,
+  withoutHiddenInviteOnly,
+} from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
 import type {
   CalendarClient,
@@ -67,12 +72,16 @@ function dateFromNow(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
+type Viewer = { userId: string | null; canSeeMembersOnly: boolean; isManager: boolean };
+
 /**
- * Resolve the caller from the request bearer token, if any, and whether they may
- * see members-only events (a PAID member, or a manager). Anonymous callers get
- * `{ userId: null, canSeeMembersOnly: false }`.
+ * Resolve the caller from the request bearer token, if any, whether they may
+ * see members-only events (a PAID member, or a manager), and whether they are a
+ * manager (who also sees every invite-only date). Anonymous callers get
+ * `{ userId: null, canSeeMembersOnly: false, isManager: false }`.
  */
-async function resolveViewer(): Promise<{ userId: string | null; canSeeMembersOnly: boolean }> {
+async function resolveViewer(): Promise<Viewer> {
+  const anonymous: Viewer = { userId: null, canSeeMembersOnly: false, isManager: false };
   let bearer: string | null = null;
   try {
     const { getRequestHeader } = await import("@tanstack/react-start/server");
@@ -80,23 +89,62 @@ async function resolveViewer(): Promise<{ userId: string | null; canSeeMembersOn
   } catch {
     /* header access unavailable */
   }
-  if (!bearer) return { userId: null, canSeeMembersOnly: false };
+  if (!bearer) return anonymous;
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data } = await supabaseAdmin.auth.getUser(bearer);
   const userId = data.user?.id ?? null;
-  if (!userId) return { userId: null, canSeeMembersOnly: false };
-  return { userId, canSeeMembersOnly: await canSeeMembersOnly(userId) };
+  if (!userId) return anonymous;
+  const access = await calendarAccess(userId);
+  return {
+    userId,
+    canSeeMembersOnly: access.paid || access.isManager,
+    isManager: access.isManager,
+  };
 }
 
-/** Paid member (active, non-trial, price > 0) or manager. */
-async function canSeeMembersOnly(userId: string): Promise<boolean> {
+/** Whether a person holds a paid membership, and whether they are a manager. */
+async function calendarAccess(userId: string): Promise<{ paid: boolean; isManager: boolean }> {
   const admin = await adminClient();
   const [{ data: paid }, { data: isMgr }] = await Promise.all([
     admin.rpc("has_active_paid_membership", { _user_id: userId }),
     admin.rpc("has_role", { _user_id: userId, _role: "manager" }),
   ]);
-  return Boolean(paid) || Boolean(isMgr);
+  return { paid: Boolean(paid), isManager: Boolean(isMgr) };
+}
+
+/** Paid member (active, non-trial, price > 0) or manager. */
+async function canSeeMembersOnly(userId: string): Promise<boolean> {
+  const { paid, isManager } = await calendarAccess(userId);
+  return paid || isManager;
+}
+
+/**
+ * The invite-only dates this viewer may see: managers see all of them, a
+ * signed-in person sees the ones they are invited to (an RSVP row), and
+ * anybody not signed in sees none. Mirrors the `calendar_events` read policies,
+ * which the service role skips.
+ */
+async function hideInviteOnlyFor<
+  E extends { id: string; series_id: string | null; invite_only: boolean },
+>(admin: CalendarClient, viewer: Viewer, events: E[]): Promise<E[]> {
+  if (viewer.isManager) return events;
+  const [rsvps, inviteSeries] = await Promise.all([
+    viewer.userId
+      ? admin.from("event_rsvps").select("event_id").eq("user_id", viewer.userId)
+      : Promise.resolve({ data: [] as { event_id: string }[], error: null }),
+    admin.from("calendar_series").select("id").eq("invite_only", true),
+  ]);
+  // Fail closed: without these answers there is no telling which dates are
+  // hidden, and showing an invite-only date to the wrong person is worse than
+  // a calendar that does not load.
+  if (rsvps.error) throw new Error(rsvps.error.message);
+  if (inviteSeries.error) throw new Error(inviteSeries.error.message);
+  return withoutHiddenInviteOnly(events, {
+    isManager: false,
+    invitedEventIds: new Set((rsvps.data ?? []).map((r) => r.event_id)),
+    inviteOnlySeriesIds: new Set((inviteSeries.data ?? []).map((s) => s.id)),
+  });
 }
 
 async function requestOrigin(): Promise<string> {
@@ -131,7 +179,8 @@ export const getCalendar = createServerFn({ method: "GET" }).handler(async () =>
   const admin = await adminClient();
   // Keeps repeating entries appearing without anyone pressing anything.
   await topUpHorizon(admin);
-  const { userId, canSeeMembersOnly: seesMembers } = await resolveViewer();
+  const viewer = await resolveViewer();
+  const { userId, canSeeMembersOnly: seesMembers } = viewer;
   let query = admin
     .from("calendar_events")
     .select(EVENT_COLUMNS)
@@ -145,11 +194,14 @@ export const getCalendar = createServerFn({ method: "GET" }).handler(async () =>
   if (!seesMembers) query = query.eq("visibility", "public");
   const { data, error } = await query;
   if (error) throw new Error(error.message);
+  // The query above applies `visibility` only. Invite-only dates are dropped
+  // here, after it, for anyone who is neither invited nor a manager.
+  const visible = await hideInviteOnlyFor(admin, viewer, data ?? []);
   return {
     // Any signed-in person may RSVP — trial visitors included.
     signed_in: Boolean(userId),
     sees_members_only: seesMembers,
-    events: (data ?? []).map(projectEvent),
+    events: visible.map(projectEvent),
   };
 });
 

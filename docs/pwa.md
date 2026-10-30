@@ -189,7 +189,10 @@ dev server and serve yesterday's assets.
 
 Bump `CACHE_VERSION` in `public/sw.js` to throw away every cached asset on the next
 deploy. You should not normally need to: build assets are content-hashed, so a
-deploy changes their filenames anyway.
+deploy changes their filenames anyway. The exception is the shell (`offline.html`
+and the files beside it in `SHELL_ASSETS`): their URLs never change, so an install
+keeps its cached copy until the cache name does. Changing `offline.html` means
+bumping the version.
 
 ## Regenerating the icons
 
