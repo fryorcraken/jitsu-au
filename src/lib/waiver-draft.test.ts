@@ -282,3 +282,14 @@ describe("an address outside Australia in a draft", () => {
     expect(parseDraft(serializeDraft(draft))?.address).toEqual(draft.address);
   });
 });
+
+describe("draftHasContent and the address", () => {
+  // Anything typed into the address is a start worth offering back.
+  it.each([
+    ["only a state picked", { ...EMPTY_ADDRESS, state: "VIC" }],
+    ["only the outside-Australia tick", { ...EMPTY_ADDRESS, overseas: true }],
+    ["only a country", { ...EMPTY_ADDRESS, overseas: true, country: "Japan" }],
+  ])("counts %s as started", (_why, address) => {
+    expect(draftHasContent({ ...blank, address })).toBe(true);
+  });
+});

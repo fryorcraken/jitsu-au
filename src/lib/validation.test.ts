@@ -397,7 +397,7 @@ describe("updateMyProfileSchema", () => {
 
     it("refuses a part the database would refuse", () => {
       expect(() => updateMyProfileSchema.parse({ ...parts, address_postcode: "207" })).toThrow();
-      expect(() => updateMyProfileSchema.parse({ ...parts, address_state: "Nsw" })).toThrow();
+      expect(() => updateMyProfileSchema.parse({ ...parts, address_state: "XYZ" })).toThrow();
     });
 
     it("ignores a blank line sent with the parts, which it replaces anyway", () => {
@@ -2679,6 +2679,22 @@ describe("paperWaiverUploadSchema", () => {
 
   // A paper form's address is transcribed in parts where it can be, or as the
   // one line written on it where it cannot; one of the two is required.
+  // The line sent beside parts is ignored, so it is not held to anything.
+  it("does not refuse a long line it is going to ignore", () => {
+    const parts = { street: "1 Broadway", suburb: "Ultimo", state: "nsw", postcode: "2007" };
+    const result = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      address: "x".repeat(400),
+      address_parts: parts,
+    });
+    expect(result.success).toBe(true);
+    // And a lower-case state from an agent is the state it means.
+    expect(result.data?.address_parts?.state).toBe("NSW");
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...validAdult, address: "x".repeat(301) }).success,
+    ).toBe(false);
+  });
+
   it("takes the address in parts or as one line, but not neither", () => {
     const { address: _line, ...noAddress } = validAdult;
     const parts = { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" };

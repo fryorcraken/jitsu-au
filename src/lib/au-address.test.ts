@@ -13,8 +13,8 @@ import {
   composeAuAddress,
   draftAddressLine,
   EMPTY_ADDRESS,
-  addressPartsFromLine,
-  isBlankAuAddress,
+  draftFromLine,
+  readOverseasLine,
   readComposedAuAddress,
   postcodeStateNote,
   resolveAddressInput,
@@ -197,7 +197,7 @@ describe("auAddressSchema", () => {
   });
 
   it("refuses a state that is not one of the eight", () => {
-    expect(auAddressSchema.safeParse({ ...broadway, state: "Nsw" }).success).toBe(false);
+    expect(auAddressSchema.safeParse({ ...broadway, state: "XYZ" }).success).toBe(false);
   });
 
   it("refuses a street over more than one line", () => {
@@ -216,11 +216,6 @@ describe("rows and drafts", () => {
 
   it("writes four nulls for no address", () => {
     expect(Object.values(auAddressColumns(null))).toEqual([null, null, null, null]);
-  });
-
-  it("knows a blank draft from a started one", () => {
-    expect(isBlankAuAddress(EMPTY_ADDRESS)).toBe(true);
-    expect(isBlankAuAddress({ ...EMPTY_ADDRESS, state: "VIC" })).toBe(false);
   });
 });
 
@@ -338,7 +333,7 @@ describe("readComposedAuAddress", () => {
     const line = composeAuAddress(parts);
     expect(splitAuAddress(line)).toBeNull();
     expect(readComposedAuAddress(line)).toEqual(parts);
-    expect(addressPartsFromLine(line)).toEqual(parts);
+    expect(draftFromLine(line, "guardian").draft).toMatchObject(parts);
   });
 
   it("reads nothing that is not exactly the composed shape", () => {
@@ -346,14 +341,89 @@ describe("readComposedAuAddress", () => {
     expect(readComposedAuAddress("1 Broadway Ultimo NSW 2007")).toBeNull();
     expect(readComposedAuAddress("Unit 3, 12 Smith St Pyrmont NSW 2009")).toBeNull();
   });
+});
 
-  it("falls back to the careful split for a line somebody typed", () => {
-    expect(addressPartsFromLine("5 Quay St, Haymarket nsw 2000, Australia")).toEqual({
-      street: "5 Quay St",
-      suburb: "Haymarket",
-      state: "NSW",
-      postcode: "2000",
-    });
+describe("draftFromLine", () => {
+  // A line typed in the old single box can fit the composed shape exactly
+  // while meaning something else, so a person's OWN address, whose parts are
+  // counted, never takes the composed read-back.
+  it.each(["Unit 3, Rose Avenue Glebe NSW 2037", "Flat 2, The Grange Mosman NSW 2088"])(
+    "does not split %j into a street and a bogus suburb for somebody's own address",
+    (line) => {
+      expect(draftFromLine(line, "own")).toEqual({ draft: EMPTY_ADDRESS, read: false });
+    },
+  );
+
+  // A parent's address is stored only as its line, so the composed read-back
+  // cannot change anything stored: it composes back to exactly that line.
+  it("reads a guardian's line back so it composes to the same line", () => {
+    const line = "Unit 3, Rose Avenue Glebe NSW 2037";
+    const { draft } = draftFromLine(line, "guardian");
+    expect(draftAddressLine(draft)).toBe(line);
+  });
+
+  it("reads a typed line with the careful split for either", () => {
+    for (const whose of ["own", "guardian"] as const) {
+      expect(draftFromLine("5 Quay St, Haymarket nsw 2000, Australia", whose).draft).toMatchObject({
+        street: "5 Quay St",
+        suburb: "Haymarket",
+        state: "NSW",
+        postcode: "2000",
+      });
+    }
+  });
+
+  it("says a line could not be read, so the form can show it", () => {
+    expect(draftFromLine("1 Broadway Ultimo", "own").read).toBe(false);
+    expect(draftFromLine("", "own").read).toBe(true);
+  });
+
+  // The only memory the club has that an address is abroad is its line, so a
+  // line ending in a country other than Australia opens with the tick on.
+  it("recognises an address outside Australia by the country it ends in", () => {
+    const line = "10 Downing St, London SW1A 2AA, United Kingdom";
+    const { draft, read } = draftFromLine(line, "own");
+    expect(read).toBe(true);
+    expect(draft).toMatchObject({ overseas: true, country: "United Kingdom" });
+    // And it composes back to exactly the line it was read from.
+    expect(draftAddressLine(draft)).toBe(line);
+  });
+});
+
+describe("readOverseasLine", () => {
+  it.each([
+    "10 Downing St, London, UK",
+    "1 Rue de Rivoli, 75001 Paris, France",
+    "5 Main St, Auckland 1010, New Zealand",
+  ])("reads %j as an address abroad when its last part is a country", (line) => {
+    const read = readOverseasLine(line);
+    expect(read?.overseas, line).toBe(true);
+  });
+
+  // Names only, never two-letter codes: "SA" is Saudi Arabia and South
+  // Australia both, so a code would read an Australian address as foreign.
+  it("does not read a two-letter code as a country", () => {
+    expect(readOverseasLine("1 King William St, Adelaide, SA")).toBeNull();
+  });
+
+  it("does not take Australia, or a suburb, for a country abroad", () => {
+    expect(readOverseasLine("1 Broadway, Ultimo NSW 2007, Australia")).toBeNull();
+    expect(readOverseasLine("1 Broadway, Ultimo")).toBeNull();
+    expect(readOverseasLine("United Kingdom")).toBeNull();
+  });
+});
+
+describe("auAddressSchema state", () => {
+  // The database stores the abbreviation upper-cased, and an agent typing one
+  // in lower case means the same state.
+  it("takes a state in any case", () => {
+    expect(auAddressSchema.parse({ ...broadway, state: "nsw" }).state).toBe("NSW");
+    expect(auAddressSchema.parse({ ...broadway, state: " Vic " }).state).toBe("VIC");
+  });
+
+  it("says which states there are when it refuses one", () => {
+    const result = auAddressSchema.safeParse({ ...broadway, state: "New South Wales" });
+    expect(result.error?.issues[0].message).toMatch(/ACT, NSW, NT, QLD, SA, TAS, VIC or WA/);
   });
 });
 

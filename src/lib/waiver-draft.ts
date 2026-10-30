@@ -21,13 +21,7 @@
 // reason.
 
 import type { HealthAnswers, HealthQuestionId, WaiverSigningFor } from "@/lib/validation";
-import {
-  EMPTY_ADDRESS,
-  auAddressDraft,
-  isAuState,
-  addressPartsFromLine,
-  type AddressDraft,
-} from "@/lib/au-address";
+import { EMPTY_ADDRESS, isAuState, draftFromLine, type AddressDraft } from "@/lib/au-address";
 
 export const WAIVER_DRAFT_KEY = "uts-jitsu.waiver.draft";
 
@@ -154,8 +148,8 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
   // one line instead; that is read into parts where it can be, and otherwise
   // restored empty rather than binning the whole draft (see `giSize` below for
   // why the version is not bumped for a change like this).
-  const address = (v: unknown): AddressDraft => {
-    if (typeof v === "string") return auAddressDraft(addressPartsFromLine(v));
+  const address = (v: unknown, whose: "own" | "guardian"): AddressDraft => {
+    if (typeof v === "string") return draftFromLine(v, whose).draft;
     if (!v || typeof v !== "object") return { ...EMPTY_ADDRESS };
     const source = v as Record<string, unknown>;
     const overseas = source.overseas === true;
@@ -172,8 +166,8 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
   };
   // An old one-line draft address that could not be read as parts: kept, so
   // it can be shown above the empty boxes instead of vanishing on restore.
-  const unreadLine = (v: unknown): string =>
-    typeof v === "string" && v.trim() && !addressPartsFromLine(v) ? v.trim() : "";
+  const unreadLine = (v: unknown, whose: "own" | "guardian"): string =>
+    typeof v === "string" && v.trim() && !draftFromLine(v, whose).read ? v.trim() : "";
   const acks = (v: unknown): Record<string, boolean> => {
     const source = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
     const out: Record<string, boolean> = {};
@@ -198,8 +192,8 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     dob: text(draft.dob),
     phone: text(draft.phone),
     email: text(draft.email),
-    address: address(draft.address),
-    addressOnFile: text(draft.addressOnFile) || unreadLine(draft.address),
+    address: address(draft.address, "own"),
+    addressOnFile: text(draft.addressOnFile) || unreadLine(draft.address, "own"),
     utsStudentNumber: text(draft.utsStudentNumber),
     smsConsent: draft.smsConsent === true,
     // Deliberately does NOT bump WAIVER_DRAFT_VERSION: `giSize` is a new
@@ -227,8 +221,9 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
       typeof draft.guardianSameAddress === "boolean"
         ? draft.guardianSameAddress
         : !text(draft.guardianAddress as unknown).trim(),
-    guardianAddress: address(draft.guardianAddress),
-    guardianAddressOnFile: text(draft.guardianAddressOnFile) || unreadLine(draft.guardianAddress),
+    guardianAddress: address(draft.guardianAddress, "guardian"),
+    guardianAddressOnFile:
+      text(draft.guardianAddressOnFile) || unreadLine(draft.guardianAddress, "guardian"),
     guardianPhone: text(draft.guardianPhone),
     guardianEmail: text(draft.guardianEmail),
     health: health(draft.health),
@@ -257,9 +252,14 @@ export function draftHasContent(draft: WaiverDraft | null): boolean {
     draft.lastName,
     draft.dob,
     draft.phone,
+    // Every part of the address counts, the state and the country too: a
+    // signer who has only picked a state has started, and a draft that says
+    // otherwise is not offered back.
     draft.address.street,
     draft.address.suburb,
+    draft.address.state,
     draft.address.postcode,
+    draft.address.country ?? "",
     draft.ecName,
     draft.ecPhone,
     draft.guardianName,
@@ -268,6 +268,7 @@ export function draftHasContent(draft: WaiverDraft | null): boolean {
     draft.signatureName,
     draft.signatureImage,
   ].some((v) => v.trim() !== "");
+  if (draft.address.overseas) return true;
   const answeredHealth = Object.values(draft.health).some((v) => v !== null);
   return filledText || answeredHealth;
 }

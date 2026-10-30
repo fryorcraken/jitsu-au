@@ -273,6 +273,25 @@ describe("/account", () => {
     expect(sent).not.toHaveProperty("address_postcode");
   });
 
+  // The club keeps no flag for "abroad", so a saved address that ends in a
+  // country has to come back with the tick on, not with a request to split it.
+  it("opens an address saved as outside Australia with the tick on, and asks nothing", async () => {
+    const { getMyProfile } = await import("@/lib/waiver.functions");
+    vi.mocked(getMyProfile).mockResolvedValueOnce({
+      ...PROFILE,
+      address: "10 Downing St, London SW1A 2AA, United Kingdom",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    await renderLoaded();
+
+    expect(screen.getByLabelText("This address is outside Australia")).toBeChecked();
+    expect(screen.getByLabelText(/Country/)).toHaveValue("United Kingdom");
+    expect(screen.queryByText(/We have this address as/)).not.toBeInTheDocument();
+  });
+
   // The address the club could not split must not stand between a member and
   // saving a new mobile, nor be rewritten by a save that never touched it.
   it("saves a new mobile without asking about an address that was not edited", async () => {

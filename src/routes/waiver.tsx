@@ -24,7 +24,7 @@ import {
   auAddressFromRow,
   finishedAddress,
   draftAddressLine,
-  addressPartsFromLine,
+  draftFromLine,
   sameAuAddress,
   type AddressDraft,
 } from "@/lib/au-address";
@@ -407,12 +407,17 @@ function Waiver() {
         // Prefill the consent checkbox from the member's stored consent (they
         // can still change it).
         if (typeof r.sms_whatsapp_consent === "boolean") setSmsConsent(r.sms_whatsapp_consent);
-        // The parts when the club has them; otherwise the one line read as
-        // parts where that can be done without guessing, and shown above the
-        // empty boxes where it cannot.
-        const parts = auAddressFromRow(r) ?? addressPartsFromLine(r.address);
-        if (parts) setAddress(auAddressDraft(parts));
-        else if (r.address) setAddressOnFile(r.address);
+        // The parts when the club has them; otherwise the one line read
+        // where that can be done without guessing (draftFromLine says how),
+        // and shown above the empty boxes where it cannot.
+        const parts = auAddressFromRow(r);
+        if (parts) {
+          setAddress(auAddressDraft(parts));
+        } else {
+          const own = draftFromLine(r.address, "own");
+          setAddress(own.draft);
+          if (!own.read && r.address) setAddressOnFile(r.address);
+        }
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.gi_size && isGiSize(r.gi_size)) setGiSize(r.gi_size);
         if (r.martial_arts_experience) setMartialArtsExperience(r.martial_arts_experience);
@@ -428,12 +433,11 @@ function Waiver() {
         // line in it means "the same", which is the tick's default.
         if (r.guardian_address && !sameAuAddress(r.guardian_address, r.address)) {
           setGuardianSameAddress(false);
-          // Stored as its composed line only, so read it back as composed
-          // first: a parent's own "Rose Cottage" or border postcode must not
-          // come back as four empty boxes on every waiver.
-          const guardianParts = addressPartsFromLine(r.guardian_address);
-          if (guardianParts) setGuardianAddress(auAddressDraft(guardianParts));
-          else setGuardianAddressOnFile(r.guardian_address);
+          // Stored as its line only, so read back the way a parent's own
+          // "Rose Cottage" or border postcode survives (see draftFromLine).
+          const theirs = draftFromLine(r.guardian_address, "guardian");
+          setGuardianAddress(theirs.draft);
+          if (!theirs.read) setGuardianAddressOnFile(r.guardian_address);
         }
         if (r.guardian_phone) setGuardianPhone(r.guardian_phone);
         if (r.guardian_email) setGuardianEmail(r.guardian_email);

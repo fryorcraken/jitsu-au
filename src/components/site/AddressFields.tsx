@@ -259,6 +259,12 @@ export function AddressFields({
             {...props("country")}
           />
           {messageFor(id("country"))}
+          {/* Optional, but the country is how the address is recognised as
+              outside Australia next time (draftFromLine): without it, it is
+              asked about again. Say so, rather than leave it a mystery. */}
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Add the country and we&apos;ll remember this address is outside Australia.
+          </p>
         </div>
       )}
       {/* Under both boxes rather than one, because it is about the pair: the

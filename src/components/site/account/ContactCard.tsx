@@ -10,12 +10,31 @@ import {
   auAddressFromRow,
   finishedAddress,
   composeAuAddress,
-  addressPartsFromLine,
+  draftFromLine,
   type AddressDraft,
 } from "@/lib/au-address";
 import { SaveFailure } from "@/components/site/SaveFailure";
 import { CardActions } from "./CardActions";
 import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
+
+/**
+ * The address to start the card from: the parts when the club holds them,
+ * else the one line read where that is unambiguous (`draftFromLine`), and
+ * whether the line could be read at all, so one that cannot is shown above the
+ * empty boxes rather than lost.
+ */
+function readStoredAddress(row: {
+  address?: string | null;
+  address_street?: string | null;
+  address_suburb?: string | null;
+  address_state?: string | null;
+  address_postcode?: string | null;
+}): { address: AddressDraft; addressUnread: boolean } {
+  const parts = auAddressFromRow(row);
+  if (parts) return { address: auAddressDraft(parts), addressUnread: false };
+  const own = draftFromLine(row.address, "own");
+  return { address: own.draft, addressUnread: !own.read };
+}
 
 /**
  * How the club reaches this person, and who it calls if something happens.
@@ -45,17 +64,13 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
   const stored = useMemo(
     () => ({
       phone: profile?.phone ?? "",
-      // The parts when the club holds them, else the one line read as parts
-      // where that is unambiguous. `addressLine` is kept so a line that
-      // cannot be read is shown above the empty boxes rather than lost.
-      address: auAddressDraft(
-        auAddressFromRow({
-          address_street: profile?.address_street,
-          address_suburb: profile?.address_suburb,
-          address_state: profile?.address_state,
-          address_postcode: profile?.address_postcode,
-        }) ?? addressPartsFromLine(profile?.address),
-      ),
+      ...readStoredAddress({
+        address: profile?.address,
+        address_street: profile?.address_street,
+        address_suburb: profile?.address_suburb,
+        address_state: profile?.address_state,
+        address_postcode: profile?.address_postcode,
+      }),
       addressLine: profile?.address ?? "",
       smsConsent: profile?.sms_whatsapp_consent ?? false,
       ecName: profile?.emergency_contact_name ?? "",
@@ -107,9 +122,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
   // The line on file could not be read as parts: show it while the member
   // copies it into the boxes, so it is there to read until they are done.
   const previousLine =
-    !finishedAddress(stored.address) && !finishedAddress(address) && stored.addressLine
-      ? stored.addressLine
-      : null;
+    stored.addressUnread && !finishedAddress(address) ? stored.addressLine : null;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();

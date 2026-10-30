@@ -156,27 +156,90 @@ export function readComposedAuAddress(line: string | null | undefined): AuAddres
 }
 
 /**
- * The parts to offer somebody for an address the club holds as a line: the
- * line as composed, else the line read without guessing, else nothing.
+ * The draft to offer somebody for an address the club holds as one line, and
+ * whether the line could be read at all (when it cannot, the form shows it
+ * above empty boxes so it is not lost).
+ *
+ * Which reader is used depends on whose address it is, and the difference is
+ * the whole point:
+ *
+ *   * `own`: a person's own address, whose parts are counted and reported.
+ *     Only the careful split, never the composed read-back: a line somebody
+ *     typed in the old single box ("Unit 3, Rose Avenue Glebe NSW 2037") fits
+ *     the composed shape exactly while meaning something else, and reading it
+ *     back would file "Rose Avenue Glebe" as their suburb.
+ *   * `guardian`: a parent's address, which is stored only as its line and
+ *     never as parts. The composed read-back is safe here, because whatever it
+ *     reads composes back to exactly the line it was read from, so nothing
+ *     stored can change; and it is needed, because the careful split refuses
+ *     the "Rose Cottage" or Barooga NSW 3644 a parent entered last time.
+ *
+ * Either way, a line ending in a country other than Australia is read as an
+ * address outside Australia, which is how one is recognised again next time:
+ * the club stores no other marker of it.
  */
-export function addressPartsFromLine(line: string | null | undefined): AuAddress | null {
-  return readComposedAuAddress(line) ?? splitAuAddress(line);
+export function draftFromLine(
+  line: string | null | undefined,
+  whose: "own" | "guardian",
+): { draft: AddressDraft; read: boolean } {
+  const parts =
+    whose === "guardian"
+      ? (readComposedAuAddress(line) ?? splitAuAddress(line))
+      : splitAuAddress(line);
+  if (parts) return { draft: auAddressDraft(parts), read: true };
+  const abroad = readOverseasLine(line);
+  if (abroad) return { draft: abroad, read: true };
+  return { draft: auAddressDraft(null), read: !line?.trim() };
+}
+
+/**
+ * Every country name a line might end in, lower-cased, Australia left out.
+ *
+ * Built from the platform's own region names (`Intl.DisplayNames`) rather
+ * than a list kept here, plus the handful of everyday names it does not give.
+ * Built once, on first use. Where the platform has no region names, nothing is
+ * recognised and an address abroad is simply asked about again.
+ */
+let countryNames: Set<string> | null = null;
+function knownCountries(): Set<string> {
+  if (countryNames) return countryNames;
+  const names = new Set<string>(["uk", "usa", "us", "england", "scotland", "wales"]);
+  try {
+    const display = new Intl.DisplayNames(["en"], { type: "region", fallback: "none" });
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (const a of letters) {
+      for (const b of letters) {
+        const code = a + b;
+        if (code === "AU") continue;
+        const name = display.of(code);
+        if (name) names.add(name.toLowerCase());
+      }
+    }
+  } catch {
+    // No region names here: recognise only the everyday ones above.
+  }
+  countryNames = names;
+  return names;
+}
+
+/**
+ * Read a line as an address outside Australia when it ends in a country the
+ * platform knows, or `null`. Everything before the last comma goes in the
+ * street box and the country in its own, which composes back to the same line.
+ */
+export function readOverseasLine(line: string | null | undefined): AddressDraft | null {
+  if (!line || CONTROL.test(line)) return null;
+  const cut = line.lastIndexOf(",");
+  if (cut <= 0) return null;
+  const rest = line.slice(0, cut).trim();
+  const country = line.slice(cut + 1).trim();
+  if (!rest || !knownCountries().has(country.toLowerCase())) return null;
+  return { overseas: true, street: rest, suburb: "", state: "", postcode: "", country };
 }
 
 /** The draft to show for an address the club holds, or an empty one. */
 export function auAddressDraft(a: AuAddress | null): AddressDraft {
   return a ? { ...EMPTY_ADDRESS, ...a } : { ...EMPTY_ADDRESS };
-}
-
-/** True when nothing has been typed into any part. */
-export function isBlankAuAddress(d: AddressDraft): boolean {
-  return (
-    !d.street.trim() &&
-    !d.suburb.trim() &&
-    !d.state &&
-    !d.postcode.trim() &&
-    !(d.country ?? "").trim()
-  );
 }
 
 /** Just the four Australian parts of a draft, for the strict schema. */
@@ -234,7 +297,10 @@ export const OVERSEAS_ADDRESS_LABELS = {
 
 /** The longest each part of an address outside Australia may be. */
 export const OVERSEAS_ADDRESS_LIMITS = {
-  street: 150,
+  // The whole line's limit, so a line the club already holds always fits when
+  // it is moved into this box. The line as a whole is checked against the
+  // same 300 below.
+  street: 300,
   suburb: 60,
   state: 40,
   postcode: 12,
@@ -319,7 +385,15 @@ export const auAddressSchema = z
         (v) => !CONTROL.test(v) && !/[0-9,]/.test(v),
         "Just the suburb name here. The street goes in the line above.",
       ),
-    state: z.enum(AU_STATES, { message: "Please choose a state." }),
+    // Upper-cased first, as the database stores it, so "nsw" from the agent API
+    // is NSW rather than a refusal. The form's picker never sends anything
+    // else, so this message is only ever read by a caller that typed one.
+    state: z.preprocess(
+      (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
+      z.enum(AU_STATES, {
+        message: "The state must be one of ACT, NSW, NT, QLD, SA, TAS, VIC or WA.",
+      }),
+    ),
     postcode: z
       .string()
       .trim()

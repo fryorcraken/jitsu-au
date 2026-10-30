@@ -298,7 +298,10 @@ which turns them into free text (street, town or city, state or region,
 postcode, country) with only the street line required and no list or format
 to meet. It is stored as the one line made from what was given, with no
 parts, so it is never counted by suburb or postcode, and it reaches the
-server the same way a one-line address always has. Somebody living in
+server the same way a one-line address always has. The club keeps no flag
+for "abroad", so it is recognised next time by the country its line ends in
+(`draftFromLine`), and opens with the tick on; the form says as much under
+the country box, since without one it is asked about again. Somebody living in
 Australia, an international student included, gives their Australian
 address as usual. The parts are what the club can sort and count people
 by; the one line every screen, email and the signed PDF print is composed from

@@ -647,7 +647,9 @@ export const waiverSubmitSchema = z
     // with no parts, rather than failing a signed waiver. One of the two is
     // required (the refine below), and the parts win when both arrive.
     address_parts: auAddressSchema.optional(),
-    address: z.string().trim().max(300).optional().or(z.literal("")),
+    // Bounded by the refines below, and only when it is the address actually
+    // used: sent beside parts it is ignored, so it is not held to anything.
+    address: z.string().trim().optional(),
     phone: z.string().trim().min(1).max(30),
     // Who this waiver is for, asked explicitly rather than guessed from a date
     // of birth. "dependant" means a parent is signing for a child on their
@@ -724,7 +726,7 @@ export const waiverSubmitSchema = z
     // like the participant's. Absent means "the same as the participant's".
     // `guardian_address` is the one-line form an older client sends.
     guardian_address_parts: auAddressSchema.optional(),
-    guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
+    guardian_address: z.string().trim().optional(),
     guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
     // Optional signing for yourself (blank means "the same as the
     // participant's"), REQUIRED for a dependant: it is the only address on the
@@ -754,6 +756,14 @@ export const waiverSubmitSchema = z
   .refine((d) => Boolean(d.address_parts || d.address?.trim()), {
     message: "Please give your address.",
     path: ["address"],
+  })
+  .refine((d) => d.address_parts || (d.address ?? "").length <= 300, {
+    message: "The address can be up to 300 characters.",
+    path: ["address"],
+  })
+  .refine((d) => d.guardian_address_parts || (d.guardian_address ?? "").length <= 300, {
+    message: "The guardian's address can be up to 300 characters.",
+    path: ["guardian_address"],
   })
   .refine(
     (d) =>
@@ -1260,7 +1270,9 @@ export const paperWaiverUploadSchema = z
     // the person is asked for the parts the next time they give an address.
     // One of the two is required, and the parts win when both arrive.
     address_parts: auAddressSchema.optional(),
-    address: z.string().trim().max(300).optional().or(z.literal("")),
+    // Bounded by the refines below, and only when it is the address actually
+    // used: sent beside parts it is ignored, so it is not held to anything.
+    address: z.string().trim().optional(),
     phone: z.string().trim().min(1).max(30),
     // The same "who is this for" question the online form asks, so a manager
     // files a paper child waiver identically and it produces the identical
@@ -1294,7 +1306,7 @@ export const paperWaiverUploadSchema = z
     guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
     guardian_address_parts: auAddressSchema.optional(),
-    guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
+    guardian_address: z.string().trim().optional(),
     guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
     guardian_email: z.string().trim().email().max(255).optional().or(z.literal("")),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
@@ -1340,6 +1352,14 @@ export const paperWaiverUploadSchema = z
   .refine((d) => Boolean(d.address_parts || d.address?.trim()), {
     message: "The participant's address is required, as address_parts or as one address line.",
     path: ["address"],
+  })
+  .refine((d) => d.address_parts || (d.address ?? "").length <= 300, {
+    message: "The address can be up to 300 characters.",
+    path: ["address"],
+  })
+  .refine((d) => d.guardian_address_parts || (d.guardian_address ?? "").length <= 300, {
+    message: "The guardian's address can be up to 300 characters.",
+    path: ["guardian_address"],
   })
   .refine(
     (d) =>
