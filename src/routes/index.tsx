@@ -54,10 +54,10 @@ function Home() {
               Learn practical self-defence at <span className="text-primary">UTS Ultimo</span>.
             </h1>
             <p className="mt-5 max-w-lg text-base text-muted-foreground md:text-lg">
-              Build real self-defence skills in a fun and welcoming environment. We train Japanese
-              Jiu-Jitsu in Ultimo and welcome the general public and local community, with special
-              rates for UTS students. Classes are for beginners and experienced martial artists
-              alike.
+              Build real self-defence skills in a welcoming class. We train hard but safely, and you
+              build up at your own pace. Our Japanese Jiu-Jitsu classes in Ultimo are open to the
+              general public, with special rates for UTS students, and suit complete beginners as
+              well as experienced martial artists.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg">
@@ -132,7 +132,7 @@ function Home() {
             {
               icon: Shield,
               title: "Practical self-defence",
-              body: "Techniques trained under pressure so they work when it matters.",
+              body: "Tested against a partner who resists, so it works when it matters. A tap stops everything.",
             },
             {
               icon: Users,
@@ -142,7 +142,7 @@ function Home() {
             {
               icon: Dumbbell,
               title: "Fitness through art",
-              body: "Drills, conditioning and skill for a sharper mind and stronger body.",
+              body: "You don't need to be fit to start. Drills and conditioning build up week by week.",
             },
             {
               icon: Award,

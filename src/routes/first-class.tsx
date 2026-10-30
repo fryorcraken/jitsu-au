@@ -74,7 +74,7 @@ const matSteps = [
   {
     icon: ClipboardCheck,
     title: "Test it with games",
-    body: "We play some games to pressure-test the techniques in a fun way.",
+    body: "We play games to pressure-test the techniques. Your partner only pushes as hard as you're ready for, and stops the moment you tap.",
   },
   {
     icon: HeartPulse,
@@ -154,8 +154,9 @@ function FirstClass() {
       <section className="mx-auto max-w-6xl px-4 py-8">
         <h2 className="text-2xl font-bold md:text-3xl">What happens on the mat</h2>
         <p className="mt-2 max-w-2xl text-muted-foreground">
-          Every session follows the same friendly rhythm. Nothing is sprung on you, and everything
-          is adapted to your level.
+          Every session follows the same friendly rhythm. Nothing is sprung on you: you start with
+          the basics, and things only get harder as you're ready for them. Need a breather? Tell the
+          coach and sit out for a bit.
         </p>
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {matSteps.map((s, i) => (

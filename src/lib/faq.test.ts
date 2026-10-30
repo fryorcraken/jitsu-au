@@ -17,8 +17,8 @@ describe("faq content", () => {
 });
 
 describe("homepage FAQ selection", () => {
-  it("surfaces exactly four reassuring questions", () => {
-    expect(homepageFaqItems).toHaveLength(4);
+  it("surfaces exactly five reassuring questions", () => {
+    expect(homepageFaqItems).toHaveLength(5);
   });
 
   it("only references ids that exist in the source of truth", () => {
@@ -41,10 +41,24 @@ describe("homepage FAQ selection", () => {
     expect(homepageFaqIds).not.toContain("what-to-wear");
   });
 
-  it("includes the experience, trial and JJJ-vs-BJJ reassurances", () => {
+  it("includes the experience, fitness/age, intensity and trial reassurances", () => {
     expect(homepageFaqIds).toContain("experience");
+    expect(homepageFaqIds).toContain("fitness-age");
+    expect(homepageFaqIds).toContain("training-intensity");
     expect(homepageFaqIds).toContain("trial-offer");
-    expect(homepageFaqIds).toContain("jjj-vs-bjj");
+  });
+
+  // Nervous beginners worry they are too unfit or too old, and people looking
+  // for self-defence want to know it is hard enough to work. Both answers have
+  // to say the load builds up gradually and that a tap stops everything, or
+  // they reassure one audience by scaring off the other.
+  it("says training builds up gradually and stops on a tap", () => {
+    const fitness = faqItems.find((f) => f.id === "fitness-age")!;
+    const intensity = faqItems.find((f) => f.id === "training-intensity")!;
+    expect(fitness.a).toMatch(/don't need to be fit/i);
+    expect(fitness.a).toMatch(/as you're ready/i);
+    expect(intensity.a).toMatch(/builds up/i);
+    expect(intensity.a).toMatch(/tap/i);
   });
 
   // The club's name reads as a university club, so someone from the public can
