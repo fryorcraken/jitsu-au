@@ -11,7 +11,8 @@ import { formatCents, isPaperWaiver, sameInstant } from "@/lib/validation";
 import type { AgentSaveBlogPostInput, BlogPostInput, EditInvoiceInput } from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import { versionLabel } from "@/lib/document-versions";
-import { SITE_ORIGIN, canonicalUrl } from "@/lib/seo";
+import { canonicalUrl } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 
 /** The columns `list_kb_articles` projects from. */
 export type AgentKbArticle = {

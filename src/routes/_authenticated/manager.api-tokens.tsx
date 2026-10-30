@@ -19,7 +19,7 @@ import { formatDateTime } from "@/lib/dates";
 import { createApiToken, listApiTokens, revokeApiToken } from "@/lib/manager-api-tokens.functions";
 import { buildAgentPrompt } from "@/lib/manager-api-tokens";
 import { useAuth, useRoles } from "@/hooks/useAuth";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { linkOrigin } from "@/lib/site-origin";
 
 export const Route = createFileRoute("/_authenticated/manager/api-tokens")({
   head: () => ({
@@ -62,7 +62,7 @@ function ApiTokensPage() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
 
-  const baseUrl = typeof window !== "undefined" ? window.location.origin : SITE_ORIGIN;
+  const baseUrl = linkOrigin(typeof window !== "undefined" ? window.location.origin : null);
   const agentPrompt = useMemo(() => buildAgentPrompt({ baseUrl }), [baseUrl]);
   const manifestUrl = `${baseUrl}/api/manager/agent`;
   const mcpUrl = `${baseUrl}/mcp`;

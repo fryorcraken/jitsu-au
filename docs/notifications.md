@@ -90,10 +90,10 @@ notifications page at all. A manager found out by opening `/manager/users` or
 
 Both are **attention items**, and they are deliberately different shapes:
 
-| Step         | Item                                                | Verb    | Clears when                      |
-| ------------ | --------------------------------------------------- | ------- | -------------------------------- |
-| **Register** | "Sam registered interest in training"               | Read it | a manager opens `/manager/users` |
-| **Waiver**   | "Sam signed the waiver and is waiting for approval" | Approve | the waiver is approved           |
+| Step         | Item                                                | Verb    | Clears when                                               |
+| ------------ | --------------------------------------------------- | ------- | --------------------------------------------------------- |
+| **Register** | "Sam registered interest in training"               | Read it | a manager opens `/manager/users`                          |
+| **Waiver**   | "Sam signed the waiver and is waiting for approval" | Approve | the waiver is approved, or a later signature of theirs is |
 
 The register step is **news, not work**. Nobody is waiting on anything, so it
 carries a reading verb and nothing else, and its copy says so in as many words.
@@ -109,21 +109,40 @@ inbox that hears about it are the **parent's**, not the participant's. That is
 outward-facing and cannot be taken back quietly, and "anything irreversible gets
 a confirm that says what will happen" is the club's own UX rule.
 
-Counted from `waivers.approval_status = 'pending'`, which is the stored fact.
-The waivers screen's third state, `superseded`, is derived from a person's other
-**approved** waivers, so it can never hide work from this count.
+**Not** counted from `waivers.approval_status = 'pending'`, though that is the
+stored fact. `countWaiversAwaitingApproval` reads the waiting rows and asks
+`deriveWaiverListStatuses` which of them are **`replaced`** — unapproved
+submissions the person has since signed past, where the club approved that later
+signature — and leaves those out. Approving one is not the chore it looks like:
+`active` is keyed on `approved_at`, so approving an overtaken submission today
+makes that older document the person's active waiver and patches its stale
+details onto their profile, over the newer form they actually signed. Leaving it
+alone is the only right action, the stored status cannot record that, and so
+counted it was both an item no manager could ever clear and an invitation to the
+one click that would do damage. The club was carrying one: a July submission
+nobody approved, under an August re-signing that was. The other two derived
+states, `active` and `superseded`, only ever apply to an already-approved waiver
+and so never hid work from this count.
+
+Both reads are scoped: the waiting rows are capped at the same 500 the waivers
+screen itself reads under, and the second read asks only for the approved
+waivers of the people who have something waiting. If that second read fails the
+count degrades to every waiting row, which is how it behaved before `replaced`
+existed — over-reporting is noise, under-reporting is somebody waiting to train
+that nobody is told about.
 
 > [!WARNING]
-> **A pending waiver has exactly one exit, and it is approval.** `approval_status`
-> is `pending | approved` with no reject, and approving one row leaves any other
-> pending row of that person's alone. So a second submission nobody wants
-> approved (a bogus public signing, or a paper form filed for somebody who then
-> signed online outside the same-day duplicate probe) keeps this item and the
-> badge up for good. Clearing it means approving a duplicate, and for a stranger's
-> submission that activates an account, emails them and grants a trial. Nothing
-> counted pending waivers before this, which is why it never surfaced. The fix is
-> a real dismissal state on `waivers`, which is a schema change and a product
-> decision of its own, so it is not in this change.
+> **A pending waiver still has exactly one exit, and it is approval.**
+> `approval_status` is `pending | approved` with no reject, and approving one row
+> leaves any other pending row of that person's alone. `replaced` covers the case
+> where the person's own later signature settles the question, which is the common
+> one, but not a submission with no approved signature behind it: a bogus public
+> signing by somebody who never came back, or a duplicate where the copy the club
+> kept was signed first. Those keep this item and the badge up for good, and
+> clearing one means approving a duplicate — which for a stranger's submission
+> activates an account, emails them and grants a trial. The fix for what is left
+> is a real dismissal state on `waivers`, which is a schema change and a product
+> decision of its own.
 >
 > The count is also unbounded while `listWaivers` caps at 500 rows, newest
 > `signed_at` first. Past 500 waivers the club could have a pending one that

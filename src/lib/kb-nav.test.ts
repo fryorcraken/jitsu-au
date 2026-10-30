@@ -207,6 +207,15 @@ describe("parseHeading", () => {
 });
 
 describe("extractHeadings", () => {
+  // Three belt pages were written this way, and showed 1 to 3 entries in "On
+  // this page" out of 10 to 12 headings.
+  it("finds a heading written with no blank line above or below it", () => {
+    const headings = extractHeadings(
+      "## Techniques\n### Throws\n- O Goshi\n### Locks\n- Kote Gaeshi",
+    );
+    expect(headings.map((h) => h.id)).toEqual(["techniques", "throws", "locks"]);
+  });
+
   it("lists the headings in order with their block ids", () => {
     const headings = extractHeadings("# Syllabus\n\nIntro text.\n\n## White belt\n\nDetails.");
     expect(headings.map((h) => [h.depth, h.text, h.id])).toEqual([

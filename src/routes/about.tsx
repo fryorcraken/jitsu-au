@@ -23,7 +23,7 @@ export const Route = createFileRoute("/about")({
 const pillars = [
   {
     title: "Our approach to self-defence",
-    body: "Our focus is practical self-defence through Japanese Jiu-Jitsu. By simulating encounters under pressure, we make sure students develop the skills to respond effectively and apply techniques when it matters most.",
+    body: "Our focus is practical self-defence through Japanese Jiu-Jitsu. We train hard: techniques are tested against a partner who resists, because that is how you find out they work. We also train safely: resistance only builds up as your skill does, and partners train with control.",
   },
   {
     title: "An inclusive community",
@@ -31,7 +31,7 @@ const pillars = [
   },
   {
     title: "Fitness through martial arts",
-    body: "Our sessions combine martial arts drills with strength and conditioning, improving your overall fitness, agility and endurance. Expect to be challenged, and leave sharper than you came in.",
+    body: "Our sessions combine martial arts drills with strength and conditioning, improving your overall fitness, agility and endurance. You don't need to be fit to start. Expect to be challenged at your level, and leave sharper than you came in.",
   },
 ];
 

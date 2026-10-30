@@ -74,7 +74,7 @@ const matSteps = [
   {
     icon: ClipboardCheck,
     title: "Test it with games",
-    body: "We play some games to pressure-test the techniques in a fun way.",
+    body: "We play games to pressure-test the techniques. Your partner only pushes as hard as you're ready for, and stops the moment you tap.",
   },
   {
     icon: HeartPulse,

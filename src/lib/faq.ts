@@ -38,6 +38,16 @@ export const faqItems: FaqItem[] = [
     a: "No. Plenty of our members had never done a martial art before they walked in. You will be shown the basics from the start.",
   },
   {
+    id: "fitness-age",
+    q: "Am I too unfit or too old to start?",
+    a: "Very unlikely. You don't need to be fit to start: training is what gets you fit, and age on its own is no reason to stay away. Everything is adapted to your level. You start by learning to fall safely and practising techniques with a partner at your level, and the pace and resistance only go up as you're ready. Take a breather whenever you need one, and tell the coach about any injury or health condition before class so they can adjust things for you.",
+  },
+  {
+    id: "training-intensity",
+    q: "How hard is the training?",
+    a: "Hard enough that what you learn works for real, but never careless. Techniques are tested against a partner who resists, and that resistance builds up as your skill does. Your partner stops the moment you tap or show any discomfort. Nobody has to train with a partner they're not comfortable with: you can change partner or sit out at any time. A mouthguard is required once you start sparring.",
+  },
+  {
     id: "vs-other-martial-arts",
     q: "How is Japanese Jiu-Jitsu different from other martial arts?",
     a: "Japanese Jiu-Jitsu is comprehensive. It includes striking, throws, joint locks and ground work, with a focus on self-defence techniques applicable to real-life situations.",
@@ -50,9 +60,14 @@ export const faqItems: FaqItem[] = [
 ];
 
 // The most reassuring questions to surface on the homepage, where hesitation
-// actually strikes. Deliberately chosen to COMPLEMENT the "Your first class"
-// page (which already covers gear + what to wear), so the gear / clothing
-// questions are intentionally excluded here to avoid redundancy.
+// actually strikes. "fitness-age" and "training-intensity" answer the two
+// worries a nervous beginner brings (am I fit/young enough, will I get hurt)
+// and the one a self-defence seeker brings (is it hard enough to work). They
+// displaced "trial-offer", which stays on /faq: the homepage already states the
+// free trial in the hero, the CTA and both "Start your free trial" buttons.
+// Deliberately chosen to COMPLEMENT the "Your first class" page (which already
+// covers gear + what to wear), so the gear / clothing questions are
+// intentionally excluded here to avoid redundancy.
 //
 // "open-to-public" leads because the club's name reads as a university club,
 // and someone who assumes they are not eligible leaves without asking. It sits
@@ -61,7 +76,8 @@ export const faqItems: FaqItem[] = [
 export const homepageFaqIds = [
   "open-to-public",
   "experience",
-  "trial-offer",
+  "fitness-age",
+  "training-intensity",
   "jjj-vs-bjj",
 ] as const;
 

@@ -1671,7 +1671,8 @@ export const listWaivers = createServerFn({ method: "GET" })
     const admin = supabaseAdmin;
     // Each row shows the SUBMITTED name/email (the frozen submission), plus a
     // derived status: the person's latest approved waiver is their active one,
-    // older approved ones are superseded, the rest are pending.
+    // older approved ones are superseded, an unapproved one they have since
+    // signed past is replaced, and the rest are pending.
     const { data, error } = await admin
       .from("waivers")
       .select(
@@ -1750,13 +1751,31 @@ export const listWaivers = createServerFn({ method: "GET" })
   });
 
 /**
+ * How many waiting waivers one call looks at. Generous for a club this size
+ * (the live number is in single figures), and the same cap the waivers screen
+ * itself reads under, so the capped branch below is theory rather than a
+ * limit anybody meets.
+ */
+const WAITING_WAIVER_SCAN = 500;
+
+/** PostgREST renders `.in()` into the URL; same chunk size as household-email.ts. */
+const ID_CHUNK = 100;
+
+/**
  * How many signed waivers are waiting for a manager, and who signed the newest
  * one. Feeds the "needs attention" list behind /notifications.
  *
- * `approval_status` is the stored fact, and it is the right one to count here.
- * The list screen's third state, `superseded`, is derived from a person's OTHER
- * approved waivers and only ever applies to one that is already approved, so it
- * can never hide work from this count.
+ * NOT a count of `approval_status = 'pending'`, which is the stored fact but
+ * not the question asked here. A waiver the person has since signed past, where
+ * the club approved that later signature, stays stored pending for good, and
+ * approving it is not the chore it looks like: it would make that older
+ * document their active waiver and patch its stale details onto their profile
+ * (see `deriveWaiverListStatuses`, which carries the reasoning). So the right
+ * action is to leave it alone, the stored status cannot say that, and counted
+ * it is an item no manager can clear that also invites the damaging click. The
+ * live club was carrying one. `deriveWaiverListStatuses` is the single place
+ * that decides which those are (`replaced`), so this reads the rows and asks it
+ * rather than keeping a second opinion in SQL.
  *
  * A plain exported function taking its client, like `countUnreadContactMessages`:
  * the attention list is composed in one place and this is a source for it.
@@ -1766,32 +1785,77 @@ export async function countWaiversAwaitingApproval(admin: SupabaseClient<Databas
   latestName: string | null;
   latestAt: string | null;
 }> {
-  const { count, error } = await admin
+  // Newest signature first, and with the name fields: the item names whoever
+  // signed the newest waiver still waiting, which is now a row this read
+  // already has rather than a second query.
+  const { data, count, error } = await admin
     .from("waivers")
-    .select("id", { count: "exact", head: true })
-    .eq("approval_status", "pending");
+    .select(
+      "id, user_id, approval_status, approved_at, signed_at, first_name, middle_name, last_name, preferred_name",
+      { count: "exact" },
+    )
+    .eq("approval_status", "pending")
+    .order("signed_at", { ascending: false })
+    .limit(WAITING_WAIVER_SCAN);
   // Degrade rather than throw: this runs inside the attention list's
   // Promise.all, and a failed count must not take down the other items with it.
   if (error) {
     console.error("[waivers] could not count waivers awaiting approval:", error);
     return { pending: 0, latestName: null, latestAt: null };
   }
-  const pending = count ?? 0;
+  const waiting = data ?? [];
+  if (waiting.length === 0) return { pending: 0, latestName: null, latestAt: null };
+
+  // The approved waivers of just these people, which is what decides whether a
+  // waiting row has been replaced. A person's whole history or none of it: the
+  // derivation cannot answer for a row it was told nothing around.
+  //
+  // Chunked for the reason household-email.ts chunks: PostgREST renders `.in()`
+  // into the URL, and at the scan cap above one list of ids would run past the
+  // proxy's request-line limit, failing the read as a whole rather than
+  // narrowing it.
+  const userIds = [...new Set(waiting.map((w) => w.user_id))];
+  const approved: {
+    id: string;
+    user_id: string;
+    approval_status: string;
+    approved_at: string | null;
+    signed_at: string;
+  }[] = [];
+  for (let i = 0; i < userIds.length; i += ID_CHUNK) {
+    const { data: slice, error: sliceError } = await admin
+      .from("waivers")
+      .select("id, user_id, approval_status, approved_at, signed_at")
+      .eq("approval_status", "approved")
+      .in("user_id", userIds.slice(i, i + ID_CHUNK));
+    // Stop, keep what came back, and carry on with it. Nothing to special-case:
+    // a missing approved row can only leave a waiting row looking `pending`, so
+    // a partial or empty read counts MORE, which is how this read behaved
+    // before `replaced` existed. That is the right direction to fail in. An
+    // item a manager has already dealt with is noise; a signature nobody is
+    // told about is somebody waiting to train.
+    if (sliceError) {
+      console.error("[waivers] could not read the approved waivers beside them:", sliceError);
+      break;
+    }
+    approved.push(...(slice ?? []));
+  }
+
+  const statuses = deriveWaiverListStatuses([...waiting, ...approved]);
+  const stillWaiting = waiting.filter((w) => statuses.get(w.id) === "pending");
+
+  // `count` is how many rows are waiting; `waiting` is how many this read
+  // looked at. Subtract only the replaced ones it could see, so a scan that hit
+  // the cap over-reports rather than inventing a shorter queue.
+  const total = count ?? waiting.length;
+  const pending = Math.max(total - (waiting.length - stillWaiting.length), 0);
+  if (total > waiting.length)
+    console.warn(
+      `[waivers] ${total} waivers waiting; only the newest ${waiting.length} were checked for replacements`,
+    );
   if (pending === 0) return { pending: 0, latestName: null, latestAt: null };
 
-  const { data: latest, error: latestError } = await admin
-    .from("waivers")
-    .select("first_name, middle_name, last_name, preferred_name, signed_at")
-    .eq("approval_status", "pending")
-    .order("signed_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  // The count is the part the notification cannot do without; a missing name
-  // only makes the copy vaguer.
-  if (latestError) {
-    console.error("[waivers] could not read the newest waiting waiver:", latestError);
-    return { pending, latestName: null, latestAt: null };
-  }
+  const latest = stillWaiting[0];
   return {
     pending,
     latestName: latest ? nameWithPreferred(latest) : null,

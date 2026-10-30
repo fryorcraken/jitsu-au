@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils";
 import {
   deriveExpandedWaivers,
   formatCents,
+  isApprovedWaiverStatus,
   isPaperWaiver,
   type WaiverApprovalStatus,
 } from "@/lib/validation";
@@ -1226,11 +1227,7 @@ function ManagerUserPage() {
                     )}
                   </CollapsibleTrigger>
                   <div className="flex flex-wrap items-center gap-2">
-                    {w.status === "pending" ? (
-                      <Button size="sm" onClick={() => setApproval(w, "approved")} disabled={busy}>
-                        {busy ? "Approving..." : "Approve"}
-                      </Button>
-                    ) : (
+                    {isApprovedWaiverStatus(w.status) ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -1238,6 +1235,10 @@ function ManagerUserPage() {
                         disabled={busy}
                       >
                         {busy ? "Updating..." : "Revoke approval"}
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => setApproval(w, "approved")} disabled={busy}>
+                        {busy ? "Approving..." : "Approve"}
                       </Button>
                     )}
                     {w.has_pdf ? (

@@ -122,6 +122,15 @@ export function blockId(text: string, ordinal = 0): string {
  * Splitting there would both mangle the rendering and mint anchors for fragments
  * of a code sample.
  *
+ * A HEADING is always a block of its own, blank lines or not. Authors write
+ * `### Throws` straight under the list above it and put the list straight under
+ * it, and Markdown renders that as a heading either way. Left in a block with
+ * other lines it was no heading here: no anchor, missing from "On this page",
+ * a link to it reported the section as renamed away, and a preview of the
+ * section above ran on into it. Only a heading at the start of the line counts:
+ * an indented `### x` can belong to a list item, and splitting it out would
+ * break that item in two.
+ *
  * This is deliberately a source-level split rather than a real markdown parse.
  * The reader renders each block with `react-markdown` independently, so the
  * split has to land on boundaries where that is safe — which top-level blank
@@ -162,6 +171,12 @@ export function splitBlocks(markdown: string): ArticleBlock[] {
       continue;
     }
     if (fence === null && line.trim() === "") {
+      flush();
+      continue;
+    }
+    if (fence === null && /^#{1,6}(?:[ \t]|$)/.test(line)) {
+      flush();
+      current.push(line);
       flush();
       continue;
     }

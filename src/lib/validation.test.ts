@@ -52,6 +52,7 @@ import {
   deriveWaiverListStatuses,
   endsWithCredits,
   interestSchema,
+  isApprovedWaiverStatus,
   isFutureSigningDate,
   isMinorOn,
   isPaperWaiver,
@@ -78,6 +79,7 @@ import {
   nameWithPreferred,
   waiverSubmitSchema,
   waiverToProfileFields,
+  type WaiverListStatus,
 } from "./validation";
 
 describe("profileFullName", () => {
@@ -591,10 +593,89 @@ describe("deriveWaiverListStatuses", () => {
     expect(statuses.get("w2")).toBe("active");
     expect(statuses.get("w1")).toBe("superseded");
   });
+
+  it("marks an unapproved waiver replaced once a later signature is approved", () => {
+    // The live case this state was added for: somebody signed in July, nobody
+    // approved it, they re-signed in August on a newer template and THAT was
+    // approved. Read as pending, the July form asks a manager for a decision
+    // that no longer exists and that no button could ever settle.
+    const statuses = deriveWaiverListStatuses([
+      row({ id: "july", signed_at: "2026-07-27T04:20:00Z" }),
+      row({
+        id: "august",
+        approval_status: "approved",
+        signed_at: "2026-08-28T02:29:00Z",
+        approved_at: "2026-08-31T04:18:00Z",
+      }),
+    ]);
+    expect(statuses.get("august")).toBe("active");
+    expect(statuses.get("july")).toBe("replaced");
+  });
+
+  it("replaces per person, so one member's re-signing cannot clear another's queue", () => {
+    const statuses = deriveWaiverListStatuses([
+      row({ id: "theirs", user_id: "pb", signed_at: "2026-07-01T00:00:00Z" }),
+      row({
+        id: "mine",
+        user_id: "pa",
+        approval_status: "approved",
+        signed_at: "2026-08-01T00:00:00Z",
+      }),
+    ]);
+    expect(statuses.get("theirs")).toBe("pending");
+  });
+
+  it("keeps a waiting waiver pending when the approved one was signed earlier", () => {
+    // Approved LAST is not approved OF a later signature. Their January form
+    // was approved in March; the February one they signed in between is still
+    // the newest thing they have signed, and still wants a look.
+    const statuses = deriveWaiverListStatuses([
+      row({
+        id: "january",
+        approval_status: "approved",
+        signed_at: "2026-01-01T00:00:00Z",
+        approved_at: "2026-03-01T00:00:00Z",
+      }),
+      row({ id: "february", signed_at: "2026-02-01T00:00:00Z" }),
+    ]);
+    expect(statuses.get("january")).toBe("active");
+    expect(statuses.get("february")).toBe("pending");
+  });
+
+  it("keeps a waiting waiver pending on an exact signing tie", () => {
+    // Two rows with the same signing date is the shape a duplicate paper
+    // filing makes, and neither replaced the other. Pending is the side that
+    // still asks somebody to look.
+    const statuses = deriveWaiverListStatuses([
+      row({ id: "waiting", signed_at: "2026-05-01T00:00:00Z" }),
+      row({
+        id: "filed",
+        approval_status: "approved",
+        signed_at: "2026-05-01T00:00:00Z",
+        approved_at: "2026-05-02T00:00:00Z",
+      }),
+    ]);
+    expect(statuses.get("waiting")).toBe("pending");
+  });
+});
+
+describe("isApprovedWaiverStatus", () => {
+  it("is true for exactly the two states that mean the club approved it", () => {
+    expect(isApprovedWaiverStatus("active")).toBe(true);
+    expect(isApprovedWaiverStatus("superseded")).toBe(true);
+    expect(isApprovedWaiverStatus("pending")).toBe(false);
+  });
+
+  it("is false for a replaced waiver, which has no approval to revoke", () => {
+    // The approval buttons read this. "Not pending" would offer a manager
+    // "Revoke approval" on a waiver nobody ever approved, and pressing it
+    // would write back the status the row already has.
+    expect(isApprovedWaiverStatus("replaced")).toBe(false);
+  });
 });
 
 describe("deriveExpandedWaivers", () => {
-  const w = (id: string, signed_at: string, status: "pending" | "active" | "superseded") => ({
+  const w = (id: string, signed_at: string, status: WaiverListStatus) => ({
     id,
     signed_at,
     status,
@@ -619,6 +700,14 @@ describe("deriveExpandedWaivers", () => {
   it("expands nothing when the newest waiver is approved", () => {
     expect(deriveExpandedWaivers([w("w1", "2026-03-01T00:00:00Z", "active")]).size).toBe(0);
     expect(deriveExpandedWaivers([w("w1", "2026-03-01T00:00:00Z", "superseded")]).size).toBe(0);
+  });
+
+  it("expands nothing for a replaced waiver", () => {
+    // `deriveWaiverListStatuses` cannot hand the newest row this status, since
+    // replacing one takes a signature made later. Pinned anyway: the panel
+    // that opens by itself is the one asking for a decision, and this is not
+    // one.
+    expect(deriveExpandedWaivers([w("w1", "2026-03-01T00:00:00Z", "replaced")]).size).toBe(0);
   });
 
   it("leaves an older pending waiver collapsed when a newer one is approved", () => {

@@ -13,7 +13,7 @@ import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confirmation";
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 
 /** Manager dashboard where the lead/member funnel is reviewed. */
