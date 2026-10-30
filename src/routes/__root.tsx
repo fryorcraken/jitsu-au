@@ -100,6 +100,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
+      // Google Search Console ownership proof for https://utsjitsu.com.au/
+      { name: "google-site-verification", content: "z-T60_duumV8DOAvkH37iri30wKXYqeqDGzqjTwXxhA" },
       { title: "UTS Jitsu | Practical Japanese Jiu-Jitsu in Sydney" },
       {
         name: "description",
