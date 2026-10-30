@@ -48,8 +48,15 @@ type EventRow = {
   status: string;
   visibility: string;
   invite_only: boolean;
+  /** Its weekly entry is invite only, which hides it whatever `invite_only` says. */
+  series_invite_only: boolean;
   rsvps: { going: number; maybe: number; declined: number };
 };
+
+/** Whether the date is hidden as invite only: its own setting, or its weekly entry's. */
+function hiddenAsInviteOnly(ev: EventRow): boolean {
+  return ev.invite_only || ev.series_invite_only;
+}
 
 type RsvpRow = {
   user_id: string;
@@ -238,7 +245,7 @@ function ManagerCalendarPage() {
       location: ev.location ?? "",
       description: ev.description ?? "",
       visibility: ev.visibility === "members" ? "members" : "public",
-      invite_only: ev.invite_only,
+      invite_only: hiddenAsInviteOnly(ev),
     });
   }
 
@@ -257,7 +264,12 @@ function ManagerCalendarPage() {
           location: editForm.location,
           description: editForm.description,
           visibility: editForm.visibility,
-          invite_only: editForm.invite_only,
+          // Only when the box was changed. It opens showing whether the date is
+          // hidden, which can come from its weekly entry; sending that back
+          // untouched would copy the entry's setting onto this date for good.
+          ...(editForm.invite_only !== hiddenAsInviteOnly(ev) && {
+            invite_only: editForm.invite_only,
+          }),
         },
       });
       toast.success(
@@ -614,7 +626,7 @@ function ManagerCalendarPage() {
                               Weekly
                             </span>
                           )}
-                          {ev.invite_only && (
+                          {hiddenAsInviteOnly(ev) && (
                             <span className="ml-2 rounded-full border border-primary/40 px-2 py-0.5 text-xs text-primary">
                               Invite only
                             </span>
@@ -796,6 +808,12 @@ function ManagerCalendarPage() {
                                 />
                                 Show an &quot;invite only&quot; badge
                               </label>
+                              {ev.series_invite_only && (
+                                <p className="text-xs text-muted-foreground sm:col-span-2">
+                                  Every date of this weekly entry is invite only. To change that,
+                                  save for this date and all future ones.
+                                </p>
+                              )}
                               <div className="flex flex-wrap items-end gap-2">
                                 <Button
                                   size="sm"

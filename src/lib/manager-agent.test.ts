@@ -1053,6 +1053,20 @@ describe("projectAgentCalendarEvent", () => {
     invite_only: false,
   };
 
+  // The manager list reads the date's own flag and its entry's apart; a caller
+  // asking who can see the date needs them together.
+  it("reports a date as invite only when its weekly entry is, whatever its own flag says", () => {
+    const weekly = { ...morning, series_id: "series-1" };
+    expect(projectAgentCalendarEvent({ ...weekly, series_invite_only: true }).invite_only).toBe(
+      true,
+    );
+    expect(projectAgentCalendarEvent({ ...weekly, series_invite_only: false }).invite_only).toBe(
+      false,
+    );
+    expect(projectAgentCalendarEvent({ ...morning, invite_only: true }).invite_only).toBe(true);
+    expect(projectAgentCalendarEvent(morning)).not.toHaveProperty("series_invite_only");
+  });
+
   it("reports the club's wall clock and weekday, not UTC's", () => {
     expect(projectAgentCalendarEvent(morning)).toMatchObject({
       starts_at: morning.starts_at,

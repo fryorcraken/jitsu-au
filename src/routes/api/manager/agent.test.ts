@@ -2803,6 +2803,10 @@ describe("manager agent route: the calendar", () => {
               filters.push((r) => r[col] === val);
               return b;
             },
+            neq: (col: string, val: unknown) => {
+              filters.push((r) => r[col] !== val);
+              return b;
+            },
             in: (col: string, vals: unknown[]) => {
               filters.push((r) => vals.includes(r[col]));
               return b;

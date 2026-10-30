@@ -88,8 +88,12 @@ only for "this and all future dates" hides **every** date of it, earlier ones
 included, because the entry itself is now invite only, even though only the
 date clicked and the ones after it are rewritten. And while the entry is invite
 only, one date of it cannot be made visible on its own ("this date only"): the
-entry's setting still hides it. Turning invite only off for "this and all future
-dates" is the way back.
+entry's setting still hides it, so the server refuses the change rather than
+report it saved, and the edit form says so under the box. Turning invite only
+off for "this and all future dates" is the way back. The edit form opens with
+the box showing whether the date is hidden, and only sends it when the manager
+changes it, so saving a title on a date its entry hides does not copy the
+entry's setting onto that date for good.
 
 The calendar page and the personal calendar link read through the service role,
 which skips those policies, so both apply the same rule in code through one
@@ -154,6 +158,12 @@ appears, and it is no reason to add a one-off for it.
    and when a class was kept, the message afterwards says why it is still
    listed and to cancel it if it is not going ahead. Without that, the class
    still sitting on the calendar makes pressing Stop again look like the fix.
+   The repeat is recorded as ending on today's date at the club, or on that
+   kept class's date if it is later, so the rule never says it ended before a
+   class still on the calendar. Adding the class again straight after (to
+   change its length, say) does not put a second copy over the kept one: a
+   repeat never generates a date where a scheduled date with the same title
+   already is.
 6. **See who's coming** — a going/maybe tally per date, expandable to the list of
    names and emails.
 7. **Check people in** — who actually turned up, on the `/manager/check-in`

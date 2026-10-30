@@ -1483,8 +1483,13 @@ scripts/agent.sh create_calendar_entry '{
 - **A weekly entry's day, time and length are fixed once it is made.** Get them
   right now: changing one later means stopping it and adding it again.
 - **A `location` left out is the club's gym**, which the screen's form fills
-  in. Send `""` for no location at all, or the place, for anything held
-  somewhere else.
+  in. Send `""` (or `null`) for no location at all, or the place, for anything
+  held somewhere else. `null` clears `description` and `instructor_name` here
+  too, as it does on `edit_calendar_entry`.
+- **A weekly entry skips any week where a scheduled date with the same title
+  is already at that time**, such as tonight's class a `stop_calendar_repeat`
+  kept because people were checked in. So stopping a class and adding it again
+  (to change its length) does not put two of tonight's class on the calendar.
 - **`visibility: "members"` means paid members only**, not everyone with an
   account: an active, priced membership that is not a trial (held by the person
   or by a child on their account), plus managers. Somebody on the free trial or
@@ -1571,8 +1576,9 @@ changed. `404 not_found` when there is no such date; `422 not_repeating` for
 > earlier ones included, even though `updated` counts only the date named and
 > later ones. And `invite_only: false` with `scope: "event"` cannot make one
 > date of an invite-only weekly entry visible again, because the entry still
-> hides it: only `scope: "series"` with `invite_only: false` can. Tell the
-> manager which of these applies before sending it.
+> hides it, so it is refused as `422 invite_only_on_entry` (`series_id` in
+> `error.details`): only `scope: "series"` with `invite_only: false` can. Tell
+> the manager which of these applies before sending it.
 
 ### `cancel_calendar_entry` — call off a date, or restore it
 

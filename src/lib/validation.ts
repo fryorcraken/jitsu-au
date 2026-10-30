@@ -3781,11 +3781,16 @@ const CLUB_LOCAL_DATE_TIME = /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d(:[0-5
  *   impossible date ("2026-02-31T18:00") is refused there rather than rolled
  *   over into March.
  * - An omitted `location` is the club's gym, which the form pre-fills. An empty
- *   one is still no location, as clearing the field on the form is.
+ *   one (or null) is still no location, as clearing the field on the form is.
  */
 function agentCalendarEntryInput(raw: unknown): unknown {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
-  const input = raw as Record<string, unknown>;
+  const input = { ...(raw as Record<string, unknown>) };
+  // null means "none", as it does on edit_calendar_entry, which is how an agent
+  // will have learnt to clear one. The screen's schema takes text only.
+  for (const key of ["description", "instructor_name", "location"]) {
+    if (input[key] === null) input[key] = "";
+  }
   const withLocation = "location" in input ? input : { ...input, location: DEFAULT_EVENT_LOCATION };
   const repeat = input.repeat;
   if (!repeat || typeof repeat !== "object") return withLocation;

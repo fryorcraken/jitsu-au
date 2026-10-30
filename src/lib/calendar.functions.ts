@@ -22,6 +22,7 @@ import {
 import {
   CLUB_TIME_ZONE,
   WEEKDAY_LABELS,
+  clubLocalDate,
   diffOccurrences,
   firstDateToCome,
   generateOccurrences,
@@ -92,6 +93,9 @@ async function requireManager(context: { supabase: CalendarClient; userId: strin
  * - `already_on_calendar`: asked to add something that is already there.
  * - `no_dates`: asked to add a weekly entry that would never put a date on the
  *   calendar (its last date has passed, or no date in it is on that weekday).
+ * - `invite_only_on_entry`: asked to open one date of a weekly entry that is
+ *   invite only. The entry's setting hides every one of its dates, so the
+ *   date's own setting cannot open it.
  */
 export type CalendarRefusal =
   | "not_found"
@@ -99,7 +103,8 @@ export type CalendarRefusal =
   | "repeating_date"
   | "checked_in"
   | "already_on_calendar"
-  | "no_dates";
+  | "no_dates"
+  | "invite_only_on_entry";
 
 export class CalendarEntryError extends Error {
   reason: CalendarRefusal;
@@ -114,6 +119,16 @@ export class CalendarEntryError extends Error {
 
 const NO_SUCH_DATE = "That date is no longer on the calendar. Refresh the list and try again.";
 const NOT_REPEATING = "That entry does not repeat.";
+
+/**
+ * Today at the club, YYYY-MM-DD. What "has this run any date still to come"
+ * and "which date did it stop on" are measured against: until mid-morning in
+ * Sydney the UTC date is still yesterday, so `dateFromNow(0)` would let a run
+ * that ended yesterday through as live.
+ */
+function clubToday(): string {
+  return clubLocalDate(new Date());
+}
 
 /** A YYYY-MM-DD date `days` from now (UTC date grid). */
 function dateFromNow(days: number): string {
@@ -454,27 +469,28 @@ export const replaceMyCalendarFeedUrl = createServerFn({ method: "POST" })
 /** Every date from a month back to six months ahead, each with its RSVP tally. */
 export async function listManagerEventRows(admin: CalendarClient) {
   await topUpHorizon(admin);
-  const { data, error } = await admin
-    .from("calendar_events")
-    .select(EVENT_COLUMNS)
-    .gte("starts_at", `${dateFromNow(-30)}T00:00:00.000Z`)
-    .lte("starts_at", `${dateFromNow(180)}T23:59:59.999Z`)
-    .order("starts_at", { ascending: true })
-    .limit(1000);
+  const [{ data, error }, { data: inviteSeries, error: iErr }] = await Promise.all([
+    admin
+      .from("calendar_events")
+      .select(EVENT_COLUMNS)
+      .gte("starts_at", `${dateFromNow(-30)}T00:00:00.000Z`)
+      .lte("starts_at", `${dateFromNow(180)}T23:59:59.999Z`)
+      .order("starts_at", { ascending: true })
+      .limit(1000),
+    admin.from("calendar_series").select("id").eq("invite_only", true),
+  ]);
   if (error) throw new Error(error.message);
-  // Who can see a date is its own invite-only flag OR its weekly entry's (the
-  // read policies and `withoutHiddenInviteOnly` both ask both), so the list
-  // reports that, not the date's own column, which an entry made invite only
-  // "from this date on" leaves false on the dates before it.
-  const { data: inviteSeries, error: iErr } = await admin
-    .from("calendar_series")
-    .select("id")
-    .eq("invite_only", true);
   if (iErr) throw new Error(iErr.message);
+  // Who can see a date is its own invite-only flag OR its weekly entry's (the
+  // read policies and `withoutHiddenInviteOnly` both ask both), and an entry
+  // made invite only "from this date on" leaves the dates before it with their
+  // own flag false. So each date carries both: `invite_only` is its own
+  // column, the one an edit of that date writes, and `series_invite_only` says
+  // its entry hides it whatever that column holds.
   const inviteOnlySeries = new Set((inviteSeries ?? []).map((s) => s.id));
   const events = (data ?? []).map((e) => ({
     ...projectEvent(e),
-    invite_only: e.invite_only || (e.series_id !== null && inviteOnlySeries.has(e.series_id)),
+    series_invite_only: e.series_id !== null && inviteOnlySeries.has(e.series_id),
   }));
 
   // Attach a per-event RSVP tally so the manager sees interest at a glance,
@@ -576,6 +592,13 @@ export const listEventRsvps = createServerFn({ method: "POST" })
  * skipping any that already exist (idempotent — we diff against existing starts
  * rather than relying on ON CONFLICT, since the uniqueness index is partial).
  * Returns the dates it added.
+ *
+ * "Already exist" includes a scheduled date with the same title at the same
+ * moment from anywhere else: a one-off, or the date a stopped repeat kept
+ * because people were checked in to it. Re-adding a class straight after
+ * stopping it (to change its length, say) would otherwise put a second copy of
+ * tonight's on the calendar, and the new one is the one replies and check-ins
+ * would land on.
  */
 async function materializeSeries(
   admin: CalendarClient,
@@ -597,18 +620,31 @@ async function materializeSeries(
   );
   if (occ.length === 0) return [];
 
-  const { data: existing, error: exErr } = await admin
-    .from("calendar_events")
-    .select("starts_at")
-    .eq("series_id", series.id)
-    .gte("starts_at", occ[0].starts_at)
-    .lte("starts_at", occ[occ.length - 1].starts_at);
-  if (exErr) throw new Error(exErr.message);
+  const from = occ[0].starts_at;
+  const through = occ[occ.length - 1].starts_at;
+  const [own, sameClass] = await Promise.all([
+    admin
+      .from("calendar_events")
+      .select("starts_at")
+      .eq("series_id", series.id)
+      .gte("starts_at", from)
+      .lte("starts_at", through),
+    admin
+      .from("calendar_events")
+      .select("starts_at")
+      .eq("title", series.title)
+      .neq("status", "cancelled")
+      .gte("starts_at", from)
+      .lte("starts_at", through),
+  ]);
+  if (own.error) throw new Error(own.error.message);
+  if (sameClass.error) throw new Error(sameClass.error.message);
+  const existing = [...(own.data ?? []), ...(sameClass.data ?? [])];
 
   // Every generated date is a copy of the entry, INCLUDING who can see it and
   // the invite-only badge. Hardcoding those (as this used to) is what made a
   // recurring members-only or invite-only entry impossible to express.
-  const rows = diffOccurrences(existing ?? [], occ).map((o) => ({
+  const rows = diffOccurrences(existing, occ).map((o) => ({
     series_id: series.id,
     title: series.title,
     description: series.description,
@@ -620,14 +656,21 @@ async function materializeSeries(
     invite_only: series.invite_only,
   }));
   if (rows.length === 0) return [];
+  // Only the ids come back: everything else about each date was written from
+  // here, and the horizon top-up on every calendar read has no use for any of
+  // it. Matched by instant, since PostgREST answers "+00:00" for our "Z".
   const { data: inserted, error: insErr } = await admin
     .from("calendar_events")
     .insert(rows)
-    .select(EVENT_COLUMNS);
+    .select("id, starts_at");
   if (insErr) throw new Error(insErr.message);
-  return [...(inserted ?? [])].sort(
-    (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
-  );
+  const idAt = new Map((inserted ?? []).map((r) => [new Date(r.starts_at).getTime(), r.id]));
+  return rows
+    .flatMap((r) => {
+      const id = idAt.get(new Date(r.starts_at).getTime());
+      return id ? [{ ...r, id, status: "scheduled" }] : [];
+    })
+    .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
 }
 
 /**
@@ -666,13 +709,9 @@ export async function topUpHorizon(admin: CalendarClient): Promise<void> {
       // No dates yet, or the last one is close enough to be worth extending.
       if (last && last >= threshold) continue;
       // A finished entry has nothing left to generate.
-      if (row.ends_on && row.ends_on < dateFromNow(0)) continue;
-      await materializeSeries(
-        admin,
-        row,
-        row.starts_on > dateFromNow(0) ? row.starts_on : dateFromNow(0),
-        through,
-      );
+      const today = clubToday();
+      if (row.ends_on && row.ends_on < today) continue;
+      await materializeSeries(admin, row, row.starts_on > today ? row.starts_on : today, through);
     }
   } catch (e) {
     console.error("[calendar] horizon top-up failed:", e);
@@ -735,7 +774,7 @@ async function refuseDuplicateEntry(admin: CalendarClient, data: CreateCalendarE
     .eq("start_time", data.repeat.start_time)
     .eq("is_active", true);
   if (error) throw new Error(error.message);
-  const existing = (same ?? []).find((s) => weeklyRunsShareADate(s, run, dateFromNow(0)));
+  const existing = (same ?? []).find((s) => weeklyRunsShareADate(s, run, clubToday()));
   if (!existing) return;
   throw new CalendarEntryError(
     "already_on_calendar",
@@ -769,7 +808,7 @@ export async function createCalendarEntryRow(
         starts_on: data.repeat.starts_on,
         ends_on: data.repeat.ends_on ?? null,
       },
-      dateFromNow(0),
+      clubToday(),
     )
   ) {
     throw new CalendarEntryError(
@@ -822,7 +861,7 @@ export async function createCalendarEntryRow(
   const dates = await materializeSeries(
     admin,
     created as CalendarSeriesRow,
-    starts_on > dateFromNow(0) ? starts_on : dateFromNow(0),
+    starts_on > clubToday() ? starts_on : clubToday(),
     dateFromNow(HORIZON_DAYS),
   );
   return {
@@ -876,6 +915,10 @@ export async function updateCalendarEntryRow(
   if (Object.keys(patch).length === 0) return { ok: true as const, id, updated: 0 };
 
   if (scope === "event") {
+    // Opening one date of an invite-only weekly entry cannot work: the entry
+    // hides every one of its dates, whatever the date's own setting says. Saved
+    // anyway, it would report success and leave the date exactly as hidden.
+    if (patch.invite_only === false) await refuseOpeningOneDateOfHiddenEntry(admin, id);
     const { data: changed, error } = await admin
       .from("calendar_events")
       .update({ ...patch, updated_at: now })
@@ -913,6 +956,31 @@ export async function updateCalendarEntryRow(
   return { ok: true as const, id, updated: changed?.length ?? 0 };
 }
 
+/** Refuse `invite_only: false` on one date when its weekly entry is invite only. */
+async function refuseOpeningOneDateOfHiddenEntry(admin: CalendarClient, eventId: string) {
+  const { data: ev, error } = await admin
+    .from("calendar_events")
+    .select("series_id")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!ev) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
+  if (!ev.series_id) return;
+  const { data: series, error: sErr } = await admin
+    .from("calendar_series")
+    .select("invite_only")
+    .eq("id", ev.series_id)
+    .maybeSingle();
+  if (sErr) throw new Error(sErr.message);
+  if (series?.invite_only) {
+    throw new CalendarEntryError(
+      "invite_only_on_entry",
+      "This weekly entry is invite only, which hides every one of its dates, so one date cannot be opened on its own. Turn invite only off for this date and all future ones instead.",
+      { series_id: ev.series_id },
+    );
+  }
+}
+
 /** Manager: edit an entry's details, for one date or this and every future one. */
 export const updateCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -935,12 +1003,16 @@ export const updateCalendarEntry = createServerFn({ method: "POST" })
  * Safe to repeat: the rule is switched off first, and a second call on a repeat
  * already stopped clears any future dates a first call left behind without
  * moving the date it stopped on.
+ *
+ * The date it stopped on (`ends_on`) is the club's today, or the last date it
+ * kept if that is later, so the rule never says it ended before a class that is
+ * still on the calendar.
  */
 export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepeatingInput) {
   const now = new Date().toISOString();
   const { data: series, error: sReadErr } = await admin
     .from("calendar_series")
-    .select("starts_on, is_active")
+    .select("starts_on, ends_on, is_active")
     .eq("id", data.series_id)
     .maybeSingle();
   if (sReadErr) throw new Error(sReadErr.message);
@@ -950,25 +1022,23 @@ export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepea
 
   // Off first, so the horizon top-up stops adding dates before the ones it
   // added are cleared away.
+  let endsOn = series.ends_on;
   if (series.is_active) {
     // `ends_on` has a CHECK against `starts_on`, so an entry stopped before its
     // first date ends on that date rather than today. is_active = false is what
     // actually stops it; the date is only for the record.
-    const today = dateFromNow(0);
+    const today = clubToday();
+    endsOn = series.starts_on > today ? series.starts_on : today;
     const { error: sErr } = await admin
       .from("calendar_series")
-      .update({
-        is_active: false,
-        ends_on: series.starts_on > today ? series.starts_on : today,
-        updated_at: now,
-      })
+      .update({ is_active: false, ends_on: endsOn, updated_at: now })
       .eq("id", data.series_id);
     if (sErr) throw new Error(sErr.message);
   }
 
   const { data: future, error: fErr } = await admin
     .from("calendar_events")
-    .select("id")
+    .select("id, starts_at")
     .eq("series_id", data.series_id)
     .gte("starts_at", now);
   if (fErr) throw new Error(fErr.message);
@@ -987,6 +1057,20 @@ export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepea
   for (const ids of chunks(removable)) {
     const { error: dErr } = await admin.from("calendar_events").delete().in("id", ids);
     if (dErr) throw new Error(dErr.message);
+  }
+  // A kept date that falls after the date it stopped on moves that date out to
+  // it, in club time, so the rule and the calendar agree on its last class.
+  const lastKept = (future ?? [])
+    .filter((e) => checkedIn.has(e.id))
+    .map((e) => clubLocalDate(new Date(e.starts_at)))
+    .sort()
+    .at(-1);
+  if (lastKept && (!endsOn || lastKept > endsOn)) {
+    const { error: eErr } = await admin
+      .from("calendar_series")
+      .update({ ends_on: lastKept, updated_at: now })
+      .eq("id", data.series_id);
+    if (eErr) throw new Error(eErr.message);
   }
   return {
     ok: true as const,

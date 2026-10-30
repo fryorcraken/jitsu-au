@@ -2610,6 +2610,21 @@ describe("agentCreateCalendarEntrySchema", () => {
     expect(result.success && result.data.location).toBeUndefined();
   });
 
+  // edit_calendar_entry clears a field with null, so an agent will send it
+  // here too. Refused, the whole create would fail on a valid entry.
+  it("takes null as none for location, description and instructor, as edit does", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse({
+      ...oneOff("2026-11-05T18:00", "2026-11-05T19:30"),
+      location: null,
+      description: null,
+      instructor_name: null,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.location).toBeUndefined();
+    expect(result.success && result.data.description).toBeUndefined();
+    expect(result.success && result.data.instructor_name).toBeUndefined();
+  });
+
   it("keeps a location it is given", () => {
     const result = agentCreateCalendarEntrySchema.safeParse({
       ...oneOff("2026-11-05T18:00", "2026-11-05T19:30"),

@@ -63,6 +63,7 @@ function fakeClient(respond: (op: Op, calls: Op[]) => Result) {
     );
     const builder: Record<string, unknown> = {
       eq: filter("eq"),
+      neq: filter("neq"),
       in: filter("in"),
       gte: filter("gte"),
       lte: filter("lte"),
@@ -274,6 +275,57 @@ describe("cancelEventRows", () => {
 });
 
 describe("updateCalendarEntryRow", () => {
+  describe("opening one date of an invite-only weekly entry", () => {
+    /** One date of a weekly entry, and whether that entry is invite only. */
+    function club(entryInviteOnly: boolean) {
+      return fakeClient((op) => {
+        if (op.table === "calendar_events" && op.verb === "select")
+          return ok({ series_id: "series-1" });
+        if (op.table === "calendar_series" && op.verb === "select")
+          return ok({ invite_only: entryInviteOnly });
+        if (op.verb === "update") return ok([{ id: "evt-1" }]);
+        return ok(null);
+      });
+    }
+
+    // Saved, it would say "saved" and leave the date exactly as hidden.
+    it("refuses it, naming the entry, and writes nothing", async () => {
+      const { admin, calls } = club(true);
+
+      const e = await refusal(
+        updateCalendarEntryRow(admin, { scope: "event", id: "evt-1", invite_only: false }),
+      );
+      expect(e.reason).toBe("invite_only_on_entry");
+      expect(e.details).toEqual({ series_id: "series-1" });
+      expect(e.message).toMatch(/all future ones/);
+      expect(writes(calls)).toHaveLength(0);
+    });
+
+    it("opens a date whose entry is not invite only", async () => {
+      const { admin, calls } = club(false);
+
+      await updateCalendarEntryRow(admin, { scope: "event", id: "evt-1", invite_only: false });
+      expect(ofTable(calls, "calendar_events", "update")[0].patch).toMatchObject({
+        invite_only: false,
+      });
+    });
+
+    // The way that does work: the entry's own setting, from this date on.
+    it("lets the whole entry be opened from this date on", async () => {
+      const { admin, calls } = fakeClient((op) => {
+        if (op.table === "calendar_events" && op.verb === "select")
+          return ok({ series_id: "series-1", starts_at: NEXT_CLASS });
+        if (op.verb === "update") return ok([{ id: "evt-1" }]);
+        return ok(null);
+      });
+
+      await updateCalendarEntryRow(admin, { scope: "series", id: "evt-1", invite_only: false });
+      expect(ofTable(calls, "calendar_series", "update")[0].patch).toMatchObject({
+        invite_only: false,
+      });
+    });
+  });
+
   it("refuses a date that does not exist rather than reporting an edit that changed nothing", async () => {
     const { admin } = fakeClient(() => ok([]));
 
@@ -365,8 +417,14 @@ describe("stopRepeatingSeries", () => {
   function club(opts: { series: unknown; future: string[]; checkedIn?: string[] }) {
     return fakeClient((op) => {
       if (op.table === "calendar_series" && op.verb === "select") return ok(opts.series);
+      // Each future date a week after the last, from tonight on.
       if (op.table === "calendar_events" && op.verb === "select")
-        return ok(opts.future.map((id) => ({ id })));
+        return ok(
+          opts.future.map((id, i) => ({
+            id,
+            starts_at: new Date(Date.parse(NOW) + (i + 1) * 7 * 86_400_000).toISOString(),
+          })),
+        );
       if (op.table === "session_checkins") {
         const asked = (filterValue(op, "event_id", "in") as string[]) ?? [];
         return ok(
@@ -438,6 +496,24 @@ describe("stopRepeatingSeries", () => {
     const result = await stopRepeatingSeries(admin, { series_id: "series-1" });
     expect(result).toMatchObject({ removed: 2, kept_checked_in: ["evt-2"] });
     expect(deletedIds(calls)).toEqual(["evt-1", "evt-3"]);
+  });
+
+  // Stopped "today", but with a class still on the calendar two weeks out,
+  // the rule would say it ended before its own last date.
+  it("moves the date it stopped on out to the last date it kept, in club time", async () => {
+    const { admin, calls } = club({
+      series: { starts_on: "2026-09-02", ends_on: null, is_active: true },
+      future: ["evt-1", "evt-2"],
+      checkedIn: ["evt-2"],
+    });
+
+    await stopRepeatingSeries(admin, { series_id: "series-1" });
+    const updates = ofTable(calls, "calendar_series", "update").map((u) => u.patch);
+    // NOW plus two weeks is 2026-11-16 at 11am in Sydney.
+    expect(updates).toEqual([
+      expect.objectContaining({ is_active: false, ends_on: TODAY }),
+      expect.objectContaining({ ends_on: "2026-11-16" }),
+    ]);
   });
 
   it("clears dates left behind on a repeat already stopped, without rewriting the repeat", async () => {
@@ -714,6 +790,61 @@ describe("createCalendarEntryRow", () => {
     expect(calls).toHaveLength(0);
   });
 
+  // Until mid-morning in Sydney the UTC date is still yesterday. Measured in
+  // UTC, a run that ended yesterday at the club would still count as live.
+  it("measures a run's last date against today at the club, not in UTC", async () => {
+    // 8am Monday 2 November in Sydney, still Sunday 1 November in UTC.
+    vi.setSystemTime(new Date("2026-11-01T21:00:00.000Z"));
+    const { admin, calls } = fakeClient(() => ok([]));
+    const sundays: CreateCalendarEntryInput = {
+      ...weekly,
+      repeat: {
+        type: "weekly",
+        weekday: 0,
+        start_time: "18:00",
+        duration_minutes: 120,
+        starts_on: "2026-10-25",
+        ends_on: "2026-11-01",
+      },
+    };
+
+    const e = await refusal(createCalendarEntryRow(admin, sundays, MANAGER));
+    expect(e.reason).toBe("no_dates");
+    expect(calls).toHaveLength(0);
+  });
+
+  // Stopped at 5pm to change its length, with people already checked in to
+  // tonight's class, and added again at once: tonight's kept date is the class.
+  it("does not put a second copy over a scheduled date of the same class at the same time", async () => {
+    let inserted: Record<string, unknown>[] = [];
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "calendar_series" && op.verb === "select") return ok([]);
+      if (op.table === "calendar_series" && op.verb === "insert")
+        return ok({ id: "series-new", is_active: true, ...(op.patch as object) });
+      if (op.table === "calendar_events" && op.verb === "select")
+        // Only the same-title lookup finds it: it belongs to the stopped repeat.
+        return ok(filterValue(op, "title") ? [{ starts_at: "2026-11-04T07:00:00+00:00" }] : []);
+      if (op.table === "calendar_events" && op.verb === "insert") {
+        inserted = op.patch as Record<string, unknown>[];
+        return ok(inserted.map((r, i) => ({ id: `evt-${i}`, starts_at: r.starts_at })));
+      }
+      return ok(null);
+    });
+
+    const result = await createCalendarEntryRow(admin, wednesdays(TODAY, null), MANAGER);
+    const starts = inserted.map((r) => r.starts_at);
+    expect(starts).not.toContain(NEXT_CLASS);
+    expect(starts[0]).toBe("2026-11-11T07:00:00.000Z");
+    expect(result.dates[0]).toMatchObject({ id: "evt-0", starts_at: "2026-11-11T07:00:00.000Z" });
+
+    // A cancelled date at that time is not the class, so it does not count.
+    const sameClass = ofTable(calls, "calendar_events", "select").find((c) =>
+      filterValue(c, "title"),
+    )!;
+    expect(filterValue(sameClass, "title")).toBe("Wednesday class");
+    expect(filterValue(sameClass, "status", "neq")).toBe("cancelled");
+  });
+
   it("adds a fresh one-off as the acting manager, and hands back the date it added", async () => {
     const { admin, calls } = fakeClient((op) => {
       if (op.table === "calendar_events" && op.verb === "select") return ok([]);
@@ -819,8 +950,9 @@ describe("listManagerEventRows", () => {
   }
 
   // An entry made invite only "from this date on" leaves the flag false on
-  // its earlier dates, but the series flag hides them all the same.
-  it("reports a date as invite only when its weekly entry is, whatever its own flag says", async () => {
+  // its earlier dates, but the series flag hides them all the same. The two
+  // are reported apart: an edit of one date writes only its own.
+  it("reports apart whether a date's weekly entry hides it and what its own flag says", async () => {
     const { admin } = club(
       [
         date("evt-hidden", "series-invite", false),
@@ -832,11 +964,13 @@ describe("listManagerEventRows", () => {
     );
 
     const rows = await listManagerEventRows(admin);
-    expect(Object.fromEntries(rows.map((r) => [r.id, r.invite_only]))).toEqual({
-      "evt-hidden": true,
-      "evt-open": false,
-      "evt-one-off": false,
-      "evt-own-flag": true,
+    expect(
+      Object.fromEntries(rows.map((r) => [r.id, [r.invite_only, r.series_invite_only]])),
+    ).toEqual({
+      "evt-hidden": [false, true],
+      "evt-open": [false, false],
+      "evt-one-off": [false, false],
+      "evt-own-flag": [true, false],
     });
   });
 

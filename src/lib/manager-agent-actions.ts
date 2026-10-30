@@ -2376,6 +2376,7 @@ const CALENDAR_REFUSAL_STATUS: Record<CalendarRefusal, number> = {
   checked_in: 409,
   already_on_calendar: 409,
   no_dates: 422,
+  invite_only_on_entry: 422,
 };
 
 /** A shared calendar function's failure, in the endpoint's envelope. */

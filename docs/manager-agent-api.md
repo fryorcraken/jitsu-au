@@ -596,6 +596,8 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   `CalendarEntryError`'s `reason` as the error code: `404 not_found` (no such
   date or repeat), `422 not_repeating` (`scope: "series"` on a one-off),
   `422 no_dates` (a weekly entry that would put no date on the calendar),
+  `422 invite_only_on_entry` (opening one date of an invite-only weekly entry
+  with `scope: "event"`, `series_id` in `error.details`),
   `409 repeating_date` (deleting one date of a weekly entry, `series_id` in
   `error.details`), `409 checked_in` (deleting a class people were checked in
   to, the count in `error.details`) and `409 already_on_calendar`. Anything
@@ -678,22 +680,31 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   (its last date has passed, or no date from `starts_on` to `ends_on` falls on
   that weekday) is `no_dates`, checked by `firstDateToCome` before anything is
   written, rather than saved and reported as added with nothing to show for
-  it; and the duplicate refusal above.
+  it; and the duplicate refusal above. "Still to come" and the date a stopped
+  repeat is recorded as ending on are the club's today (`clubLocalDate`), not
+  the UTC date, which until mid-morning in Sydney is still yesterday. A repeat
+  also never generates a date over a scheduled date with the same title at the
+  same moment, so re-adding a class straight after stopping it does not double
+  tonight's class that the stop kept.
 
   There is **no action that invites somebody to an invite-only date**, because
   the screen has none either: an invitation is an RSVP row, and nothing on
   `/manager/calendar` writes one. An agent can mark a date invite only, but not
   choose who sees it. Who can see a date is its own `invite_only` **or** its
   weekly entry's (the read policies and `withoutHiddenInviteOnly` both ask
-  both), and `listManagerEventRows` reports that effective flag, for the screen
-  and the agent alike, rather than the date's own column, which an entry made
-  invite only "from this date on" leaves false on the dates before it. Two
+  both). `listManagerEventRows` reports the two apart, the date's own column as
+  `invite_only` and its entry's as `series_invite_only`, because an edit of one
+  date writes only its own and the screen's edit form must not copy the
+  entry's setting onto the date; `projectAgentCalendarEvent` puts them
+  together, so an agent reads `invite_only` as whether the date is hidden. Two
   consequences the manifest spells out for `edit_calendar_entry`:
   `scope: "series"` with `invite_only: true` hides every date of the entry,
   earlier ones included, although it rewrites only the date named and later
   ones; and `scope: "event"` cannot make one date of an invite-only weekly
-  entry visible again, since the entry's flag still hides it. Only
-  `scope: "series"` with `invite_only: false` can.
+  entry visible again, since the entry's flag still hides it, so it is refused
+  as `422 invite_only_on_entry` (screen and API alike) rather than saved as a
+  change that changes nothing. Only `scope: "series"` with
+  `invite_only: false` can.
 
 ### `file_waiver`: the parts that have bitten us
 
