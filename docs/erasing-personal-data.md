@@ -64,9 +64,8 @@ building the thing "The decision" rules out.
 A manager will be able to mark a person as having **left the club**
 (`profiles.archived_at`). Today only the columns exist and nothing reads or
 writes them; the screens, the API and the email exclusions are the next change.
-It is a reversible bookkeeping mark, and it is the answer to "everyone who ever
-signed stays on the books" that needs neither of the questions below settled,
-because it destroys nothing:
+It is a reversible bookkeeping mark, and it is the club's answer to "everyone
+who ever signed stays on the books", because it destroys nothing:
 
 - Every record, waiver, PDF, membership and check-in will stay exactly as it is.
 - The person will still be able to sign in, see their account and pay what they
