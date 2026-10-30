@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import { SiteBannerBar } from "@/components/site/SiteBanner";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
 import { useAuth, useRoles } from "@/hooks/useAuth";
+import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 import { getSiteBannerSettings, saveClubSettings } from "@/lib/club-settings.functions";
 import { describeLoadError } from "@/lib/load-error";
 import { INTAKE_SUBMIT } from "@/lib/submit-resilience";
@@ -32,6 +33,11 @@ export const Route = createFileRoute("/_authenticated/manager/site-banner")({
 
 type TextField = "message" | "link_label" | "link_href";
 
+/** The message as a save stores it (`siteBannerSchema`): one line, trimmed. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 function SiteBannerPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -41,6 +47,9 @@ function SiteBannerPage() {
   const [saved, setSaved] = useState<SiteBanner | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Whether the form holds edits not yet saved, for the Back button below.
+  const [dirty, setDirty] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) navigate({ to: "/account" });
@@ -59,6 +68,11 @@ function SiteBannerPage() {
     if (isManager) load();
   }, [isManager, load]);
 
+  async function goBack() {
+    if (dirty && !(await confirm(discardUnsavedChanges("Going back")))) return;
+    navigate({ to: "/manager" });
+  }
+
   if (loading && !saved) return <Loading className="p-8" />;
 
   return (
@@ -71,8 +85,8 @@ function SiteBannerPage() {
             before anything else.
           </p>
         </div>
-        <Button asChild variant="outline">
-          <Link to="/manager">Back to dashboard</Link>
+        <Button variant="outline" onClick={() => void goBack()}>
+          Back to dashboard
         </Button>
       </div>
 
@@ -86,8 +100,9 @@ function SiteBannerPage() {
           onRetry={load}
         />
       ) : (
-        <BannerForm initial={saved} />
+        <BannerForm initial={saved} onDirtyChange={setDirty} />
       )}
+      {confirmDialog}
     </section>
   );
 }
@@ -98,7 +113,13 @@ function SiteBannerPage() {
  * edit. No confirm, because it is undone the same way it is done, and the
  * preview already shows exactly what visitors will get.
  */
-function BannerForm({ initial }: { initial: SiteBanner }) {
+function BannerForm({
+  initial,
+  onDirtyChange,
+}: {
+  initial: SiteBanner;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const save = useServerFn(saveClubSettings);
   const router = useRouter();
   const send = useResilientSubmit<{ ok: true }>(INTAKE_SUBMIT);
@@ -115,6 +136,10 @@ function BannerForm({ initial }: { initial: SiteBanner }) {
     }
   }
   const unchanged = parsed.success && JSON.stringify(parsed.data) === JSON.stringify(saved);
+  // Compared raw, not parsed: an edit that does not yet pass the rules is
+  // still somebody's typing, and the most likely kind to be thrown away.
+  const dirty = JSON.stringify(form) !== JSON.stringify(saved);
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   function update(next: Partial<SiteBanner>) {
     setForm((f) => ({ ...f, ...next }));
@@ -147,9 +172,7 @@ function BannerForm({ initial }: { initial: SiteBanner }) {
   // What a save would store, so the preview never shows what visitors won't
   // get (a message of only spaces, say). Shown on a page no link points at, so
   // a link to "/" is previewed as the link it is everywhere else.
-  const preview = parsed.success
-    ? parsed.data
-    : { ...form, message: form.message.replace(/\s+/g, " ").trim() };
+  const preview = parsed.success ? parsed.data : { ...form, message: oneLine(form.message) };
 
   return (
     <form onSubmit={(e) => void submit(e)} className="space-y-6" noValidate>
@@ -179,10 +202,12 @@ function BannerForm({ initial }: { initial: SiteBanner }) {
       <TextInput
         id="message"
         label="Message"
-        hint={`One line, up to ${SITE_BANNER_MESSAGE_MAX} characters. Short reads best on a phone.`}
+        // Counted as it will be saved: line breaks and doubled spaces collapse.
+        // No maxLength on the box, because it would cut a pasted notice off
+        // before that tidying, mid-word.
+        hint={`One line, up to ${SITE_BANNER_MESSAGE_MAX} characters (${oneLine(form.message).length} so far). Line breaks become spaces. Short reads best on a phone.`}
         placeholder="We're training at a temporary location, so free trials are paused for now."
         value={form.message}
-        maxLength={SITE_BANNER_MESSAGE_MAX}
         error={showError("message")}
         disabled={send.busy}
         onChange={(message) => update({ message })}
@@ -199,9 +224,9 @@ function BannerForm({ initial }: { initial: SiteBanner }) {
         <TextInput
           id="link_label"
           label="Link text"
+          hint={`Up to ${SITE_BANNER_LINK_LABEL_MAX} characters.`}
           placeholder="Register your interest"
           value={form.link_label}
-          maxLength={SITE_BANNER_LINK_LABEL_MAX}
           error={showError("link_label")}
           disabled={send.busy}
           onChange={(link_label) => update({ link_label })}
@@ -212,7 +237,6 @@ function BannerForm({ initial }: { initial: SiteBanner }) {
           hint="A page on this site, like /register-interest, or a full https:// address."
           placeholder="/register-interest"
           value={form.link_href}
-          maxLength={500}
           error={showError("link_href")}
           disabled={send.busy}
           onChange={(link_href) => update({ link_href })}
@@ -262,7 +286,6 @@ function TextInput({
   hint,
   placeholder,
   value,
-  maxLength,
   error,
   disabled,
   onChange,
@@ -272,7 +295,6 @@ function TextInput({
   hint?: string;
   placeholder: string;
   value: string;
-  maxLength: number;
   error?: string;
   disabled: boolean;
   onChange: (value: string) => void;
@@ -292,7 +314,6 @@ function TextInput({
         id={id}
         value={value}
         placeholder={placeholder}
-        maxLength={maxLength}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={error ? true : undefined}

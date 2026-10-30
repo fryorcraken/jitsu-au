@@ -301,9 +301,13 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   `siteBannerSchema`, the screen's own rules (`400 invalid_params` otherwise).
   It refuses with `503` rather than merge over a banner it could not read.
   **Its `link_href` can only be a page on this site** (`400 invalid_params`
-  otherwise): an outside address is set on the screen, because a club-branded
-  link to another site across every page is what a leaked token would want. A
-  stored outside link survives a call that changes other fields.
+  otherwise; a full address to this site counts): an outside address is set
+  on the screen, because a club-branded link to another site across every
+  page is what a leaked token would want. And while the **stored** link goes
+  to another site (one a manager set on the screen), the only change allowed
+  is switching the banner off or replacing that link with a page here
+  (`409 outside_link` otherwise), so a token cannot reword or re-enable a
+  manager's outside link into a message of its own.
   **Unlike `get_club_settings`, this one is writable**, deliberately: the banner
   is public text, moves no money and no replies, and is undone by saving again,
   the same footing as `save_blog_post`. Product rules: `docs/site-banner.md`.

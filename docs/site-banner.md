@@ -31,7 +31,9 @@ on or off; nobody has to change code to do either.
     kept, because jumping to it is the point.
 - **A link to this site stays in the app.** A page here, or a full address to
   this site (`https://utsjitsu.com.au/classes`), moves within the app when
-  tapped rather than reloading it. Other sites open as an ordinary link.
+  tapped rather than reloading it. A file the site serves (`/timetable.pdf`)
+  or a server address (`/api/...`) loads as an ordinary link, since the app
+  would show its 404 page for it. Other sites open as an ordinary link.
 - **A failed read shows no banner.** It is a notice, not something a visitor is
   waiting on, so the page renders without it rather than with an error where
   it would be. The failure is logged.
@@ -48,14 +50,15 @@ agent API's `get_site_banner` / `save_site_banner` (`docs/manager-agent-api.md`)
 Both read and write the same stored value the same way, with one difference:
 **over the API the link can only be a page on this site.** An outside address
 across the top of every page is what a leaked token would want (a club-branded
-"pay here" link), so that is set on the screen, signed in. A stored outside link
-is kept when an agent changes something else.
+"pay here" link), so that is set on the screen, signed in. While a banner's stored link goes to another site, an agent can only switch it
+off (or replace the link with a page here), never reword or re-enable it.
 
 - **One switch, a message, and an optional link** (link text plus where it
   goes). One Save puts all of it live together, with a preview that updates as
   you type.
 - **No confirm.** It is undone the same way it is done, and the preview already
   shows exactly what visitors will get.
+- **Leaving with unsaved edits asks first**, like the other editors.
 - **The message survives being switched off**, so a recurring notice can be
   turned off and on again without retyping it.
 - **If the current banner cannot be read, there is no form**, only the failure

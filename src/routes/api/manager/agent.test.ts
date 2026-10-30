@@ -1556,13 +1556,39 @@ describe("manager agent route: site banner", () => {
     expect(fake.upserts).toEqual([]);
   });
 
-  it("keeps an outside link the screen stored when changing something else", async () => {
+  it("can switch off a banner whose stored link goes to another site", async () => {
     const stored = { ...LIVE, link_href: "https://example.com/news" };
     const fake = fakeBannerStore(stored);
     currentAdmin = fake.db;
     const res = await post({ action: "save_site_banner", params: { enabled: false } });
     expect(res.status).toBe(200);
     expect((await res.json()).result.banner).toEqual({ ...stored, enabled: false });
+  });
+
+  // Otherwise a token could reword a manager's outside link into "pay here".
+  it("will not reword or switch on a banner that links to another site", async () => {
+    const stored = { ...LIVE, enabled: false, link_href: "https://example.com/news" };
+    for (const params of [
+      { message: "Membership fees are now paid here" },
+      { link_label: "Pay now" },
+      { enabled: true },
+    ]) {
+      const fake = fakeBannerStore(stored);
+      currentAdmin = fake.db;
+      const res = await post({ action: "save_site_banner", params });
+      expect(res.status, JSON.stringify(params)).toBe(409);
+      expect((await res.json()).error.code).toBe("outside_link");
+      expect(fake.upserts).toEqual([]);
+    }
+  });
+
+  it("can replace a stored outside link with a page on this site", async () => {
+    const stored = { ...LIVE, link_href: "https://example.com/news" };
+    const fake = fakeBannerStore(stored);
+    currentAdmin = fake.db;
+    const res = await post({ action: "save_site_banner", params: { link_href: "/classes" } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result.banner.link_href).toBe("/classes");
   });
 
   // Merging a change over a banner we could not read would save a guess.

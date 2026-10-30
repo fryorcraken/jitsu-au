@@ -78,6 +78,20 @@ export function siteBannerLocalHref(href: string): string | null {
 }
 
 /**
+ * Whether a local link is a page the app's router draws, which a tap can move
+ * to without reloading the app. A file the site serves (`/timetable.pdf`,
+ * `/sitemap.xml`) or a server route (`/api/...`) is not: handed to the router,
+ * it would show the app's 404 page instead of the file, so the browser loads
+ * those itself.
+ */
+export function siteBannerNavigatesInApp(localHref: string): boolean {
+  const path = localHref.split(/[?#]/)[0];
+  if (/^\/(api|lovable)(\/|$)/.test(path)) return false;
+  const last = path.split("/").pop() ?? "";
+  return !last.includes(".");
+}
+
+/**
  * Pages where the banner's message shows but its link does not: the forms. The
  * whole line is a tap target, and on these a stray tap would carry somebody
  * away from a form they are partway through (the waiver holds health answers

@@ -11,6 +11,7 @@ import { resendKinds } from "./email-resend";
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
 import { annotationVisibilities, articleVisibilities } from "./kb";
+import { siteBannerLocalHref } from "./site-banner";
 // Same idea for the gi/belt size charts: `kit-sizes.ts` owns the two code sets
 // (and the CHECK constraints on `profiles` mirror them), so the wire schemas
 // below enumerate them from there rather than repeating the lists.
@@ -3411,7 +3412,7 @@ export const agentSaveSiteBannerSchema = z
     link_label: z.string().optional(),
     link_href: z
       .string()
-      .refine((v) => v.trim() === "" || v.trim().startsWith("/"), {
+      .refine((v) => v.trim() === "" || siteBannerLocalHref(v.trim()) !== null, {
         message:
           "Over the API the link is a page on this site, like /register-interest. An outside address is set on the Site banner screen.",
       })

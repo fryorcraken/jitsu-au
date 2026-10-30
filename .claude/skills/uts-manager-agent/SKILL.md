@@ -707,6 +707,8 @@ is one line of up to 200 characters. The link is optional, but `link_label` and
 `link_href` go together, and `link_href` is a page on this site (`/classes`,
 `/faq#trial`). An outside `https://` address is refused here: if the manager
 wants one, tell them it is on the Site banner screen (`/manager/site-banner`).
+If the stored banner already links to another site, you can only switch it off
+(`409 outside_link` for anything else); send the manager to the same screen.
 
 > **It is public the moment it saves.** Every visitor sees the banner at the top
 > of every public page, and a changed message is shown again even to people who

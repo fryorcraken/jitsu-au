@@ -6,6 +6,7 @@ import {
   shouldDropSiteBannerLink,
   siteBannerFingerprint,
   siteBannerLocalHref,
+  siteBannerNavigatesInApp,
 } from "./site-banner";
 import { SITE_ORIGIN } from "./site-origin";
 
@@ -76,6 +77,21 @@ describe("siteBannerLocalHref", () => {
   it("is null for another site, including one that merely starts the same", () => {
     expect(siteBannerLocalHref("https://example.com/")).toBeNull();
     expect(siteBannerLocalHref(`${SITE_ORIGIN}.evil.example/`)).toBeNull();
+  });
+});
+
+describe("siteBannerNavigatesInApp", () => {
+  it("moves within the app to a page", () => {
+    for (const href of ["/", "/classes", "/faq#trial", "/blog/grading-day?from=banner"]) {
+      expect(siteBannerNavigatesInApp(href), href).toBe(true);
+    }
+  });
+
+  // The router would draw its 404 page over these instead of loading them.
+  it("leaves a file or a server route to the browser", () => {
+    for (const href of ["/timetable.pdf", "/sitemap.xml", "/api/calendar", "/lovable/x"]) {
+      expect(siteBannerNavigatesInApp(href), href).toBe(false);
+    }
   });
 });
 

@@ -3,10 +3,10 @@ import { useState, type MouseEvent, type ReactNode } from "react";
 import { X } from "lucide-react";
 import {
   dismissSiteBannerCookie,
-  readDismissedSiteBanner,
   shouldDropSiteBannerLink,
   siteBannerFingerprint,
   siteBannerLocalHref,
+  siteBannerNavigatesInApp,
 } from "@/lib/site-banner";
 import type { SiteBanner as SiteBannerValue } from "@/lib/validation";
 
@@ -17,25 +17,26 @@ import type { SiteBanner as SiteBannerValue } from "@/lib/validation";
  *
  * The root route's loader reads it, so the server draws it into the page and
  * nothing moves when the page loads. That read already leaves out a banner
- * this visitor closed (the cookie is sent with it), and the cookie is checked
- * again here for the page-to-page case, where the loader's answer is reused
- * from before the visitor closed it.
+ * this visitor closed (the cookie travels with it), so this renders exactly
+ * what the loader says and never reads the cookie itself: doing that while
+ * drawing could disagree with the server's HTML. Closing it refreshes the
+ * loader, so the next page asks the server again and gets nothing.
  */
 export function SiteBanner() {
   const { siteBanner: banner } = useLoaderData({ from: "__root__" });
+  const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // Set when closed on this page, so it goes at once without a reload.
+  // Set when closed on this page, so it goes at once.
   const [closed, setClosed] = useState<string | null>(null);
 
   if (!banner) return null;
   const fingerprint = siteBannerFingerprint(banner);
-  const dismissed =
-    closed ?? readDismissedSiteBanner(typeof document === "undefined" ? null : document.cookie);
-  if (dismissed === fingerprint) return null;
+  if (closed === fingerprint) return null;
 
   const dismiss = () => {
     document.cookie = dismissSiteBannerCookie(fingerprint, window.location.protocol === "https:");
     setClosed(fingerprint);
+    void router.invalidate({ filter: (match) => match.routeId === "__root__" });
   };
 
   return <SiteBannerBar banner={banner} pathname={pathname} onDismiss={dismiss} />;
@@ -123,7 +124,7 @@ function BannerLink({
   children: ReactNode;
 }) {
   const local = siteBannerLocalHref(href);
-  if (local) {
+  if (local && siteBannerNavigatesInApp(local)) {
     return (
       <LocalBannerLink href={local} className={className}>
         {children}
@@ -131,7 +132,7 @@ function BannerLink({
     );
   }
   return (
-    <a href={href} rel="noreferrer" className={className}>
+    <a href={local ?? href} rel={local ? undefined : "noreferrer"} className={className}>
       {children}
     </a>
   );

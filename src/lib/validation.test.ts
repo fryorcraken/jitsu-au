@@ -3175,6 +3175,10 @@ describe("agentSaveSiteBannerSchema", () => {
   it("takes a page on this site as the link, and refuses another site", () => {
     expect(agentSaveSiteBannerSchema.safeParse({ link_href: "/faq#trial" }).success).toBe(true);
     expect(agentSaveSiteBannerSchema.safeParse({ link_href: "" }).success).toBe(true);
+    // A full address to this site is this site.
+    expect(
+      agentSaveSiteBannerSchema.safeParse({ link_href: "https://utsjitsu.com.au/classes" }).success,
+    ).toBe(true);
     expect(agentSaveSiteBannerSchema.safeParse({ link_href: "https://example.com" }).success).toBe(
       false,
     );

@@ -150,6 +150,7 @@ import { ItemNoLongerListedError } from "@/lib/item-invoices";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
 import { loadHouseholdContacts, type ContactEmail } from "@/lib/household-email";
+import { siteBannerLocalHref } from "@/lib/site-banner";
 import { loadClubSettings, loadSiteBanner, writeClubSetting } from "@/lib/club-settings.functions";
 import { ResendNotSentError, resendEmail } from "@/lib/email-resend.functions";
 import type { ResendRefusal } from "@/lib/email-resend";
@@ -1848,6 +1849,19 @@ async function handleSaveSiteBanner(params: unknown, actingAs: string) {
     key: "site_banner" as const,
     value: siteBannerSchema.parse({ ...current, ...changes }),
   };
+  // The schema keeps the caller from SENDING an outside link; this keeps it
+  // from reusing one a manager stored. Rewording or switching on a banner that
+  // links to another site would put a club-branded message of the token's
+  // choosing in front of that link. Switching it off is always allowed.
+  const outside = input.value.link_href !== "" && !siteBannerLocalHref(input.value.link_href);
+  const onlySwitchingOff = Object.keys(changes).length === 1 && changes.enabled === false;
+  if (outside && !onlySwitchingOff) {
+    throw new AgentError(
+      409,
+      "outside_link",
+      "This banner links to another site, so it can only be switched off here. Change it on the Site banner screen, or send a link_href on this site to replace the outside link.",
+    );
+  }
   try {
     await writeClubSetting(admin, input, actingAs);
   } catch (e) {
