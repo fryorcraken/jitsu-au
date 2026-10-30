@@ -52,22 +52,9 @@ import {
 } from "@/lib/validation";
 import { DocumentVersionError } from "@/lib/document-versions";
 import { promoteDocumentVersion, type VersionedDocument } from "@/lib/document-version-store";
+import { clientIp } from "@/lib/client-ip";
 
 type AdminClient = SupabaseClient<Database>;
-
-/**
- * Best-effort real client IP from the proxy headers, kept on the acceptance as
- * the same forensic record a waiver keeps. Mirrors `clientIp` in
- * `waiver.functions.ts`.
- */
-function clientIp(getHeader: (name: string) => string | undefined): string | null {
-  const fwd = getHeader("x-forwarded-for");
-  if (fwd) {
-    const first = fwd.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return getHeader("cf-connecting-ip") || getHeader("x-real-ip") || null;
-}
 
 /** Request headers, when the server runtime exposes them. Never throws. */
 async function headerGetter(): Promise<(name: string) => string | undefined> {

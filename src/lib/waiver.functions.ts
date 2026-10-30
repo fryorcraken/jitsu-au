@@ -67,6 +67,7 @@ import {
   resolveSubject,
 } from "@/lib/household";
 import { isManager } from "@/lib/require-manager";
+import { clientIp } from "@/lib/client-ip";
 
 /** The waiver, as the shared version store talks about it. */
 const WAIVER_DOCUMENT: VersionedDocument = {
@@ -633,19 +634,6 @@ async function resolveDependantId(
     throw new Error("We couldn't add that person to your account. Please try again.");
   }
   return created.user.id;
-}
-
-/**
- * Best-effort real client IP from the proxy headers, kept on the waiver as a
- * forensic/legal record. Falls back through the common forwarding headers.
- */
-function clientIp(getHeader: (name: string) => string | undefined): string | null {
-  const fwd = getHeader("x-forwarded-for");
-  if (fwd) {
-    const first = fwd.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return getHeader("cf-connecting-ip") || getHeader("x-real-ip") || null;
 }
 
 function serverSupabase() {
