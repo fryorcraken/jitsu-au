@@ -1,10 +1,11 @@
 # Erasing a person's data
 
-What the club can destroy today, what it deliberately cannot, and where every
-piece of a person actually lives. Opened by issue #55 (live readiness), where
-the product decisions behind it are still being made.
+What the club can destroy, what it deliberately cannot, and where every piece of
+a person actually lives. The short version: **a manager can delete an enquiry,
+and nothing else about a person is ever erased.** That is a decision, not a gap
+waiting to be filled (see "The decision" below).
 
-**Nothing in here is legal advice.** The retention points below are a reading of
+**Nothing in here is legal advice.** The privacy points below are a reading of
 the pre-launch review, not an independent view, and a practitioner should
 confirm them alongside the privacy policy. There is no privacy policy page on
 the site yet, so no promise has been made that the code has to live up to.
@@ -52,6 +53,12 @@ Three rules hold that path together, and all of them are load-bearing:
 Everything else about a person is untouched, on purpose. There is no way to
 delete a member, a waiver, a PDF or a login, by design rather than by omission.
 
+An enquiry is the one exception because it is not a person's record: a lead
+signed nothing, owes nothing and has nothing hanging off them, and a contact
+message is just something somebody wrote to the club. Keep that boundary. A
+change that lets the enquiry delete reach anything with a person behind it is
+building the thing "The decision" rules out.
+
 ## Archiving is not erasure
 
 A manager will be able to mark a person as having **left the club**
@@ -69,36 +76,49 @@ because it destroys nothing:
   owe still reaches them. Until the next change lands, nothing excludes anybody.
 
 So archiving is never a step towards deleting anybody, and nothing should treat
-it as consent to delete, or as the start of a retention clock. If the club
-later answers the questions below, an archived person is exactly as much in
-scope as anyone else, no more.
+it as consent to delete, or as the start of a retention clock. For somebody who
+has left, archiving is the whole answer.
 
-## Why the rest is not built
+## The decision: people are not erased
 
-Erasure for anyone who has signed something needs two answers the club has not
-given yet:
+The club decided on 2026-10-30 not to build a way to erase or de-identify a
+person, and closed issue #55 (the pre-launch review's "there is no way to erase
+a person's data") as not planned. So there is no "delete this member" for a
+manager, no "delete my account" for a member, and no request flow that ends in
+either.
 
-1. **Does "delete me" mean erase or de-identify?** Stripping the person out and
-   keeping the skeleton (a waiver was signed on this date against this template;
-   a membership ran for these dates at this price) keeps the club's own history
-   without holding the person. Full erasure is simpler and leaves the club with
-   no evidence anybody consented to train.
-2. **What must be retained anyway, and for how long?** A signed waiver is
-   evidence of informed consent, and there is likely a period in which a claim
-   can still be brought. Minors are the sharp edge: that period commonly starts
-   when the person turns 18, so "N years from signing" and "until 18 plus N"
-   give very different answers for the same document. An insurer may also ask
-   for longer than the law does.
+The reasons it was never a small feature, kept so the question is not reopened
+without them:
 
-Building either on a guess destroys evidence the club needs or keeps documents
-it should not have, which is why the slice above stops where it does.
+- **A signed waiver is the club's evidence of informed consent**, and there is
+  likely a period in which a claim can still be brought. For minors that period
+  commonly starts when the person turns 18. Deleting on request would destroy
+  exactly the document the club would most want if an old injury surfaced.
+- **Copies have already left.** Waiver PDFs exported to a manager's personal
+  Google Drive, and the PDF link emailed at signing, cannot be recalled, so any
+  promise of deletion would overstate what the club can actually do.
+
+What follows from the decision:
+
+- **The privacy policy must not promise deletion on request.** When one is
+  written, it should say what the club keeps and why, and that an enquiry can be
+  removed. Worth raising with whoever reviews it: the Australian Privacy
+  Principles (APP 11.2) also expect information to be destroyed or de-identified
+  once it is no longer needed, which is a separate question from deletion on
+  request. Not deleting on request is a choice the club can make; keeping
+  everything forever may not be.
+- **Do not build a deletion path on the strength of this file's map.** The map
+  below is kept because the by-hand case is dangerous and somebody may one day
+  be obliged to do it anyway, not as a design for a feature. Reopening this is
+  a product decision for the club first.
 
 ## Where a person's data actually lives
 
-The map, for whoever builds the rest. Deleting the `auth.users` row by hand
-today is worse than doing nothing, because it destroys the record and keeps the
-documents. Since dependants exist it may also simply fail, which is the one
-case where doing it by hand tells you so (see the box below).
+The map, for the day somebody is asked to remove a person by hand anyway (a
+legal obligation, say). Deleting the `auth.users` row by hand is worse than
+doing nothing, because it destroys the record and keeps the documents. Since
+dependants exist it may also simply fail, which is the one case where doing it
+by hand tells you so (see the box below).
 
 **Cascades from the login** (`ON DELETE CASCADE`, directly or through
 `profiles.user_id`): `profiles`, `waivers` (the frozen submission, including the
@@ -142,10 +162,9 @@ guardian>' AND role = 'member'` -- unless that person still holds, or still
 > decide, per child, whether that person is also leaving the club:
 >
 > - **The child is leaving too.** Delete each child first, as their own
->   deletion, with the same questions in "Why the rest is not built" answered
->   for each of them. A child who trained has signed a waiver, so this is the
->   hard case, not the easy one, and minors are exactly where the retention
->   question bites (see below).
+>   deletion. A child who trained has signed a waiver, so this is the hard
+>   case, not the easy one, and minors are exactly where the retention question
+>   bites (see "The decision" above).
 > - **The child is staying**, which is realistic: a parent who separates, or
 >   who hands the account to another adult. The child has to be moved to a
 >   different guardian before the parent can go. There is no screen for that
@@ -156,10 +175,6 @@ guardian>' AND role = 'member'` -- unless that person still holds, or still
 >
 > Only once no `profiles` row points at them may the parent be deleted, and
 > only then does the cascade above describe what happens.
->
-> Whatever gets built should ask this question out loud rather than letting a
-> manager discover it as a `23503`, the same way it should refuse a manager
-> outright (see the audit columns below).
 
 **Survives, holding personal data:**
 
@@ -167,7 +182,7 @@ guardian>' AND role = 'member'` -- unless that person still holds, or still
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Signed waiver PDFs in the `waivers` bucket   | Storage objects have no FK. The row cascades, the file does not. Each is `<waiver_id>.pdf`, and the id is gone with the row, so an orphaned file cannot even be traced back.                                                                                                                                                                        |
 | `memberships`                                | `user_id` is `ON DELETE SET NULL`. The row stays, orphaned, still carrying `uts_student_number` and `payment_reference`. `item_invoices` is orphaned the same way but holds nothing personal once it is: its reference is a bare number (`INV0007`) and its lines are what was bought.                                                              |
-| `interest_registrations`, `contact_messages` | No user FK at all. Name, email, phone, free text. This is the only part the slice above closes.                                                                                                                                                                                                                                                     |
+| `interest_registrations`, `contact_messages` | No user FK at all. Name, email, phone, free text. The one part a manager can delete from the product (see "What exists today").                                                                                                                                                                                                                     |
 | `bank_transactions`                          | The club's financial record. A member's name appears incidentally, in text the bank wrote.                                                                                                                                                                                                                                                          |
 | Google Drive exports                         | The file lives in a manager's personal Drive, named `<date> - <the name on the waiver>.pdf`. `waiver_drive_uploads` records the Drive file id, so a deletion path COULD remove it, but only while that manager still has Drive connected, and never a copy they moved by hand. `disconnectGoogleDrive` deliberately leaves exported files in place. |
 | The signed download link emailed at signing  | Expires, but the PDF may already be saved elsewhere. Not recallable.                                                                                                                                                                                                                                                                                |
@@ -181,30 +196,8 @@ guardian>' AND role = 'member'` -- unless that person still holds, or still
 `profiles.media_consent_updated_by`, `profiles.archived_by`, `blog_comments.hidden_by`,
 `blog_blocked_commenters.blocked_by`, `manager_api_tokens.created_by`,
 `notifications.actor_id`. So deleting a **manager** quietly erases who approved
-what. Whatever gets built should refuse a manager outright, or make the club
-say so first.
+what. Never do it by hand without the club agreeing to lose that history first.
 
 One thing that does fail safe: a manager API token whose owner is gone is
 rejected, because `/api/manager/agent` refuses a token with no `created_by`
 (see `docs/manager-agent-api.md`).
-
-## What the product would still need
-
-In the order I would build it, once the questions above are answered:
-
-1. Delete an enquiry. **Done.**
-2. Delete a person who never signed anything, as one operation. Refused when a
-   waiver, a membership or attendance is behind them, and refused with a
-   sentence rather than a `23503` when they still have children on their
-   account (see the box above). A "move these children to another guardian"
-   step is what would unblock the second case, and it is worth building
-   whether or not deletion ever is: it is also the answer when a family
-   changes shape and nobody is leaving.
-3. Delete or de-identify a person who did sign: their record, login, comments,
-   notifications, attendance and PDFs, with the waiver either going with them or
-   retained for the agreed period and kept out of the day-to-day screens.
-4. A member-facing **request**, if the club wants one, landing in the manager
-   queue rather than destroying anything on the spot.
-
-Steps 2 and 3 need a migration (a retention stamp at minimum), so
-`docs/database-changes.md` applies to both.
