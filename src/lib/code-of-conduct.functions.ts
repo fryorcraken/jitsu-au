@@ -32,6 +32,7 @@ import {
   normalizeEmail,
   profileFullName,
 } from "@/lib/validation";
+import { requestHeaderGetter } from "@/lib/request-headers";
 import type { SignerMeta } from "@/lib/validation";
 import { householdTargetUserId, resolveSubject } from "@/lib/household";
 import {
@@ -55,16 +56,6 @@ import { promoteDocumentVersion, type VersionedDocument } from "@/lib/document-v
 import { clientIp } from "@/lib/client-ip";
 
 type AdminClient = SupabaseClient<Database>;
-
-/** Request headers, when the server runtime exposes them. Never throws. */
-async function headerGetter(): Promise<(name: string) => string | undefined> {
-  try {
-    const { getRequestHeader } = await import("@tanstack/react-start/server");
-    return (name: string) => getRequestHeader(name);
-  } catch {
-    return () => undefined;
-  }
-}
 
 /** The person a signing session belongs to, resolved server-side. */
 export type CodeOfConductSigner = {
@@ -90,7 +81,7 @@ async function resolveSigner(
   admin: AdminClient,
   token: string | undefined,
 ): Promise<CodeOfConductSigner | null> {
-  const getHeader = await headerGetter();
+  const getHeader = await requestHeaderGetter();
   const bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
 
   let userId: string | null = null;
@@ -404,7 +395,7 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
       );
     }
 
-    const getHeader = await headerGetter();
+    const getHeader = await requestHeaderGetter();
     const signer_ip = clientIp(getHeader);
     const signer_meta: SignerMeta = buildSignerMeta(getHeader, data.client_meta);
 

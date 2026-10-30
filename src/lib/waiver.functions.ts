@@ -71,6 +71,7 @@ import {
 } from "@/lib/household";
 import { isManager } from "@/lib/require-manager";
 import { clientIp } from "@/lib/client-ip";
+import { requestHeaderGetter } from "@/lib/request-headers";
 
 /** The waiver, as the shared version store talks about it. */
 const WAIVER_DOCUMENT: VersionedDocument = {
@@ -856,19 +857,12 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // IP plus request headers (user agent, language, client hints) merged with
     // the browser's self-reported context (timezone, screen, platform). Also
     // capture the caller's bearer token to know who is submitting.
-    let signer_ip: string | null = null;
-    let signer_meta: SignerMeta = {};
-    let bearer: string | null = null;
-    try {
-      const { getRequestHeader } = await import("@tanstack/react-start/server");
-      const getHeader = (name: string) => getRequestHeader(name);
-      signer_ip = clientIp(getHeader);
-      signer_meta = buildSignerMeta(getHeader, data.client_meta);
-      bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
-    } catch {
-      /* header access unavailable */
-      signer_meta = buildSignerMeta(() => undefined, data.client_meta);
-    }
+    // The same header getter and `clientIp` the rate limit counted by, so the
+    // address recorded here is the one that was counted.
+    const getHeader = await requestHeaderGetter();
+    const signer_ip: string | null = clientIp(getHeader);
+    const signer_meta: SignerMeta = buildSignerMeta(getHeader, data.client_meta);
+    const bearer: string | null = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
 
     // A signed-in caller signs on their OWN account, and this is the
     // server-side backstop for it (the form locks the field). Without it a typo

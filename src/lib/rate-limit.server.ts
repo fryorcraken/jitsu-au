@@ -12,6 +12,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { clientIp } from "@/lib/client-ip";
+import { requestHeaderGetter } from "@/lib/request-headers";
 import { hashToken } from "@/lib/manager-api-tokens";
 import { normalizeEmail } from "@/lib/validation";
 import {
@@ -114,13 +115,7 @@ export async function limitPublicForm(
   form: PublicForm,
   submissionId: string | null | undefined,
 ): Promise<void> {
-  let getHeader: (name: string) => string | undefined = () => undefined;
-  try {
-    const { getRequestHeader } = await import("@tanstack/react-start/server");
-    getHeader = (name: string) => getRequestHeader(name);
-  } catch {
-    /* no request context: nothing to key on, so no limit */
-  }
+  const getHeader = await requestHeaderGetter();
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   await enforcePublicFormLimit(supabaseAdmin, getHeader, form, submissionId);
 }
