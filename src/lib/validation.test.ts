@@ -8,6 +8,11 @@ import {
   clubReplyToSchema,
   parseClubReplyTo,
   saveClubSettingsSchema,
+  SITE_BANNER_MESSAGE_MAX,
+  SITE_BANNER_OFF,
+  agentSaveSiteBannerSchema,
+  parseSiteBanner,
+  siteBannerSchema,
   agentGetWaiverTemplateSchema,
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
@@ -56,6 +61,7 @@ import {
   isFutureSigningDate,
   isMinorOn,
   isPaperWaiver,
+  isSameOnlineSubmission,
   isUtsStudent,
   managerEmailChangeSchema,
   markNotificationsReadSchema,
@@ -367,6 +373,46 @@ describe("updateMyProfileSchema", () => {
     expect(() => updateMyProfileSchema.parse({ emergency_contact_relationship: "" })).toThrow();
   });
 
+  describe("the address", () => {
+    const parts = {
+      address_street: "1 Broadway",
+      address_suburb: "Ultimo",
+      address_state: "NSW" as const,
+      address_postcode: "2007",
+    };
+
+    // The line is the server's to compose, so a client cannot store an address
+    // whose line says one place and whose parts say another.
+    it("composes the line from the parts, whatever line was sent with them", () => {
+      expect(updateMyProfileSchema.parse({ ...parts, address: "somewhere else" })).toEqual({
+        ...parts,
+        address: "1 Broadway, Ultimo NSW 2007",
+      });
+    });
+
+    it("refuses half an address", () => {
+      const { address_postcode: _p, ...three } = parts;
+      expect(() => updateMyProfileSchema.parse(three)).toThrow(/whole address/);
+    });
+
+    it("refuses a part the database would refuse", () => {
+      expect(() => updateMyProfileSchema.parse({ ...parts, address_postcode: "207" })).toThrow();
+      expect(() => updateMyProfileSchema.parse({ ...parts, address_state: "XYZ" })).toThrow();
+    });
+
+    it("ignores a blank line sent with the parts, which it replaces anyway", () => {
+      expect(updateMyProfileSchema.parse({ ...parts, address: "" }).address).toBe(
+        "1 Broadway, Ultimo NSW 2007",
+      );
+    });
+
+    it("still takes a line on its own from an older page", () => {
+      expect(updateMyProfileSchema.parse({ address: " 1 Broadway Ultimo " })).toEqual({
+        address: "1 Broadway Ultimo",
+      });
+    });
+  });
+
   // `userId` says WHO the patch is about. It is the one key here that is not a
   // column, and the handler strips it before the UPDATE.
   it("accepts the person the patch is about, and requires it to be a uuid", () => {
@@ -421,7 +467,11 @@ describe("waiverToProfileFields", () => {
       last_name: "Lovelace",
       preferred_name: "Addy",
       date_of_birth: "1990-01-01",
-      address: "1 Example St",
+      address: "1 Example St, Ultimo NSW 2007",
+      address_street: "1 Example St",
+      address_suburb: "Ultimo",
+      address_state: "NSW",
+      address_postcode: "2007",
       phone: "0400 000 000",
       uts_student_number: "12345678",
       sms_whatsapp_consent: true,
@@ -461,6 +511,26 @@ describe("waiverToProfileFields", () => {
     expect(patch.guardian_address).toBe("2 Harris St, Ultimo NSW");
     expect(patch.guardian_phone).toBe("0400 222 222");
     expect(patch.guardian_email).toBe("charles@example.com");
+  });
+
+  // A waiver signed before addresses had parts writes four nulls beside its
+  // line, so the profile's parts can never go on describing an old address;
+  // the database then reads them back out of the line where it can.
+  it("carries an old waiver's missing parts through as nulls, never as stale parts", () => {
+    const patch = waiverToProfileFields({
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    expect(patch).toMatchObject({
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    });
   });
 
   it("carries a declined media consent through as false", () => {
@@ -1507,6 +1577,52 @@ describe("waiverSubmitSchema", () => {
     expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
   });
 
+  // New forms send the address in parts; the line above is what a client that
+  // predates them sends, and must keep working across a deploy.
+  describe("the address", () => {
+    const parts = { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" };
+    const { address: _line, ...noAddress } = validAdult;
+
+    it("accepts it in parts, with no line", () => {
+      expect(waiverSubmitSchema.safeParse({ ...noAddress, address_parts: parts }).success).toBe(
+        true,
+      );
+    });
+
+    it("still accepts a single line from an older form", () => {
+      expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    });
+
+    it("requires one or the other", () => {
+      const result = waiverSubmitSchema.safeParse(noAddress);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map((i) => i.path.join("."))).toContain("address");
+    });
+
+    it("refuses parts the database would refuse", () => {
+      for (const bad of [
+        { ...parts, postcode: "207" },
+        { ...parts, state: "New South Wales" },
+        { ...parts, suburb: "Ultimo 2007" },
+        { ...parts, street: "" },
+      ]) {
+        expect(
+          waiverSubmitSchema.safeParse({ ...noAddress, address_parts: bad }).success,
+          JSON.stringify(bad),
+        ).toBe(false);
+      }
+    });
+
+    it("takes a guardian's own address in parts too", () => {
+      expect(
+        waiverSubmitSchema.safeParse({
+          ...validAdult,
+          guardian_address_parts: { ...parts, postcode: "x" },
+        }).success,
+      ).toBe(false);
+    });
+  });
+
   it("accepts an optional verification token, and works fine without one", () => {
     // A walk-in signer has no token; someone who came from their interest email
     // does. Both are ordinary submissions, so neither may be rejected here.
@@ -2492,6 +2608,41 @@ describe("isPaperWaiver", () => {
   });
 });
 
+// The public signing endpoint answers a resent submission id with a link to
+// the signed PDF, so the id alone must never be enough to earn it.
+describe("isSameOnlineSubmission", () => {
+  const stored = {
+    signer_meta: { user_agent: "Mozilla/5.0" },
+    email: "ada@example.com",
+    date_of_birth: "1990-04-02",
+  };
+  const retry = { email: "ada@example.com", date_of_birth: "1990-04-02" };
+
+  it("matches a genuine retry carrying the same address and birth date", () => {
+    expect(isSameOnlineSubmission(stored, retry)).toBe(true);
+  });
+
+  it("ignores case and spacing in the address", () => {
+    expect(isSameOnlineSubmission(stored, { ...retry, email: " Ada@Example.com " })).toBe(true);
+  });
+
+  it("refuses a caller who holds the id but not the signer's address", () => {
+    expect(isSameOnlineSubmission(stored, { ...retry, email: "someone@example.com" })).toBe(false);
+    expect(isSameOnlineSubmission(stored, { ...retry, email: "" })).toBe(false);
+  });
+
+  it("refuses a caller who holds the id and address but not the birth date", () => {
+    expect(isSameOnlineSubmission(stored, { ...retry, date_of_birth: "1990-04-03" })).toBe(false);
+  });
+
+  // A paper filing's id is chosen by a manager's script, so it can be guessable.
+  it("never resolves to a paper filing, even when everything else matches", () => {
+    expect(
+      isSameOnlineSubmission({ ...stored, signer_meta: { source: "paper_upload" } }, retry),
+    ).toBe(false);
+  });
+});
+
 describe("nextUtcDay", () => {
   it("advances one UTC day", () => {
     expect(nextUtcDay("2026-07-20")).toBe("2026-07-21");
@@ -2524,6 +2675,37 @@ describe("paperWaiverUploadSchema", () => {
 
   it("accepts a filed adult form", () => {
     expect(paperWaiverUploadSchema.safeParse(validAdult).success).toBe(true);
+  });
+
+  // A paper form's address is transcribed in parts where it can be, or as the
+  // one line written on it where it cannot; one of the two is required.
+  // The line sent beside parts is ignored, so it is not held to anything.
+  it("does not refuse a long line it is going to ignore", () => {
+    const parts = { street: "1 Broadway", suburb: "Ultimo", state: "nsw", postcode: "2007" };
+    const result = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      address: "x".repeat(400),
+      address_parts: parts,
+    });
+    expect(result.success).toBe(true);
+    // And a lower-case state from an agent is the state it means.
+    expect(result.data?.address_parts?.state).toBe("NSW");
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...validAdult, address: "x".repeat(301) }).success,
+    ).toBe(false);
+  });
+
+  it("takes the address in parts or as one line, but not neither", () => {
+    const { address: _line, ...noAddress } = validAdult;
+    const parts = { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" };
+    expect(paperWaiverUploadSchema.safeParse({ ...noAddress, address_parts: parts }).success).toBe(
+      true,
+    );
+    expect(paperWaiverUploadSchema.safeParse(noAddress).success).toBe(false);
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...noAddress, address_parts: { ...parts, state: "XX" } })
+        .success,
+    ).toBe(false);
   });
 
   // Without .strict() Zod STRIPS an unknown key, so a misspelled confirm flag
@@ -3042,6 +3224,146 @@ describe("clubReplyToSchema", () => {
     expect(saveClubSettingsSchema.safeParse({ key: "something_else", value: "x" }).success).toBe(
       false,
     );
+  });
+});
+
+describe("siteBannerSchema", () => {
+  const LIVE = {
+    enabled: true,
+    message: "Free trials are paused for now.",
+    link_label: "Register your interest",
+    link_href: "/register-interest",
+  };
+
+  it("accepts a banner with a link to a page on this site", () => {
+    expect(siteBannerSchema.parse(LIVE)).toEqual(LIVE);
+  });
+
+  it("accepts a page with a query or a hash", () => {
+    for (const href of ["/register-interest?from=banner", "/faq#trial", "/"]) {
+      expect(siteBannerSchema.safeParse({ ...LIVE, link_href: href }).success, href).toBe(true);
+    }
+  });
+
+  it("accepts a full https address as the link", () => {
+    const external = { ...LIVE, link_href: "https://example.com/news" };
+    expect(siteBannerSchema.safeParse(external).success).toBe(true);
+  });
+
+  it("accepts a banner with no link, the link fields defaulting to empty", () => {
+    expect(siteBannerSchema.parse({ enabled: true, message: "Closed Monday." })).toEqual({
+      enabled: true,
+      message: "Closed Monday.",
+      link_label: "",
+      link_href: "",
+    });
+  });
+
+  it("keeps the message on one line", () => {
+    const parsed = siteBannerSchema.parse({ ...LIVE, message: "  Closed\n\nMonday.  " });
+    expect(parsed.message).toBe("Closed Monday.");
+  });
+
+  it("refuses to switch on a banner with nothing to say", () => {
+    const result = siteBannerSchema.safeParse({ ...LIVE, message: "   " });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0].path).toEqual(["message"]);
+  });
+
+  it("keeps a message while the banner is off, and allows none", () => {
+    expect(siteBannerSchema.safeParse({ ...LIVE, enabled: false }).success).toBe(true);
+    expect(siteBannerSchema.safeParse(SITE_BANNER_OFF).success).toBe(true);
+  });
+
+  it("refuses a message longer than one line can hold", () => {
+    const long = "a".repeat(SITE_BANNER_MESSAGE_MAX + 1);
+    expect(siteBannerSchema.safeParse({ ...LIVE, message: long }).success).toBe(false);
+  });
+
+  it("wants the link text and its address together", () => {
+    const noHref = siteBannerSchema.safeParse({ ...LIVE, link_href: "" });
+    expect(noHref.error?.issues.map((i) => i.path[0])).toEqual(["link_href"]);
+    const noLabel = siteBannerSchema.safeParse({ ...LIVE, link_label: "" });
+    expect(noLabel.error?.issues.map((i) => i.path[0])).toEqual(["link_label"]);
+  });
+
+  it("refuses a link that could take a visitor somewhere unsafe", () => {
+    for (const href of [
+      "javascript:alert(1)",
+      "http://example.com",
+      "//example.com",
+      "/\\example.com",
+      "/\texample.com",
+      "/a\\b",
+      "register-interest",
+      "/register interest",
+      "data:text/html,hi",
+    ]) {
+      expect(siteBannerSchema.safeParse({ ...LIVE, link_href: href }).success, href).toBe(false);
+    }
+  });
+
+  it("is saved under its own key", () => {
+    expect(saveClubSettingsSchema.parse({ key: "site_banner", value: LIVE })).toEqual({
+      key: "site_banner",
+      value: LIVE,
+    });
+    expect(saveClubSettingsSchema.safeParse({ key: "site_banner", value: "hi" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("parseSiteBanner", () => {
+  it("reads unset as off", () => {
+    expect(parseSiteBanner(null)).toEqual(SITE_BANNER_OFF);
+    expect(parseSiteBanner("")).toEqual(SITE_BANNER_OFF);
+  });
+
+  it("reads back a stored banner", () => {
+    const stored = { enabled: true, message: "Hi", link_label: "", link_href: "" };
+    expect(parseSiteBanner(JSON.stringify(stored))).toEqual(stored);
+  });
+
+  // Showing a half-valid banner to every visitor is worse than showing none.
+  it("reads anything that would not pass today's rules as off", () => {
+    expect(parseSiteBanner("{not json")).toEqual(SITE_BANNER_OFF);
+    expect(parseSiteBanner(JSON.stringify({ enabled: true, message: "" }))).toEqual(
+      SITE_BANNER_OFF,
+    );
+    expect(
+      parseSiteBanner(
+        JSON.stringify({
+          enabled: true,
+          message: "Hi",
+          link_label: "Go",
+          link_href: "javascript:x",
+        }),
+      ),
+    ).toEqual(SITE_BANNER_OFF);
+  });
+});
+
+describe("agentSaveSiteBannerSchema", () => {
+  it("takes any one field on its own", () => {
+    expect(agentSaveSiteBannerSchema.parse({ enabled: false })).toEqual({ enabled: false });
+  });
+
+  it("takes a page on this site as the link, and refuses another site", () => {
+    expect(agentSaveSiteBannerSchema.safeParse({ link_href: "/faq#trial" }).success).toBe(true);
+    expect(agentSaveSiteBannerSchema.safeParse({ link_href: "" }).success).toBe(true);
+    // A full address to this site is this site.
+    expect(
+      agentSaveSiteBannerSchema.safeParse({ link_href: "https://utsjitsu.com.au/classes" }).success,
+    ).toBe(true);
+    expect(agentSaveSiteBannerSchema.safeParse({ link_href: "https://example.com" }).success).toBe(
+      false,
+    );
+  });
+
+  it("refuses an empty change and an unknown field", () => {
+    expect(agentSaveSiteBannerSchema.safeParse({}).success).toBe(false);
+    expect(agentSaveSiteBannerSchema.safeParse({ colour: "red" }).success).toBe(false);
   });
 });
 

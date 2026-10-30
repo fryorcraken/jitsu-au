@@ -692,6 +692,47 @@ describe("filePaperWaiver", () => {
     expect(calls.updates[0]).toEqual({ pdf_path: "waiver-1.pdf" });
   });
 
+  // The database refuses a waiver whose line is not the one composed from its
+  // parts (`waivers_address_matches_parts`), so the row must carry both, built
+  // from the same parts.
+  it("stores an address given in parts as the parts and the line made from them", async () => {
+    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    const { address: _line, ...rest } = validInput;
+    await filePaperWaiver(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      admin as any,
+      {
+        ...rest,
+        address_parts: { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" },
+      },
+      MANAGER_ID,
+    );
+    expect(calls.insert[0]).toMatchObject({
+      address: "1 Broadway, Ultimo NSW 2007",
+      address_street: "1 Broadway",
+      address_suburb: "Ultimo",
+      address_state: "NSW",
+      address_postcode: "2007",
+    });
+  });
+
+  it("stores an address given as one line as written, with no parts", async () => {
+    const { admin, calls } = fakeAdmin({ existingId: EXISTING_USER });
+    const { filePaperWaiver } = await import("./waiver.functions");
+    await filePaperWaiver(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      admin as any,
+      { ...validInput, address: "1 Broadway Ultimo" },
+      MANAGER_ID,
+    );
+    expect(calls.insert[0]).toMatchObject({
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_postcode: null,
+    });
+  });
+
   it("creates a locked applicant for an email the club has never seen", async () => {
     const { admin, calls } = fakeAdmin({ existingId: null });
     const { filePaperWaiver } = await import("./waiver.functions");

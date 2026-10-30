@@ -164,6 +164,7 @@ describe("signedInPaths, against the real src/routes tree", () => {
       "/manager/memberships",
       "/manager/reconciliation",
       "/manager/settings",
+      "/manager/site-banner",
       "/manager/users",
       "/manager/users/$userId",
       "/manager/waiver-template",

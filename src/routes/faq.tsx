@@ -14,7 +14,8 @@ export const Route = createFileRoute("/faq")({
     meta: buildPageMeta({
       title: "FAQ | UTS Jitsu",
       description: "Answers to common questions about starting Japanese Jiu-Jitsu at UTS Jitsu.",
-      ogDescription: "Trial classes, gear, experience needed, and more.",
+      ogDescription:
+        "New to Japanese Jiu-Jitsu? What to wear, what gear you need, whether you need to be a UTS student or have experience, and how hard training is.",
       path: "/faq",
     }),
     links: [{ rel: "canonical", href: canonicalUrl("/faq") }],

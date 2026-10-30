@@ -48,6 +48,18 @@ export async function loadClubSettings(admin: MembershipClient) {
   };
 }
 
+/**
+ * The site banner as `/manager/site-banner` and the agent API's
+ * `get_site_banner` report it: the stored notice, on or off. Throws when the
+ * store could not be read, for the reason in the header.
+ */
+export async function loadSiteBanner(admin: MembershipClient) {
+  const { readSiteBanner } = await import("@/lib/club-settings.server");
+  const read = await readSiteBanner(admin);
+  if (!read.ok) throw new Error("Could not read the site banner. Try again.");
+  return read.banner;
+}
+
 /** How each key's validated value is stored in the `value` text column. */
 function storedValue(input: SaveClubSettingsInput): string {
   switch (input.key) {
@@ -57,6 +69,8 @@ function storedValue(input: SaveClubSettingsInput): string {
       // Already trimmed and lowercased; "" is a cleared address, which reads
       // back as unset.
       return input.value;
+    case "site_banner":
+      return JSON.stringify(input.value);
   }
 }
 
@@ -89,6 +103,13 @@ export const getClubSettings = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await requireManager(context);
     return loadClubSettings(await adminClient());
+  });
+
+export const getSiteBannerSettings = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context);
+    return loadSiteBanner(await adminClient());
   });
 
 export const saveClubSettings = createServerFn({ method: "POST" })

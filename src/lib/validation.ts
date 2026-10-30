@@ -11,10 +11,12 @@ import { resendKinds } from "./email-resend";
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
 import { annotationVisibilities, articleVisibilities } from "./kb";
+import { siteBannerLocalHref } from "./site-banner";
 // Same idea for the gi/belt size charts: `kit-sizes.ts` owns the two code sets
 // (and the CHECK constraints on `profiles` mirror them), so the wire schemas
 // below enumerate them from there rather than repeating the lists.
 import { beltSizes, giSizes } from "./kit-sizes";
+import { auAddressSchema, composeAuAddress } from "./au-address";
 import { householdTargetUserId } from "./household";
 // A dated plan's window is computed in the club's own timezone (its last day
 // must cover that evening's class, not cut off at UTC midnight), so this
@@ -139,7 +141,13 @@ export type WaiverPersonFields = {
   /** What the person wants to be called, when it differs from their legal name. */
   preferred_name: string | null;
   date_of_birth: string;
+  /** The one-line address, as submitted (composed from the parts below when it has them). */
   address: string;
+  /** The same address in parts. All null on a waiver that predates them. */
+  address_street: string | null;
+  address_suburb: string | null;
+  address_state: string | null;
+  address_postcode: string | null;
   phone: string;
   uts_student_number: string | null;
   sms_whatsapp_consent: boolean;
@@ -196,7 +204,15 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverProfilePatch
     last_name: w.last_name,
     preferred_name: w.preferred_name,
     date_of_birth: w.date_of_birth,
+    // The line and its parts travel together. A waiver with no parts writes
+    // four nulls beside its line, and the database reads the parts back out of
+    // the line where it can (`profiles_sync_address`), so approving an old
+    // waiver never leaves the profile's parts describing a different address.
     address: w.address,
+    address_street: w.address_street,
+    address_suburb: w.address_suburb,
+    address_state: w.address_state,
+    address_postcode: w.address_postcode,
     phone: w.phone,
     uts_student_number: w.uts_student_number,
     sms_whatsapp_consent: w.sms_whatsapp_consent,
@@ -622,7 +638,18 @@ export const waiverSubmitSchema = z
     // Purely for how the club addresses them; the legal name still signs.
     preferred_name: z.string().trim().max(60).optional().or(z.literal("")),
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    address: z.string().trim().min(1).max(300),
+    // The participant's postal address, in parts: street, suburb, state and
+    // postcode (`au-address.ts`). The server composes the one line the PDF and
+    // every screen print from them, so the two cannot disagree.
+    //
+    // `address` is that line as a client that predates the parts sends it: a
+    // tab left open across a deploy. It is still accepted, and stored as typed
+    // with no parts, rather than failing a signed waiver. One of the two is
+    // required (the refine below), and the parts win when both arrive.
+    address_parts: auAddressSchema.optional(),
+    // Bounded by the refines below, and only when it is the address actually
+    // used: sent beside parts it is ignored, so it is not held to anything.
+    address: z.string().trim().optional(),
     phone: z.string().trim().min(1).max(30),
     // Who this waiver is for, asked explicitly rather than guessed from a date
     // of birth. "dependant" means a parent is signing for a child on their
@@ -695,7 +722,11 @@ export const waiverSubmitSchema = z
     // is always the real value rather than a blank somebody has to interpret.
     guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
-    guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
+    // The guardian's own address when it is not the participant's, in parts
+    // like the participant's. Absent means "the same as the participant's".
+    // `guardian_address` is the one-line form an older client sends.
+    guardian_address_parts: auAddressSchema.optional(),
+    guardian_address: z.string().trim().optional(),
     guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
     // Optional signing for yourself (blank means "the same as the
     // participant's"), REQUIRED for a dependant: it is the only address on the
@@ -721,6 +752,18 @@ export const waiverSubmitSchema = z
     // trusted for anything beyond that: it is re-checked server-side.
     vt: z.string().trim().max(120).optional().or(z.literal("")),
     hp: honeypot,
+  })
+  .refine((d) => Boolean(d.address_parts || d.address?.trim()), {
+    message: "Please give your address.",
+    path: ["address"],
+  })
+  .refine((d) => d.address_parts || (d.address ?? "").length <= 300, {
+    message: "The address can be up to 300 characters.",
+    path: ["address"],
+  })
+  .refine((d) => d.guardian_address_parts || (d.guardian_address ?? "").length <= 300, {
+    message: "The guardian's address can be up to 300 characters.",
+    path: ["guardian_address"],
   })
   .refine(
     (d) =>
@@ -1118,6 +1161,50 @@ export function isPaperWaiver(signerMeta: unknown): boolean {
   );
 }
 
+/**
+ * What the signing endpoint says when a resent submission id does not belong
+ * to the request carrying it (see `isSameOnlineSubmission`). It deliberately
+ * says nothing about the waiver the id named. The waiver page recognises it and
+ * starts a fresh submission, so pressing "Try again" files the form as typed.
+ * A real signer only meets it after editing their email or birth date between
+ * an attempt that landed and one that could not confirm it had.
+ */
+export const RESUBMISSION_REFUSED =
+  "We couldn't save this waiver. Your details are still here, so please try again.";
+
+/**
+ * Whether a stored waiver is the one an online signing retry is asking about.
+ *
+ * The public signing endpoint resolves a resent `client_submission_id` to the
+ * row it already saved and hands back a fresh link to that row's PDF, health
+ * declaration and signature included. Without a login, the id would otherwise
+ * be the only thing standing between a caller and somebody's signed waiver, so
+ * it is not trusted on its own:
+ *
+ * - **Never a paper filing.** The id column is shared with `file_waiver`,
+ *   whose caller chooses the id, so those values can be guessable (derived from
+ *   the record, kept in import scripts). The same reasoning keeps paper rows
+ *   out of `checkWaiverSubmission`.
+ * - **The same person.** A genuine retry resends the identical payload, so the
+ *   address and birth date it carries match what was saved. Anybody else
+ *   holding the id would also need both, which costs a real signer nothing.
+ *
+ * `submittedEmail` is the address the handler would store (already chosen
+ * between participant and guardian, and normalized); the stored one was
+ * written from the same value, but is normalized again so a row written before
+ * normalization still matches its own retry.
+ */
+export function isSameOnlineSubmission(
+  stored: { signer_meta: unknown; email: string; date_of_birth: string },
+  submitted: { email: string; date_of_birth: string },
+): boolean {
+  if (isPaperWaiver(stored.signer_meta)) return false;
+  if (!submitted.email || normalizeEmail(stored.email) !== normalizeEmail(submitted.email)) {
+    return false;
+  }
+  return stored.date_of_birth.slice(0, 10) === submitted.date_of_birth.slice(0, 10);
+}
+
 /** The file types a scanned waiver can arrive as. */
 export const scanMimeTypes = ["application/pdf", "image/png", "image/jpeg"] as const;
 export type ScanMimeType = (typeof scanMimeTypes)[number];
@@ -1177,7 +1264,15 @@ export const paperWaiverUploadSchema = z
     last_name: z.string().trim().min(1).max(60),
     preferred_name: z.string().trim().max(60).optional().or(z.literal("")),
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    address: z.string().trim().min(1).max(300),
+    // The address in parts, as on the online form. A paper form often has it
+    // written as one messy line, so a caller transcribing one may send that
+    // line as `address` instead: it is stored as written, with no parts, and
+    // the person is asked for the parts the next time they give an address.
+    // One of the two is required, and the parts win when both arrive.
+    address_parts: auAddressSchema.optional(),
+    // Bounded by the refines below, and only when it is the address actually
+    // used: sent beside parts it is ignored, so it is not held to anything.
+    address: z.string().trim().optional(),
     phone: z.string().trim().min(1).max(30),
     // The same "who is this for" question the online form asks, so a manager
     // files a paper child waiver identically and it produces the identical
@@ -1210,7 +1305,8 @@ export const paperWaiverUploadSchema = z
     // participant's", exactly as on the online form.
     guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
-    guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
+    guardian_address_parts: auAddressSchema.optional(),
+    guardian_address: z.string().trim().optional(),
     guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
     guardian_email: z.string().trim().email().max(255).optional().or(z.literal("")),
     medical_notes: z.string().trim().max(2000).optional().or(z.literal("")),
@@ -1253,6 +1349,18 @@ export const paperWaiverUploadSchema = z
   // prose is exactly who this endpoint serves, and an escape hatch that fails
   // silently is not an escape hatch. Unknown keys are a loud 400 instead.
   .strict()
+  .refine((d) => Boolean(d.address_parts || d.address?.trim()), {
+    message: "The participant's address is required, as address_parts or as one address line.",
+    path: ["address"],
+  })
+  .refine((d) => d.address_parts || (d.address ?? "").length <= 300, {
+    message: "The address can be up to 300 characters.",
+    path: ["address"],
+  })
+  .refine((d) => d.guardian_address_parts || (d.guardian_address ?? "").length <= 300, {
+    message: "The guardian's address can be up to 300 characters.",
+    path: ["guardian_address"],
+  })
   .refine(
     (d) =>
       !isMinorOn(d.date_of_birth, d.signed_on) ||
@@ -3032,6 +3140,8 @@ export const managerAgentActions = [
   "cancel_item_invoice",
   "delete_item_invoice",
   "get_club_settings",
+  "get_site_banner",
+  "save_site_banner",
   "resend_email",
   "list_blog_posts",
   "get_blog_post",
@@ -3293,6 +3403,156 @@ export function parseClubReplyTo(raw: string | null): string | null {
   return parsed.success && parsed.data ? parsed.data : null;
 }
 
+// ---- Manager: the site banner (`docs/site-banner.md`) ----
+
+/** Longest banner message. It is one line across the top of a phone screen. */
+export const SITE_BANNER_MESSAGE_MAX = 200;
+/** Longest link text, which sits after the message on the same line. */
+export const SITE_BANNER_LINK_LABEL_MAX = 60;
+
+/**
+ * A page on this site: one leading slash, then printable ASCII with no spaces
+ * and no backslash. `//host` is refused because a browser reads it as another
+ * site, and so is `/\\host`, because a browser treats a backslash in a web
+ * address as a slash and reads that the same way. Control characters go too:
+ * browsers strip them, which can turn an innocent-looking path into `//host`.
+ */
+const SITE_PATH = /^\/(?![/\\])[!-[\]-~]*$/;
+
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where the banner's link goes: a page on this site (`/register-interest`) or a
+ * full `https://` address, or `""` for no link. Nothing else, so a `javascript:`
+ * or plain `http:` address can never reach the top of every public page.
+ */
+export const siteBannerLinkHrefSchema = z
+  .string()
+  .trim()
+  .max(500, "That address is too long.")
+  .refine((v) => v === "" || SITE_PATH.test(v) || isHttpsUrl(v), {
+    message: "Use a page on this site, like /register-interest, or a full https:// address.",
+  });
+
+/**
+ * The banner across the top of every public page, as a manager sets it.
+ *
+ * The message is one line: any run of whitespace, newlines included, collapses
+ * to a single space, because the banner has no room for a second line and a
+ * pasted paragraph would otherwise push the header off a phone screen.
+ *
+ * The message may be kept while the banner is off, so a manager can turn a
+ * notice off and back on without retyping it. The link is optional, but its
+ * text and its address come together or not at all: text with nowhere to go
+ * looks clickable and is not, and an address with no text cannot be read.
+ */
+export const siteBannerSchema = z
+  .object({
+    enabled: z.boolean(),
+    message: z
+      .string()
+      .transform((v) => v.replace(/\s+/g, " ").trim())
+      .pipe(
+        z
+          .string()
+          .max(SITE_BANNER_MESSAGE_MAX, `Keep it to ${SITE_BANNER_MESSAGE_MAX} characters.`),
+      ),
+    link_label: z
+      .string()
+      .transform((v) => v.replace(/\s+/g, " ").trim())
+      .pipe(
+        z
+          .string()
+          .max(SITE_BANNER_LINK_LABEL_MAX, `Keep it to ${SITE_BANNER_LINK_LABEL_MAX} characters.`),
+      )
+      .default(""),
+    link_href: siteBannerLinkHrefSchema.default(""),
+  })
+  .strict()
+  .superRefine((banner, ctx) => {
+    if (banner.enabled && !banner.message) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["message"],
+        message: "Write the message, or turn the banner off.",
+      });
+    }
+    if (banner.link_label && !banner.link_href) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["link_href"],
+        message: "Add where the link goes, or clear the link text.",
+      });
+    }
+    if (banner.link_href && !banner.link_label) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["link_label"],
+        message: "Add the link text, or clear where it goes.",
+      });
+    }
+  });
+export type SiteBanner = z.infer<typeof siteBannerSchema>;
+
+/**
+ * `save_site_banner` over the agent API: any of the four fields, merged over
+ * what is stored, so "turn it off" is `{ enabled: false }` and keeps the
+ * message for next time. The merged banner then passes `siteBannerSchema`, the
+ * same rules the screen's save meets.
+ *
+ * One rule is the API's alone: its link can only be a page on this site. An
+ * outside address across the top of every page is exactly what a leaked token
+ * would want (a club-branded "pay here" link), the same reason the bank
+ * account and reply-to are not writable over the API at all. A manager who
+ * wants an outside link sets it on the screen, signed in.
+ */
+export const agentSaveSiteBannerSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    message: z.string().optional(),
+    link_label: z.string().optional(),
+    link_href: z
+      .string()
+      .refine((v) => v.trim() === "" || siteBannerLocalHref(v.trim()) !== null, {
+        message:
+          "Over the API the link is a page on this site, like /register-interest. An outside address is set on the Site banner screen.",
+      })
+      .optional(),
+  })
+  .strict()
+  .refine((p) => Object.keys(p).length > 0, {
+    message: "Send at least one of enabled, message, link_label or link_href.",
+  });
+
+/** What a site that has never had a banner set shows: nothing. */
+export const SITE_BANNER_OFF: SiteBanner = {
+  enabled: false,
+  message: "",
+  link_label: "",
+  link_href: "",
+};
+
+/**
+ * Read the stored banner back. Unset reads as off, and so does anything stored
+ * that would not pass `siteBannerSchema` today: showing a half-valid banner to
+ * every visitor is worse than showing none.
+ */
+export function parseSiteBanner(raw: string | null): SiteBanner {
+  if (!raw?.trim()) return SITE_BANNER_OFF;
+  try {
+    const parsed = siteBannerSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : SITE_BANNER_OFF;
+  } catch {
+    return SITE_BANNER_OFF;
+  }
+}
+
 /**
  * One club setting to save, by key. Each key carries its own validation, so a
  * save names the key it writes and nothing can be stored under a key without
@@ -3302,6 +3562,7 @@ export function parseClubReplyTo(raw: string | null): string | null {
 export const saveClubSettingsSchema = z.discriminatedUnion("key", [
   z.object({ key: z.literal("invoice_payment_details"), value: clubPaymentDetailsSchema }),
   z.object({ key: z.literal("email_reply_to"), value: clubReplyToSchema }),
+  z.object({ key: z.literal("site_banner"), value: siteBannerSchema }),
 ]);
 export type SaveClubSettingsInput = z.infer<typeof saveClubSettingsSchema>;
 
@@ -4207,7 +4468,22 @@ export const updateMyProfileSchema = z
     // so "no preferred name" has exactly one representation in the column.
     preferred_name: z.string().trim().min(1).max(60).nullable().optional(),
     phone: z.string().trim().min(1).max(30).optional(),
-    address: z.string().trim().min(1).max(300).optional(),
+    // The address in parts, the four `profiles` columns that hold them, with
+    // the same rules as anywhere else an address is given. Sent as a set (the
+    // refine below), and the line every screen reads is composed from them by
+    // the transform at the end, so a client never chooses the line.
+    //
+    // `address` alone is what a client that predates the parts sends. It is
+    // still accepted, and the database reads the parts back out of it where it
+    // can (`profiles_sync_address`), clearing them where it cannot.
+    address_street: auAddressSchema.shape.street.optional(),
+    address_suburb: auAddressSchema.shape.suburb.optional(),
+    address_state: auAddressSchema.shape.state.optional(),
+    address_postcode: auAddressSchema.shape.postcode.optional(),
+    // Only checked when it arrives on its own (the refine below): sent with
+    // the parts it is replaced by the line composed from them, so refusing
+    // the save over it would be refusing something about to be thrown away.
+    address: z.string().trim().optional(),
     sms_whatsapp_consent: z.boolean().optional(),
     // Deliberately NOT nullable, unlike the kit sizes and the two names. The
     // column's null means "the club has never asked this person", which stops
@@ -4237,7 +4513,34 @@ export const updateMyProfileSchema = z
   .refine(
     (patch) => Object.entries(patch).some(([key, v]) => key !== "userId" && v !== undefined),
     { message: "Nothing to update." },
-  );
+  )
+  .refine(
+    (patch) =>
+      [patch.address_street, patch.address_suburb, patch.address_state, patch.address_postcode]
+        .map((part) => part === undefined)
+        .every((absent, _i, all) => absent === all[0]),
+    { message: "Please give the whole address: street, suburb, state and postcode." },
+  )
+  .refine(
+    (patch) =>
+      patch.address_street !== undefined ||
+      patch.address === undefined ||
+      (patch.address.length >= 1 && patch.address.length <= 300),
+    { message: "Please give an address of up to 300 characters.", path: ["address"] },
+  )
+  .transform((patch) => {
+    const { address_street, address_suburb, address_state, address_postcode } = patch;
+    if (!address_street || !address_suburb || !address_state || !address_postcode) return patch;
+    return {
+      ...patch,
+      address: composeAuAddress({
+        street: address_street,
+        suburb: address_suburb,
+        state: address_state,
+        postcode: address_postcode,
+      }),
+    };
+  });
 export type UpdateMyProfileInput = z.infer<typeof updateMyProfileSchema>;
 /** The same patch with the target removed: exactly the `profiles` columns. */
 export type UpdateMyProfileFields = Omit<UpdateMyProfileInput, "userId">;

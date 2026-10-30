@@ -13,6 +13,8 @@ import {
   isFutureSigningDate,
   isMinorOn,
   isPaperWaiver,
+  isSameOnlineSubmission,
+  RESUBMISSION_REFUSED,
   nameWithPreferred,
   splitFullName,
   nextUtcDay,
@@ -33,6 +35,7 @@ import type {
   SignerMeta,
 } from "@/lib/validation";
 import { beltSizeForGiSize, type GiSize } from "@/lib/kit-sizes";
+import { auAddressColumns, resolveAddressInput } from "@/lib/au-address";
 import {
   mediaConsentFromAnswers,
   missingRequiredAcks,
@@ -776,6 +779,26 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const admin = supabaseAdmin;
     const { renderWaiverPdf } = await import("./waiver-pdf");
 
+    // Who this waiver is for, and therefore whose address is on it.
+    //
+    // For a child's waiver the address IS the guardian's, everywhere below: the
+    // frozen `waivers.email`, the PDF, the confirmation email, the person the
+    // signed-in check compares against. That is not a stand-in for a missing
+    // value, it is what was typed on the form and it is honestly the only
+    // address the club has for anyone involved. A blank there would be worse
+    // for whoever reads the record in a year (#105).
+    //
+    // The child's own reserved address exists on their auth user and appears
+    // nowhere in this function.
+    //
+    // Worked out before the retry check below, which needs it to prove a
+    // resent id belongs to this signer.
+    const signingForDependant = data.signing_for === "dependant";
+    // Normalized so case and whitespace variants map to the one person.
+    const email = normalizeEmail(
+      signingForDependant ? data.guardian_email || "" : data.email || "",
+    );
+
     // ---- Has this exact submission already been signed? ----
     //
     // The client resends the same id on every retry, and it retries hard: a lost
@@ -783,17 +806,28 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // any auth-user creation or PDF work, is what makes that safe. Without it a
     // retry after a timeout would mint a SECOND signed waiver and email the
     // member and every manager all over again.
+    //
+    // ⚠️ This endpoint has no login, and the answer to a retry is a link to the
+    // signed PDF. So the id alone never earns that link: the row must be an
+    // online signing (never a paper filing, whose id a manager's script chose)
+    // and carry the same address and birth date this request does. A genuine
+    // retry resends the identical payload, so it always matches. Anything else
+    // holding a used id is refused before any work, and told nothing about the
+    // row it named.
     const submissionId = data.client_submission_id || null;
     if (submissionId) {
       const { data: already, error: dupErr } = await admin
         .from("waivers")
-        .select("id, pdf_path")
+        .select("id, pdf_path, signer_meta, email, date_of_birth")
         .eq("client_submission_id", submissionId)
         .maybeSingle();
       // A failed lookup must not block a signature. Falling through risks a
       // duplicate; refusing guarantees a lost waiver, and that is the worse one.
       if (dupErr) console.error("[submitWaiverWithPdf] submission lookup failed:", dupErr);
       if (already) {
+        if (!isSameOnlineSubmission(already, { email, date_of_birth: data.date_of_birth })) {
+          throw new Error(RESUBMISSION_REFUSED);
+        }
         const url = await signStoredPdf(admin, already.pdf_path);
         return {
           ok: true,
@@ -806,34 +840,17 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           reply_to_confirmation: false,
           confirmation_emailed: false,
           // Nor does it re-apply the gi size. This return sits above the point
-          // where the email is normalized and identity is established, so
-          // `applyWaiverGiSize` has neither the person nor the proof it needs,
-          // and hoisting that work above the duplicate check would be a lot of
-          // machinery for a best-effort field. If the original attempt's size
-          // write failed, the size is simply not set, and the member or a
-          // manager sets it on /account. Deliberate, not an oversight.
+          // where identity is established, so `applyWaiverGiSize` has neither
+          // the person nor the proof it needs, and hoisting that work above the
+          // duplicate check would be a lot of machinery for a best-effort
+          // field. If the original attempt's size write failed, the size is
+          // simply not set, and the member or a manager sets it on /account.
+          // Deliberate, not an oversight.
         };
       }
     }
 
     const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
-
-    // Who this waiver is for, and therefore whose address is on it.
-    //
-    // For a child's waiver the address IS the guardian's, everywhere below: the
-    // frozen `waivers.email`, the PDF, the confirmation email, the person the
-    // signed-in check compares against. That is not a stand-in for a missing
-    // value, it is what was typed on the form and it is honestly the only
-    // address the club has for anyone involved. A blank there would be worse
-    // for whoever reads the record in a year (#105).
-    //
-    // The child's own reserved address exists on their auth user and appears
-    // nowhere in this function.
-    const signingForDependant = data.signing_for === "dependant";
-    // Normalized so case and whitespace variants map to the one person.
-    const email = normalizeEmail(
-      signingForDependant ? data.guardian_email || "" : data.email || "",
-    );
 
     // Signing-context evidence for the forensic/legal record: the signer's real
     // IP plus request headers (user agent, language, client hints) merged with
@@ -940,14 +957,24 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // form because blank means "the same as the participant's". Everything
     // below -- the frozen row and the PDF -- uses these resolved values, so the
     // document and the record can never disagree about who signed.
+    //
+    // The addresses arrive in parts and are composed into the one line the
+    // document prints here, once, so the row's line and its parts are the same
+    // address by construction (the database refuses a waiver where they are
+    // not: `waivers_address_matches_parts`).
+    const participantAddress = resolveAddressInput(data.address, data.address_parts);
+    const guardianAddressLine = resolveAddressInput(
+      data.guardian_address,
+      data.guardian_address_parts,
+    ).address;
     const contacts = resolveWaiverContacts({
       isMinor: needsGuardian,
-      address: data.address,
+      address: participantAddress.address,
       phone: data.phone,
       email,
       guardianName: data.guardian_name || "",
       guardianRelationship: data.guardian_relationship || "",
-      guardianAddress: data.guardian_address || "",
+      guardianAddress: guardianAddressLine,
       guardianPhone: data.guardian_phone || "",
       guardianEmail: data.guardian_email || "",
       emergencyContactIsGuardian: data.emergency_contact_is_guardian ?? false,
@@ -1143,7 +1170,8 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         last_name: data.last_name,
         preferred_name: data.preferred_name || null,
         date_of_birth: data.date_of_birth,
-        address: data.address,
+        address: participantAddress.address,
+        ...auAddressColumns(participantAddress.parts),
         phone: data.phone,
         email,
         uts_student_number: data.uts_student_number?.trim() || null,
@@ -1180,9 +1208,14 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       // job; adopt the row that won rather than failing a signed waiver.
       const { data: raced } = await admin
         .from("waivers")
-        .select("id, pdf_path")
+        .select("id, pdf_path, signer_meta, email, date_of_birth")
         .eq("client_submission_id", submissionId)
         .maybeSingle();
+      // Same rule as the lookup before any work: only ever hand back a link to
+      // the row this signer's own retry wrote.
+      if (raced && !isSameOnlineSubmission(raced, { email, date_of_birth: data.date_of_birth })) {
+        throw new Error(RESUBMISSION_REFUSED);
+      }
       if (raced) {
         const url = await signStoredPdf(admin, raced.pdf_path);
         // The other attempt in this race is the one that will mint the token
@@ -1317,7 +1350,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         first_name: data.first_name,
         preferred_name: data.preferred_name || "",
         date_of_birth: data.date_of_birth,
-        address: data.address,
+        address: participantAddress.address,
         phone: data.phone,
         email,
         emergency_contact_name: contacts.emergencyContactName,
@@ -2011,14 +2044,16 @@ export async function filePaperWaiver(
   // the "emergency contact is the guardian" flag: they carry whatever the
   // manager read off the page, and an old form's single contact block falls
   // through to the guardian by name.
+  const participantAddress = resolveAddressInput(data.address, data.address_parts);
   const paperContacts = resolveWaiverContacts({
     isMinor: needsGuardian,
-    address: data.address,
+    address: participantAddress.address,
     phone: data.phone,
     email,
     guardianName: data.guardian_name || "",
     guardianRelationship: data.guardian_relationship || "",
-    guardianAddress: data.guardian_address || "",
+    guardianAddress: resolveAddressInput(data.guardian_address, data.guardian_address_parts)
+      .address,
     guardianPhone: data.guardian_phone || "",
     guardianEmail: data.guardian_email || "",
     emergencyContactIsGuardian: false,
@@ -2193,7 +2228,8 @@ export async function filePaperWaiver(
     last_name: data.last_name,
     preferred_name: data.preferred_name || null,
     date_of_birth: data.date_of_birth,
-    address: data.address,
+    address: participantAddress.address,
+    ...auAddressColumns(participantAddress.parts),
     phone: data.phone,
     email,
     uts_student_number: data.uts_student_number?.trim() || null,

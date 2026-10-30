@@ -17,6 +17,17 @@ import { GI_SIZE_HINT, GiSizeSelect, WAIVER_GI_EMPTY_LABEL } from "@/components/
 import { type GiSize, isGiSize } from "@/lib/kit-sizes";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { WaiverDocument } from "@/components/site/WaiverDocument";
+import { AddressFields } from "@/components/site/AddressFields";
+import {
+  EMPTY_ADDRESS,
+  auAddressDraft,
+  auAddressFromRow,
+  finishedAddress,
+  draftAddressLine,
+  draftFromLine,
+  sameAuAddress,
+  type AddressDraft,
+} from "@/lib/au-address";
 import {
   submitWaiverWithPdf,
   getCurrentWaiverTemplate,
@@ -30,6 +41,7 @@ import { resolveAcknowledgements } from "@/lib/waiver-acknowledgements";
 import { anyHealthConcern, healthQuestions } from "@/lib/waiver-health";
 import { resolveWaiverContacts } from "@/lib/waiver-contacts";
 import {
+  ADDRESS_ANCHOR_PREFIX,
   ackAnchorId,
   missingFieldsSummary,
   missingWaiverFields,
@@ -38,7 +50,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { listMyDependants } from "@/lib/household.functions";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
-import { WAIVER_SUBMIT } from "@/lib/submit-resilience";
+import { newSubmissionId, WAIVER_SUBMIT } from "@/lib/submit-resilience";
 import {
   clearDraft,
   draftHasContent,
@@ -48,6 +60,7 @@ import {
 } from "@/lib/waiver-draft";
 import {
   greetingName,
+  RESUBMISSION_REFUSED,
   resolveNamePrefill,
   waiverNeedsGuardian,
   waiverPrefillSearchSchema,
@@ -85,6 +98,10 @@ type Prefill = {
   preferred_name?: string | null;
   date_of_birth?: string | null;
   address?: string | null;
+  address_street?: string | null;
+  address_suburb?: string | null;
+  address_state?: string | null;
+  address_postcode?: string | null;
   phone?: string | null;
   uts_student_number?: string | null;
   sms_whatsapp_consent?: boolean | null;
@@ -179,7 +196,11 @@ function Waiver() {
    * which is the exact accident `resolveDependantId` exists to prevent.
    */
   const [dependantId, setDependantId] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState<AddressDraft>(EMPTY_ADDRESS);
+  // An address the club holds only as one line it could not read as parts.
+  // Shown above the boxes so a returning signer can see what they told us,
+  // rather than meeting four empty fields and wondering what happened.
+  const [addressOnFile, setAddressOnFile] = useState<string | null>(null);
   const [utsStudentNumber, setUtsStudentNumber] = useState("");
   // Equipment sizing, not part of the waiver. Optional, and it goes straight
   // onto the profile rather than onto the signed document.
@@ -201,9 +222,12 @@ function Waiver() {
   // ticked and the form asks for that person once.
   const [guardianName, setGuardianName] = useState("");
   const [guardianRelationship, setGuardianRelationship] = useState("");
-  // Blank means "the same as the participant's", resolved on submit by
-  // `resolveWaiverContacts`. Optional so a family at one address types nothing.
-  const [guardianAddress, setGuardianAddress] = useState("");
+  // Ticked means "the same as the participant's", resolved on submit by
+  // `resolveWaiverContacts`. The default, so a family at one address types
+  // nothing; unticked, the guardian's address is asked for in parts.
+  const [guardianSameAddress, setGuardianSameAddress] = useState(true);
+  const [guardianAddress, setGuardianAddress] = useState<AddressDraft>(EMPTY_ADDRESS);
+  const [guardianAddressOnFile, setGuardianAddressOnFile] = useState<string | null>(null);
   const [guardianPhone, setGuardianPhone] = useState("");
   const [guardianEmail, setGuardianEmail] = useState("");
   const [ecIsGuardian, setEcIsGuardian] = useState(true);
@@ -385,7 +409,17 @@ function Waiver() {
         // Prefill the consent checkbox from the member's stored consent (they
         // can still change it).
         if (typeof r.sms_whatsapp_consent === "boolean") setSmsConsent(r.sms_whatsapp_consent);
-        if (r.address) setAddress(r.address);
+        // The parts when the club has them; otherwise the one line read
+        // where that can be done without guessing (draftFromLine says how),
+        // and shown above the empty boxes where it cannot.
+        const parts = auAddressFromRow(r);
+        if (parts) {
+          setAddress(auAddressDraft(parts));
+        } else {
+          const own = draftFromLine(r.address, "own");
+          setAddress(own.draft);
+          if (!own.read && r.address) setAddressOnFile(r.address);
+        }
         if (r.uts_student_number) setUtsStudentNumber(r.uts_student_number);
         if (r.gi_size && isGiSize(r.gi_size)) setGiSize(r.gi_size);
         if (r.martial_arts_experience) setMartialArtsExperience(r.martial_arts_experience);
@@ -397,7 +431,16 @@ function Waiver() {
         if (r.emergency_contact_name || r.emergency_contact_phone) setEcIsGuardian(false);
         if (r.guardian_name) setGuardianName(r.guardian_name);
         if (r.guardian_relationship) setGuardianRelationship(r.guardian_relationship);
-        if (r.guardian_address) setGuardianAddress(r.guardian_address);
+        // The guardian's address is stored resolved, so the participant's own
+        // line in it means "the same", which is the tick's default.
+        if (r.guardian_address && !sameAuAddress(r.guardian_address, r.address)) {
+          setGuardianSameAddress(false);
+          // Stored as its line only, so read back the way a parent's own
+          // "Rose Cottage" or border postcode survives (see draftFromLine).
+          const theirs = draftFromLine(r.guardian_address, "guardian");
+          setGuardianAddress(theirs.draft);
+          if (!theirs.read) setGuardianAddressOnFile(r.guardian_address);
+        }
         if (r.guardian_phone) setGuardianPhone(r.guardian_phone);
         if (r.guardian_email) setGuardianEmail(r.guardian_email);
         if (r.medical_notes) setMedical(r.medical_notes);
@@ -548,6 +591,7 @@ function Waiver() {
       setPhone(draft.phone);
       setEmail(draft.email);
       setAddress(draft.address);
+      setAddressOnFile(draft.addressOnFile || null);
       setUtsStudentNumber(draft.utsStudentNumber);
       setSmsConsent(draft.smsConsent);
       setGiSize(isGiSize(draft.giSize) ? draft.giSize : "");
@@ -558,7 +602,9 @@ function Waiver() {
       setEcIsGuardian(draft.ecIsGuardian);
       setGuardianName(draft.guardianName);
       setGuardianRelationship(draft.guardianRelationship);
+      setGuardianSameAddress(draft.guardianSameAddress);
       setGuardianAddress(draft.guardianAddress);
+      setGuardianAddressOnFile(draft.guardianAddressOnFile || null);
       setGuardianPhone(draft.guardianPhone);
       setGuardianEmail(draft.guardianEmail);
       setHealth((prev) => ({ ...prev, ...draft.health }));
@@ -614,6 +660,7 @@ function Waiver() {
       signingFor,
       email,
       address,
+      addressOnFile: addressOnFile ?? "",
       utsStudentNumber,
       smsConsent,
       giSize,
@@ -624,7 +671,9 @@ function Waiver() {
       ecIsGuardian,
       guardianName,
       guardianRelationship,
+      guardianSameAddress,
       guardianAddress,
+      guardianAddressOnFile: guardianAddressOnFile ?? "",
       guardianPhone,
       guardianEmail,
       health,
@@ -648,6 +697,7 @@ function Waiver() {
       signingFor,
       email,
       address,
+      addressOnFile,
       utsStudentNumber,
       smsConsent,
       giSize,
@@ -658,7 +708,9 @@ function Waiver() {
       ecIsGuardian,
       guardianName,
       guardianRelationship,
+      guardianSameAddress,
       guardianAddress,
+      guardianAddressOnFile,
       guardianPhone,
       guardianEmail,
       health,
@@ -692,14 +744,19 @@ function Waiver() {
   // server uses: a blank guardian address/mobile/email means "the participant's",
   // and a ticked "the emergency contact is the guardian" means that one person
   // fills both roles. Computed here so the preview shows what will be signed.
+  //
+  // Each address is previewed as the line it will be printed as, which is
+  // the line the server composes once all four parts are in.
+  const addressLine = draftAddressLine(address);
+  const guardianAddressLine = guardianSameAddress ? "" : draftAddressLine(guardianAddress);
   const contacts = resolveWaiverContacts({
     isMinor: needsGuardian,
-    address,
+    address: addressLine,
     phone,
     email,
     guardianName,
     guardianRelationship,
-    guardianAddress,
+    guardianAddress: guardianAddressLine,
     guardianPhone,
     guardianEmail,
     emergencyContactIsGuardian: ecIsGuardian,
@@ -727,7 +784,7 @@ function Waiver() {
     firstName,
     preferredName,
     dateOfBirth: dob,
-    address,
+    address: addressLine,
     phone,
     email,
     emergencyContactName: contacts.emergencyContactName,
@@ -766,6 +823,8 @@ function Waiver() {
     signingFor,
     guardianName,
     guardianRelationship,
+    guardianSameAddress,
+    guardianAddress,
     guardianEmail,
     health,
     medical,
@@ -852,6 +911,11 @@ function Waiver() {
   async function sendWaiver() {
     const sigImg = signatureMode === "draw" ? signatureImage : "";
     const sigName = signatureMode === "type" ? signatureName : "";
+    const participantAddress = finishedAddress(address);
+    // Only when the guardian block is on screen and they live elsewhere; a
+    // hidden or "same address" one sends nothing, which means the participant's.
+    const guardianOwnAddress =
+      needsGuardian && !guardianSameAddress ? finishedAddress(guardianAddress) : null;
 
     const outcome = await send.submit({
       run: async (signal, submissionId) => {
@@ -867,7 +931,12 @@ function Waiver() {
             last_name: lastName,
             preferred_name: preferredName,
             date_of_birth: dob,
-            address,
+            // Finished by this point (the checklist above guards the send):
+            // the parts of an Australian address, from which the server
+            // composes the line the document prints, or the one line of an
+            // address outside Australia, which is stored as given.
+            address_parts: participantAddress?.parts,
+            address: participantAddress?.line ?? "",
             phone,
             // Who it is for, and therefore which address the club gets. Signing
             // for somebody on the account the participant's field is not on
@@ -895,7 +964,8 @@ function Waiver() {
             // nobody can see a problem with.
             guardian_name: needsGuardian ? guardianName : "",
             guardian_relationship: needsGuardian ? guardianRelationship : "",
-            guardian_address: needsGuardian ? guardianAddress : "",
+            guardian_address_parts: guardianOwnAddress?.parts,
+            guardian_address: guardianOwnAddress?.line ?? "",
             guardian_phone: needsGuardian ? guardianPhone : "",
             guardian_email: needsGuardian ? guardianEmail : "",
             // Every question is answered by this point (guarded below), so the
@@ -968,6 +1038,12 @@ function Waiver() {
       // Signed and recorded: the draft has done its job, and it holds health
       // answers and a signature that should not outlive it.
       clearDraft();
+    } else if (outcome.error.message === RESUBMISSION_REFUSED) {
+      // The server would not let this id stand for what is on the form now
+      // (an earlier attempt with it landed under a different email or birth
+      // date). Retrying with the same id can only be refused again, so the
+      // next "Try again" starts a fresh submission. The failure panel stays up.
+      send.adoptSubmissionId(newSubmissionId());
     }
   }
 
@@ -1451,18 +1527,19 @@ function Waiver() {
                   )}
                 </div>
               )}
-              <div>
-                <Label htmlFor="address">Address</Label>
-                <Input
-                  id="address"
-                  required
-                  maxLength={300}
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-medium">Home address</legend>
+                <AddressFields
+                  idPrefix={ADDRESS_ANCHOR_PREFIX.participant}
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  {...fieldProps("address")}
+                  onChange={setAddress}
+                  // Kept on screen while they copy it into the boxes, and
+                  // gone once the four are complete.
+                  previousLine={finishedAddress(address) ? null : addressOnFile}
+                  fieldProps={fieldProps}
+                  fieldMessage={fieldMessage}
                 />
-                {fieldMessage("address")}
-              </div>
+              </fieldset>
               <div>
                 <Label htmlFor="uts_student_number">
                   UTS student number <span className="text-muted-foreground">(optional)</span>
@@ -1555,11 +1632,11 @@ function Waiver() {
                     {fieldMessage("guardian_relationship")}
                   </div>
                 </div>
-                {/* One hint, pointed at by all three inputs (aria-describedby),
+                {/* One hint, pointed at by both inputs (aria-describedby),
                     so somebody who tabs straight into a field hears the rule
                     rather than only seeing it above the group. */}
                 <p id="guardian_contact_hint" className="text-xs text-muted-foreground">
-                  Leave the guardian's mobile, email and address empty if they're the same as the
+                  Leave the guardian's mobile and email empty if they're the same as the
                   participant's. We'll record the participant's details for the guardian.
                 </p>
                 <div className="grid gap-5 sm:grid-cols-2">
@@ -1614,19 +1691,31 @@ function Waiver() {
                     {fieldMessage("guardian_email")}
                   </div>
                 </div>
-                <div>
-                  <Label htmlFor="guardian_address">
-                    Guardian address <span className="text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Input
-                    id="guardian_address"
-                    maxLength={300}
-                    value={guardianAddress}
-                    onChange={(e) => setGuardianAddress(e.target.value)}
-                    placeholder="Same as the participant's"
-                    aria-describedby="guardian_contact_hint"
-                    className="mt-1.5"
-                  />
+                <div className="space-y-3">
+                  <label className="flex items-start gap-2 text-sm">
+                    <Checkbox
+                      checked={guardianSameAddress}
+                      onCheckedChange={(v) => setGuardianSameAddress(v === true)}
+                      className="mt-0.5"
+                    />
+                    <span>The parent or guardian lives at the same address.</span>
+                  </label>
+                  {!guardianSameAddress && (
+                    <fieldset className="space-y-3">
+                      <legend className="text-sm font-medium">Guardian address</legend>
+                      <AddressFields
+                        idPrefix={ADDRESS_ANCHOR_PREFIX.guardian}
+                        section="guardian"
+                        value={guardianAddress}
+                        onChange={setGuardianAddress}
+                        previousLine={
+                          finishedAddress(guardianAddress) ? null : guardianAddressOnFile
+                        }
+                        fieldProps={fieldProps}
+                        fieldMessage={fieldMessage}
+                      />
+                    </fieldset>
+                  )}
                 </div>
               </fieldset>
             )}
@@ -1801,7 +1890,7 @@ function Waiver() {
                   firstName={firstName}
                   preferredName={preferredName}
                   dateOfBirth={dob}
-                  address={address}
+                  address={addressLine}
                   phone={phone}
                   email={email}
                   emergencyContactName={contacts.emergencyContactName}
