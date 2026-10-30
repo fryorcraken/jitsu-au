@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AddressFields } from "@/components/site/AddressFields";
+import { EMPTY_AU_ADDRESS, completeAuAddress, type AuAddressDraft } from "@/lib/au-address";
 import {
   MAX_SCAN_BYTES,
   isMinorOn,
@@ -122,7 +124,10 @@ function UploadPaperWaiverPage() {
   // since #111; this screen was the one caller that could not say it.
   const [signingFor, setSigningFor] = useState<WaiverSigningFor>("self");
   const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState<AuAddressDraft>(EMPTY_AU_ADDRESS);
+  // Set once Sign is pressed with part of an address missing, so the boxes say
+  // which part rather than the screen refusing silently.
+  const [addressAttempted, setAddressAttempted] = useState(false);
   const [studentNumber, setStudentNumber] = useState("");
 
   const [contactName, setContactName] = useState("");
@@ -133,7 +138,10 @@ function UploadPaperWaiverPage() {
   // contact block, and that person is then taken as the signer.
   const [guardianName, setGuardianName] = useState("");
   const [guardianRelationship, setGuardianRelationship] = useState("");
-  const [guardianAddress, setGuardianAddress] = useState("");
+  // Ticked by default, as on the online form: the guardian lives with the
+  // applicant unless the paper says otherwise.
+  const [guardianSameAddress, setGuardianSameAddress] = useState(true);
+  const [guardianAddress, setGuardianAddress] = useState<AuAddressDraft>(EMPTY_AU_ADDRESS);
   const [guardianPhone, setGuardianPhone] = useState("");
   const [guardianEmail, setGuardianEmail] = useState("");
   const [medicalNotes, setMedicalNotes] = useState("");
@@ -218,6 +226,16 @@ function UploadPaperWaiverPage() {
       toast.error("The scan is too large. Keep the whole upload under 10 MB.");
       return;
     }
+    // Both addresses in parts, as the online form takes them. A part missing
+    // is flagged under its box, which is where the manager is looking.
+    const addressParts = completeAuAddress(address);
+    const guardianParts =
+      needsGuardian && !guardianSameAddress ? completeAuAddress(guardianAddress) : null;
+    if (!addressParts || (needsGuardian && !guardianSameAddress && !guardianParts)) {
+      setAddressAttempted(true);
+      document.getElementById(addressParts ? "guardian_address_street" : "address_street")?.focus();
+      return;
+    }
     setSaving(true);
     setDuplicateWarning(null);
     try {
@@ -235,7 +253,7 @@ function UploadPaperWaiverPage() {
           last_name: lastName,
           preferred_name: preferredName,
           date_of_birth: dob,
-          address,
+          address_parts: addressParts,
           phone,
           signing_for: signingFor,
           // Refused by the schema for a dependant rather than merely ignored:
@@ -250,7 +268,7 @@ function UploadPaperWaiverPage() {
           emergency_contact_phone: contactPhone,
           guardian_name: guardianName,
           guardian_relationship: guardianRelationship,
-          guardian_address: guardianAddress,
+          guardian_address_parts: guardianParts ?? undefined,
           guardian_phone: guardianPhone,
           guardian_email: guardianEmail,
           medical_notes: medicalNotes,
@@ -584,17 +602,15 @@ function UploadPaperWaiverPage() {
             </div>
           )}
 
-          <div>
-            <Label htmlFor="address">Address</Label>
-            <Input
-              id="address"
-              required
-              maxLength={300}
+          <fieldset className="space-y-3">
+            <legend className="text-sm font-medium">Home address</legend>
+            <AddressFields
+              idPrefix="address"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="mt-1.5"
+              onChange={setAddress}
+              showProblems={addressAttempted}
             />
-          </div>
+          </fieldset>
 
           <div>
             <Label htmlFor="uts_student_number">
@@ -680,18 +696,27 @@ function UploadPaperWaiverPage() {
                 />
               </div>
             </div>
-            <div>
-              <Label htmlFor="guardian_address">
-                Address <span className="text-muted-foreground">(optional)</span>
-              </Label>
-              <Input
-                id="guardian_address"
-                maxLength={300}
-                value={guardianAddress}
-                onChange={(e) => setGuardianAddress(e.target.value)}
-                placeholder="Same as the applicant's"
-                className="mt-1.5"
-              />
+            <div className="space-y-3">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={guardianSameAddress}
+                  onCheckedChange={(v) => setGuardianSameAddress(v === true)}
+                  className="mt-0.5"
+                />
+                <span>Lives at the applicant&apos;s address.</span>
+              </label>
+              {!guardianSameAddress && (
+                <fieldset className="space-y-3">
+                  <legend className="text-sm font-medium">Guardian address</legend>
+                  <AddressFields
+                    idPrefix="guardian_address"
+                    section="guardian"
+                    value={guardianAddress}
+                    onChange={setGuardianAddress}
+                    showProblems={addressAttempted}
+                  />
+                </fieldset>
+              )}
             </div>
           </Section>
         )}

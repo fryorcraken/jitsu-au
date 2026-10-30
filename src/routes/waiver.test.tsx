@@ -142,7 +142,10 @@ describe("/waiver missing fields", () => {
       "Date of birth",
       "Phone",
       "Email",
-      "Address",
+      "Street address",
+      "Suburb",
+      "State",
+      "Postcode",
       "Emergency contact name",
       "Health question: prescribed drugs",
       "I accept the risks of training.",
@@ -189,7 +192,10 @@ describe("/waiver missing fields", () => {
     await user.type(screen.getByLabelText("Date of birth"), "1990-01-01");
     await user.type(screen.getByLabelText("Phone"), "0400000000");
     await user.type(screen.getByLabelText("Email"), "ada@example.com");
-    await user.type(screen.getByLabelText("Address"), "1 Broadway");
+    await user.type(screen.getByLabelText("Street address"), "1 Broadway");
+    await user.type(screen.getByLabelText("Suburb"), "Ultimo");
+    await user.selectOptions(screen.getByLabelText("State"), "NSW");
+    await user.type(screen.getByLabelText("Postcode"), "2007");
     await user.type(screen.getByLabelText("Contact name"), "Alex");
     await user.type(screen.getByLabelText("Relationship"), "Partner");
     await user.type(screen.getByLabelText("Contact mobile"), "0400111111");
@@ -226,9 +232,9 @@ describe("/waiver missing fields", () => {
 
     await user.click(screen.getByRole("button", { name: /Sign and download waiver/i }));
     const banner = await screen.findByRole("alert");
-    await user.click(within(banner).getByRole("button", { name: "Address" }));
+    await user.click(within(banner).getByRole("button", { name: "Postcode" }));
 
-    await waitFor(() => expect(screen.getByLabelText("Address")).toHaveFocus());
+    await waitFor(() => expect(screen.getByLabelText("Postcode")).toHaveFocus());
   });
 
   it("marks the fields it is pointing at, for whoever lands on one", async () => {
@@ -453,6 +459,35 @@ describe("/waiver, prefilling a signed-in parent", () => {
     renderWaiver();
     await waitFor(() => expect(screen.getByLabelText("First name")).toHaveValue("Ada"));
     expect(screen.getByLabelText("Last name")).toHaveValue("Lovelace");
+  });
+
+  it("prefills the address part by part from the club's record", async () => {
+    authUser = { id: "member-1", email: "ada@example.com" };
+    getMyProfile.mockResolvedValue({
+      first_name: "Ada",
+      address: "1 Broadway, Ultimo, NSW 2007",
+      address_street: "1 Broadway",
+      address_suburb: "Ultimo",
+      address_state: "NSW",
+      address_postcode: "2007",
+    });
+
+    renderWaiver();
+    await waitFor(() => expect(screen.getByLabelText("Street address")).toHaveValue("1 Broadway"));
+    expect(screen.getByLabelText("Suburb")).toHaveValue("Ultimo");
+    expect(screen.getByLabelText("State")).toHaveValue("NSW");
+    expect(screen.getByLabelText("Postcode")).toHaveValue("2007");
+  });
+
+  // Somebody whose address the club only has as one line it cannot split
+  // meets four empty boxes, so the line they gave is shown above them.
+  it("shows an address held as one line rather than silently dropping it", async () => {
+    authUser = { id: "member-1", email: "ada@example.com" };
+    getMyProfile.mockResolvedValue({ first_name: "Ada", address: "1 Broadway Ultimo" });
+
+    renderWaiver();
+    await waitFor(() => expect(screen.getByText(/1 Broadway Ultimo/)).toBeInTheDocument());
+    expect(screen.getByLabelText("Street address")).toHaveValue("");
   });
 });
 

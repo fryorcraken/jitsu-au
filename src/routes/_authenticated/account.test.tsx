@@ -24,7 +24,11 @@ const PROFILE = {
   preferred_name: null,
   display_name: null,
   date_of_birth: "1990-12-10",
-  address: "1 Broadway, Ultimo NSW",
+  address: "1 Broadway, Ultimo NSW 2007",
+  address_street: "1 Broadway",
+  address_suburb: "Ultimo",
+  address_state: "NSW",
+  address_postcode: "2007",
   phone: "0400000000",
   uts_student_number: null,
   emergency_contact_name: "Charles Babbage",
@@ -237,13 +241,53 @@ describe("/account", () => {
     expect(updateMyProfile).toHaveBeenCalledWith({
       data: {
         phone: "0411111111",
-        address: "1 Broadway, Ultimo NSW",
+        address_street: "1 Broadway",
+        address_suburb: "Ultimo",
+        address_state: "NSW",
+        address_postcode: "2007",
+        address: "1 Broadway, Ultimo NSW 2007",
         sms_whatsapp_consent: false,
         emergency_contact_name: "Charles Babbage",
         emergency_contact_relationship: "Colleague",
         emergency_contact_phone: "0400000001",
         userId: "u1",
       },
+    });
+  });
+
+  // An address the club holds only as one line it cannot read as parts: the
+  // line is shown so nobody has to remember it, and Save names the part that
+  // is missing instead of sending half an address.
+  it("asks for an address held as one line in parts before it saves", async () => {
+    const user = userEvent.setup();
+    const { getMyProfile } = await import("@/lib/waiver.functions");
+    vi.mocked(getMyProfile).mockResolvedValueOnce({
+      ...PROFILE,
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    await renderLoaded();
+
+    expect(within(card("Contact")).getByText(/1 Broadway Ultimo/)).toBeInTheDocument();
+    // Changing only the mobile still has to send a whole address.
+    await user.type(screen.getByLabelText("Mobile", { selector: "#account-phone" }), "1");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+    expect(updateMyProfile).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Postcode")).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(screen.getByLabelText("Street address"), "1 Broadway");
+    await user.type(screen.getByLabelText("Suburb"), "Ultimo");
+    await user.selectOptions(screen.getByLabelText("State"), "NSW");
+    await user.type(screen.getByLabelText("Postcode"), "2007");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    expect(updateMyProfile.mock.calls[0][0].data).toMatchObject({
+      address_postcode: "2007",
+      address: "1 Broadway, Ultimo NSW 2007",
     });
   });
 
@@ -527,7 +571,7 @@ describe("a parent who holds the login and does not train", () => {
     render(<AccountPage />);
     // Not `renderLoaded`: that waits for "Gi size", which is one of the fields
     // this case is about NOT rendering. The address is on the card that stays.
-    await screen.findByLabelText("Address");
+    await screen.findByLabelText("Street address");
 
     // Contact stays: it is how the club reaches the family.
     expect(card("Contact")).toBeInTheDocument();

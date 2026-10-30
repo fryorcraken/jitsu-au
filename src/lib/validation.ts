@@ -15,6 +15,7 @@ import { annotationVisibilities, articleVisibilities } from "./kb";
 // (and the CHECK constraints on `profiles` mirror them), so the wire schemas
 // below enumerate them from there rather than repeating the lists.
 import { beltSizes, giSizes } from "./kit-sizes";
+import { auAddressSchema, composeAuAddress } from "./au-address";
 import { householdTargetUserId } from "./household";
 // A dated plan's window is computed in the club's own timezone (its last day
 // must cover that evening's class, not cut off at UTC midnight), so this
@@ -139,7 +140,13 @@ export type WaiverPersonFields = {
   /** What the person wants to be called, when it differs from their legal name. */
   preferred_name: string | null;
   date_of_birth: string;
+  /** The one-line address, as submitted (composed from the parts below when it has them). */
   address: string;
+  /** The same address in parts. All null on a waiver that predates them. */
+  address_street: string | null;
+  address_suburb: string | null;
+  address_state: string | null;
+  address_postcode: string | null;
   phone: string;
   uts_student_number: string | null;
   sms_whatsapp_consent: boolean;
@@ -196,7 +203,15 @@ export function waiverToProfileFields(w: WaiverPersonFields): WaiverProfilePatch
     last_name: w.last_name,
     preferred_name: w.preferred_name,
     date_of_birth: w.date_of_birth,
+    // The line and its parts travel together. A waiver with no parts writes
+    // four nulls beside its line, and the database reads the parts back out of
+    // the line where it can (`profiles_sync_address`), so approving an old
+    // waiver never leaves the profile's parts describing a different address.
     address: w.address,
+    address_street: w.address_street,
+    address_suburb: w.address_suburb,
+    address_state: w.address_state,
+    address_postcode: w.address_postcode,
     phone: w.phone,
     uts_student_number: w.uts_student_number,
     sms_whatsapp_consent: w.sms_whatsapp_consent,
@@ -622,7 +637,16 @@ export const waiverSubmitSchema = z
     // Purely for how the club addresses them; the legal name still signs.
     preferred_name: z.string().trim().max(60).optional().or(z.literal("")),
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    address: z.string().trim().min(1).max(300),
+    // The participant's postal address, in parts: street, suburb, state and
+    // postcode (`au-address.ts`). The server composes the one line the PDF and
+    // every screen print from them, so the two cannot disagree.
+    //
+    // `address` is that line as a client that predates the parts sends it: a
+    // tab left open across a deploy. It is still accepted, and stored as typed
+    // with no parts, rather than failing a signed waiver. One of the two is
+    // required (the refine below), and the parts win when both arrive.
+    address_parts: auAddressSchema.optional(),
+    address: z.string().trim().max(300).optional().or(z.literal("")),
     phone: z.string().trim().min(1).max(30),
     // Who this waiver is for, asked explicitly rather than guessed from a date
     // of birth. "dependant" means a parent is signing for a child on their
@@ -695,6 +719,10 @@ export const waiverSubmitSchema = z
     // is always the real value rather than a blank somebody has to interpret.
     guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+    // The guardian's own address when it is not the participant's, in parts
+    // like the participant's. Absent means "the same as the participant's".
+    // `guardian_address` is the one-line form an older client sends.
+    guardian_address_parts: auAddressSchema.optional(),
     guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
     guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
     // Optional signing for yourself (blank means "the same as the
@@ -721,6 +749,10 @@ export const waiverSubmitSchema = z
     // trusted for anything beyond that: it is re-checked server-side.
     vt: z.string().trim().max(120).optional().or(z.literal("")),
     hp: honeypot,
+  })
+  .refine((d) => Boolean(d.address_parts || d.address?.trim()), {
+    message: "Please give your address.",
+    path: ["address"],
   })
   .refine(
     (d) =>
@@ -1177,7 +1209,13 @@ export const paperWaiverUploadSchema = z
     last_name: z.string().trim().min(1).max(60),
     preferred_name: z.string().trim().max(60).optional().or(z.literal("")),
     date_of_birth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    address: z.string().trim().min(1).max(300),
+    // The address in parts, as on the online form. A paper form often has it
+    // written as one messy line, so a caller transcribing one may send that
+    // line as `address` instead: it is stored as written, with no parts, and
+    // the person is asked for the parts the next time they give an address.
+    // One of the two is required, and the parts win when both arrive.
+    address_parts: auAddressSchema.optional(),
+    address: z.string().trim().max(300).optional().or(z.literal("")),
     phone: z.string().trim().min(1).max(30),
     // The same "who is this for" question the online form asks, so a manager
     // files a paper child waiver identically and it produces the identical
@@ -1210,6 +1248,7 @@ export const paperWaiverUploadSchema = z
     // participant's", exactly as on the online form.
     guardian_name: z.string().trim().max(120).optional().or(z.literal("")),
     guardian_relationship: z.string().trim().max(80).optional().or(z.literal("")),
+    guardian_address_parts: auAddressSchema.optional(),
     guardian_address: z.string().trim().max(300).optional().or(z.literal("")),
     guardian_phone: z.string().trim().max(30).optional().or(z.literal("")),
     guardian_email: z.string().trim().email().max(255).optional().or(z.literal("")),
@@ -1253,6 +1292,10 @@ export const paperWaiverUploadSchema = z
   // prose is exactly who this endpoint serves, and an escape hatch that fails
   // silently is not an escape hatch. Unknown keys are a loud 400 instead.
   .strict()
+  .refine((d) => Boolean(d.address_parts || d.address?.trim()), {
+    message: "The participant's address is required, as address_parts or as one address line.",
+    path: ["address"],
+  })
   .refine(
     (d) =>
       !isMinorOn(d.date_of_birth, d.signed_on) ||
@@ -4207,6 +4250,18 @@ export const updateMyProfileSchema = z
     // so "no preferred name" has exactly one representation in the column.
     preferred_name: z.string().trim().min(1).max(60).nullable().optional(),
     phone: z.string().trim().min(1).max(30).optional(),
+    // The address in parts, the four `profiles` columns that hold them, with
+    // the same rules as anywhere else an address is given. Sent as a set (the
+    // refine below), and the line every screen reads is composed from them by
+    // the transform at the end, so a client never chooses the line.
+    //
+    // `address` alone is what a client that predates the parts sends. It is
+    // still accepted, and the database reads the parts back out of it where it
+    // can (`profiles_sync_address`), clearing them where it cannot.
+    address_street: auAddressSchema.shape.street.optional(),
+    address_suburb: auAddressSchema.shape.suburb.optional(),
+    address_state: auAddressSchema.shape.state.optional(),
+    address_postcode: auAddressSchema.shape.postcode.optional(),
     address: z.string().trim().min(1).max(300).optional(),
     sms_whatsapp_consent: z.boolean().optional(),
     // Deliberately NOT nullable, unlike the kit sizes and the two names. The
@@ -4237,7 +4292,27 @@ export const updateMyProfileSchema = z
   .refine(
     (patch) => Object.entries(patch).some(([key, v]) => key !== "userId" && v !== undefined),
     { message: "Nothing to update." },
-  );
+  )
+  .refine(
+    (patch) =>
+      [patch.address_street, patch.address_suburb, patch.address_state, patch.address_postcode]
+        .map((part) => part === undefined)
+        .every((absent, _i, all) => absent === all[0]),
+    { message: "Please give the whole address: street, suburb, state and postcode." },
+  )
+  .transform((patch) => {
+    const { address_street, address_suburb, address_state, address_postcode } = patch;
+    if (!address_street || !address_suburb || !address_state || !address_postcode) return patch;
+    return {
+      ...patch,
+      address: composeAuAddress({
+        street: address_street,
+        suburb: address_suburb,
+        state: address_state,
+        postcode: address_postcode,
+      }),
+    };
+  });
 export type UpdateMyProfileInput = z.infer<typeof updateMyProfileSchema>;
 /** The same patch with the target removed: exactly the `profiles` columns. */
 export type UpdateMyProfileFields = Omit<UpdateMyProfileInput, "userId">;

@@ -291,6 +291,22 @@ an approval unlocks. A signed-in person's own address fills whichever of the two
 fields applies and is locked, and the server refuses a submission that does not
 match it.
 
+**The address is asked in parts: street, suburb, state (a list of the eight
+states and territories) and a four-digit postcode**, and only an Australian
+address can be given. The parts are what the club can sort and count people
+by; the one line every screen, email and the signed PDF print is composed from
+them by the server, as `<street>, <suburb> <STATE> <postcode>`, so the two
+cannot disagree (the database refuses a waiver where they do: see the
+`waivers` table in `docs/database.md`). `src/lib/au-address.ts` owns the rules
+and the composition, and `components/site/AddressFields` is the one set of
+boxes every form uses. A returning signer's address is prefilled part by part;
+one the club holds only as a line it cannot split without guessing (no comma
+before the suburb, no postcode, an overseas address) is shown above four empty
+boxes instead, so they can see what they told us last time. The same goes for
+the account page and for a manager filing a paper form. A form left open
+across the change still submits its one line, which is stored as typed with
+no parts.
+
 The server decides which existing person a child's waiver belongs to by matching
 **first name, last name and date of birth within that one household**. Nothing
 the form sends identifies the child, which is deliberate: an id on the payload
@@ -301,11 +317,12 @@ worth building for and which a manager can untangle afterwards.
 For a participant under 18, **or anyone on somebody else's account whatever
 their age**, the form adds a **parent or legal guardian** block:
 the person who consents, signs and carries the liability. They are asked for by
-name and relationship, plus their own **address, mobile and email** — each of
-those three optional, meaning "the same as the participant's", so a family at
-one address types nothing. What is stored is the resolved value, never the
-blank, so nobody reading the record a year later has to work out what an empty
-field meant (`resolveWaiverContacts` in `src/lib/waiver-contacts.ts` is the one
+name and relationship, plus their own **mobile and email**, each optional and
+meaning "the same as the participant's", and their **address**, asked as a tick
+("lives at the same address", ticked by default) that opens the four address
+fields only when unticked. So a family at one address types nothing. What is
+stored is the resolved value, never the blank, so nobody reading the record a
+year later has to work out what an empty field meant (`resolveWaiverContacts` in `src/lib/waiver-contacts.ts` is the one
 place that resolves it, shared by the live preview, the "you still have to fill
 this in" checklist and the server).
 

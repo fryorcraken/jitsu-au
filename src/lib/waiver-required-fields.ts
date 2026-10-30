@@ -24,6 +24,7 @@
 import { z } from "zod";
 import { waiverNeedsGuardian, type WaiverSigningFor } from "./validation";
 import { anyHealthConcern, missingHealthAnswers, type HealthAnswerDraft } from "./waiver-health";
+import { auAddressFieldId, auAddressProblems, type AuAddressDraft } from "./au-address";
 import {
   missingRequiredAcks,
   type AcknowledgementAnswers,
@@ -50,7 +51,8 @@ export type WaiverFieldState = {
   dob: string;
   phone: string;
   email: string;
-  address: string;
+  /** The participant's address, part by part. */
+  address: AuAddressDraft;
   ecName: string;
   ecRelationship: string;
   ecPhone: string;
@@ -65,6 +67,9 @@ export type WaiverFieldState = {
   signingFor: WaiverSigningFor;
   guardianName: string;
   guardianRelationship: string;
+  /** "Lives at the same address": when ticked, no second address is asked for. */
+  guardianSameAddress: boolean;
+  guardianAddress: AuAddressDraft;
   /**
    * Optional signing for yourself, so only its FORMAT is checked and only when
    * one was typed. REQUIRED for a dependant, where it is the only address on
@@ -84,6 +89,25 @@ export type WaiverFieldState = {
   guardianSignature: string;
   guardianSignatureImage: string;
 };
+
+/** The id prefixes of the two address blocks' inputs (`auAddressFieldId`). */
+export const ADDRESS_ANCHOR_PREFIX = {
+  participant: "address",
+  guardian: "guardian_address",
+} as const;
+
+/** Each part of an address the draft is still missing, as summary entries. */
+function addressEntries(
+  draft: AuAddressDraft,
+  prefix: string,
+  labelPrefix: string,
+): MissingWaiverField[] {
+  return auAddressProblems(draft).map((problem) => ({
+    anchorId: auAddressFieldId(prefix, problem.part),
+    label: labelPrefix ? `${labelPrefix}${problem.label.toLowerCase()}` : problem.label,
+    ...(problem.hint ? { hint: problem.hint } : {}),
+  }));
+}
 
 /** The dom id of an acknowledgement's tick box. */
 export const ackAnchorId = (id: string) => `ack_${id}`;
@@ -154,16 +178,30 @@ export function missingWaiverFields(state: WaiverFieldState): MissingWaiverField
       });
     }
   }
-  require("address", "Address", state.address);
+  // Four parts, each its own entry, so the jump lands on the box that is
+  // actually empty rather than on the top of the block.
+  missing.push(...addressEntries(state.address, ADDRESS_ANCHOR_PREFIX.participant, ""));
 
   // ---- Parent or guardian (minors only) ----
   //
-  // The guardian's address, mobile and email are never REQUIRED here: each is
-  // optional and blank means "the same as the participant's", so there is
-  // nothing there for somebody to have missed.
+  // The guardian's mobile and email are never REQUIRED here: each is optional
+  // and blank means "the same as the participant's", so there is nothing there
+  // for somebody to have missed. Their address is asked as a tick ("lives at
+  // the same address") and only becomes four fields to fill when unticked.
   if (waiverNeedsGuardian({ is_minor: state.isMinor, signing_for: state.signingFor })) {
     require("guardian_name", "Parent or guardian name", state.guardianName);
     require("guardian_relationship", "Parent or guardian relationship to the participant", state.guardianRelationship);
+    // Only when they live somewhere else: the tick is the form's default and
+    // means "the participant's address", so there is nothing else to fill in.
+    if (!state.guardianSameAddress) {
+      missing.push(
+        ...addressEntries(
+          state.guardianAddress,
+          ADDRESS_ANCHOR_PREFIX.guardian,
+          "Parent or guardian ",
+        ),
+      );
+    }
     // The guardian's email is the one field whose treatment depends on who the
     // waiver is for. Optional for a minor signing under their own address, so
     // only its FORMAT is checked. REQUIRED for somebody on the caller's

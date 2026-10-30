@@ -500,7 +500,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("28");
+    expect(AGENT_MANIFEST.version).toBe("29");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -547,6 +547,25 @@ describe("AGENT_MANIFEST", () => {
     for (const field of ["first_name", "middle_name", "last_name"]) expect(notes).toMatch(field);
     const spec = AGENT_MANIFEST.actions.find((a) => a.name === "get_user")!;
     expect(spec.summary).toMatch(/first, middle, last and preferred name/);
+  });
+
+  it("announces file_waiver's address in parts, and that a single line still works", () => {
+    const entry = AGENT_MANIFEST.changes.find((c) => c.version === "29")!;
+    expect(entry.breaking).toBe(false);
+    const notes = entry.notes.join(" ");
+    expect(notes).toMatch(/address_parts/);
+    expect(notes).toMatch(/guardian_address_parts/);
+    expect(notes).toMatch(/still accepted/);
+    const params = AGENT_MANIFEST.actions
+      .find((a) => a.name === "file_waiver")!
+      .params.map((p) => [p.name, p.required]);
+    expect(params).toEqual(
+      expect.arrayContaining([
+        ["address_parts", false],
+        ["address", false],
+        ["guardian_address_parts", false],
+      ]),
+    );
   });
 
   // #112 shipped a field whose MEANING changed with no manifest bump, no note
@@ -690,11 +709,12 @@ describe("AGENT_MANIFEST", () => {
     // the manifest said was fine. emergency_contact_relationship is left off
     // this list on purpose: required only for a minor, and the manifest says
     // so in its description rather than as an unconditional required flag.
+    // The address is the same: one of address_parts or address is required,
+    // which neither param can say as a flag (checked separately below).
     const schemaRequired = new Set([
       "first_name",
       "last_name",
       "date_of_birth",
-      "address",
       "phone",
       "email",
       "emergency_contact_name",
@@ -721,6 +741,20 @@ describe("AGENT_MANIFEST", () => {
         name,
       ).toBe(false);
     }
+    // Neither address param on its own is required, but one of them is.
+    expect(
+      paperWaiverUploadSchema.safeParse({
+        first_name: "Ada",
+        last_name: "Lovelace",
+        date_of_birth: "1990-01-01",
+        phone: "0400000000",
+        email: "ada@example.com",
+        emergency_contact_name: "Charles",
+        emergency_contact_phone: "0400000001",
+        signed_on: "2020-01-01",
+        scan: [{ name: "w.pdf", type: "application/pdf", data: "aGlw" }],
+      }).success,
+    ).toBe(false);
   });
 });
 

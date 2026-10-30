@@ -21,6 +21,13 @@
 // reason.
 
 import type { HealthAnswers, HealthQuestionId, WaiverSigningFor } from "@/lib/validation";
+import {
+  EMPTY_AU_ADDRESS,
+  auAddressDraft,
+  isAuState,
+  splitAuAddress,
+  type AuAddressDraft,
+} from "@/lib/au-address";
 
 export const WAIVER_DRAFT_KEY = "uts-jitsu.waiver.draft";
 
@@ -53,7 +60,8 @@ export type WaiverDraft = {
   dob: string;
   phone: string;
   email: string;
-  address: string;
+  /** The participant's address, part by part as typed. */
+  address: AuAddressDraft;
   utsStudentNumber: string;
   smsConsent: boolean;
   /** A gi size code, or "" for not chosen. Optional on the form, so "" is normal. */
@@ -67,8 +75,10 @@ export type WaiverDraft = {
   ecIsGuardian: boolean;
   guardianName: string;
   guardianRelationship: string;
-  /** Blank means "the same as the participant's", which is the form's default. */
-  guardianAddress: string;
+  /** "The guardian lives at the participant's address": the form's default. */
+  guardianSameAddress: boolean;
+  /** The guardian's own address, used only when the tick above is off. */
+  guardianAddress: AuAddressDraft;
   guardianPhone: string;
   guardianEmail: string;
   health: HealthDraft;
@@ -132,6 +142,22 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     }
     return out as HealthDraft;
   };
+  // An address part by part. A draft written before addresses had parts holds
+  // one line instead; that is read into parts where it can be, and otherwise
+  // restored empty rather than binning the whole draft (see `giSize` below for
+  // why the version is not bumped for a change like this).
+  const address = (v: unknown): AuAddressDraft => {
+    if (typeof v === "string") return auAddressDraft(splitAuAddress(v));
+    if (!v || typeof v !== "object") return { ...EMPTY_AU_ADDRESS };
+    const source = v as Record<string, unknown>;
+    const state = text(source.state);
+    return {
+      street: text(source.street),
+      suburb: text(source.suburb),
+      state: isAuState(state) ? state : "",
+      postcode: text(source.postcode),
+    };
+  };
   const acks = (v: unknown): Record<string, boolean> => {
     const source = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
     const out: Record<string, boolean> = {};
@@ -156,7 +182,7 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     dob: text(draft.dob),
     phone: text(draft.phone),
     email: text(draft.email),
-    address: text(draft.address),
+    address: address(draft.address),
     utsStudentNumber: text(draft.utsStudentNumber),
     smsConsent: draft.smsConsent === true,
     // Deliberately does NOT bump WAIVER_DRAFT_VERSION: `giSize` is a new
@@ -178,7 +204,13 @@ export function parseDraft(raw: string | null): WaiverDraft | null {
     ecIsGuardian: draft.ecIsGuardian === true,
     guardianName: text(draft.guardianName),
     guardianRelationship: text(draft.guardianRelationship),
-    guardianAddress: text(draft.guardianAddress),
+    // An older draft said "same address" with a blank line; a typed line, or
+    // a part, means the guardian lives somewhere else.
+    guardianSameAddress:
+      typeof draft.guardianSameAddress === "boolean"
+        ? draft.guardianSameAddress
+        : !text(draft.guardianAddress as unknown).trim(),
+    guardianAddress: address(draft.guardianAddress),
     guardianPhone: text(draft.guardianPhone),
     guardianEmail: text(draft.guardianEmail),
     health: health(draft.health),
@@ -207,7 +239,9 @@ export function draftHasContent(draft: WaiverDraft | null): boolean {
     draft.lastName,
     draft.dob,
     draft.phone,
-    draft.address,
+    draft.address.street,
+    draft.address.suburb,
+    draft.address.postcode,
     draft.ecName,
     draft.ecPhone,
     draft.guardianName,

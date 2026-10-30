@@ -5,6 +5,7 @@ import {
   missingWaiverFields,
   type WaiverFieldState,
 } from "./waiver-required-fields";
+import { EMPTY_AU_ADDRESS } from "./au-address";
 import { healthQuestions } from "./waiver-health";
 
 const allAnswered = {
@@ -23,13 +24,15 @@ const emptyForm: WaiverFieldState = {
   dob: "",
   phone: "",
   email: "",
-  address: "",
+  address: EMPTY_AU_ADDRESS,
   ecName: "",
   ecRelationship: "",
   ecPhone: "",
   ecIsGuardian: false,
   guardianName: "",
   guardianRelationship: "",
+  guardianSameAddress: true,
+  guardianAddress: EMPTY_AU_ADDRESS,
   guardianEmail: "",
   health: {},
   medical: "",
@@ -52,7 +55,7 @@ const completeForm: WaiverFieldState = {
   dob: "1995-04-02",
   phone: "0400 000 000",
   email: "sam@example.com",
-  address: "1 Broadway, Ultimo NSW 2007",
+  address: { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" },
   ecName: "Alex Nguyen",
   ecRelationship: "Partner",
   ecPhone: "0400 111 111",
@@ -89,7 +92,10 @@ describe("missingWaiverFields", () => {
       "date_of_birth",
       "phone",
       "email",
-      "address",
+      "address_street",
+      "address_suburb",
+      "address_state",
+      "address_postcode",
       "emergency_contact_name",
       "emergency_contact_relationship",
       "emergency_contact_phone",
@@ -99,8 +105,24 @@ describe("missingWaiverFields", () => {
   });
 
   it("puts a missing field further down the form after the ones above it", () => {
-    const missing = missingWaiverFields(form({ address: "", ecPhone: "" }));
-    expect(missing.map((f) => f.anchorId)).toEqual(["address", "emergency_contact_phone"]);
+    const missing = missingWaiverFields(
+      form({ address: { ...completeForm.address, postcode: "" }, ecPhone: "" }),
+    );
+    expect(missing.map((f) => f.anchorId)).toEqual(["address_postcode", "emergency_contact_phone"]);
+  });
+
+  it("names the address part that is missing, in the words of its label", () => {
+    const missing = missingWaiverFields(form({ address: { ...completeForm.address, state: "" } }));
+    expect(missing).toEqual([{ anchorId: "address_state", label: "State" }]);
+  });
+
+  it("says why a postcode typed in the wrong shape is not accepted yet", () => {
+    const missing = missingWaiverFields(
+      form({ address: { ...completeForm.address, postcode: "207" } }),
+    );
+    expect(missing.map((f) => [f.anchorId, f.hint])).toEqual([
+      ["address_postcode", "A postcode is four digits"],
+    ]);
   });
 
   it("treats whitespace as blank", () => {
@@ -234,8 +256,33 @@ describe("missingWaiverFields", () => {
     });
 
     // Blank means "the same as the participant's", so there is nothing missing.
-    it("never asks for the guardian's address, mobile or email", () => {
+    it("never asks for the guardian's mobile or email, nor an address while ticked same", () => {
       expect(missingWaiverFields(minorForm())).toEqual([]);
+    });
+
+    // Unticked, the guardian's address becomes four fields like anybody's.
+    it("asks for each part of the guardian's address once they live elsewhere", () => {
+      const missing = missingWaiverFields(
+        minorForm({
+          guardianSameAddress: false,
+          guardianAddress: { ...EMPTY_AU_ADDRESS, street: "9 Quay St", state: "NSW" },
+        }),
+      );
+      expect(missing).toEqual([
+        { anchorId: "guardian_address_suburb", label: "Parent or guardian suburb" },
+        { anchorId: "guardian_address_postcode", label: "Parent or guardian postcode" },
+      ]);
+    });
+
+    it("forgets a guardian address that was typed and then ticked back to same", () => {
+      expect(
+        missingWaiverFields(
+          minorForm({
+            guardianSameAddress: true,
+            guardianAddress: { ...EMPTY_AU_ADDRESS, street: "x" },
+          }),
+        ),
+      ).toEqual([]);
     });
 
     // Optional, but an address that WAS typed still has to be one the server

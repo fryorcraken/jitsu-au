@@ -4,6 +4,15 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Loading } from "@/components/site/Loading";
+import { AddressFields } from "@/components/site/AddressFields";
+import {
+  auAddressDraft,
+  auAddressFromRow,
+  completeAuAddress,
+  composeAuAddress,
+  splitAuAddress,
+  type AuAddressDraft,
+} from "@/lib/au-address";
 import { SaveFailure } from "@/components/site/SaveFailure";
 import { CardActions } from "./CardActions";
 import { useDetailsSave, type DetailsCardProps } from "./DetailsCard";
@@ -23,7 +32,10 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
     onSaved,
   });
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState<AuAddressDraft>(auAddressDraft(null));
+  // Pressing Save with part of the address missing is the one way this card
+  // can be refused before it is sent, so it says which part, under the field.
+  const [attempted, setAttempted] = useState(false);
   const [smsConsent, setSmsConsent] = useState(false);
   const [ecName, setEcName] = useState("");
   const [ecRelationship, setEcRelationship] = useState("");
@@ -33,7 +45,18 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
   const stored = useMemo(
     () => ({
       phone: profile?.phone ?? "",
-      address: profile?.address ?? "",
+      // The parts when the club holds them, else the one line read as parts
+      // where that is unambiguous. `addressLine` is kept so a line that
+      // cannot be read is shown above the empty boxes rather than lost.
+      address: auAddressDraft(
+        auAddressFromRow({
+          address_street: profile?.address_street,
+          address_suburb: profile?.address_suburb,
+          address_state: profile?.address_state,
+          address_postcode: profile?.address_postcode,
+        }) ?? splitAuAddress(profile?.address),
+      ),
+      addressLine: profile?.address ?? "",
       smsConsent: profile?.sms_whatsapp_consent ?? false,
       ecName: profile?.emergency_contact_name ?? "",
       ecRelationship: profile?.emergency_contact_relationship ?? "",
@@ -42,6 +65,10 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
     [
       profile?.phone,
       profile?.address,
+      profile?.address_street,
+      profile?.address_suburb,
+      profile?.address_state,
+      profile?.address_postcode,
       profile?.sms_whatsapp_consent,
       profile?.emergency_contact_name,
       profile?.emergency_contact_relationship,
@@ -53,6 +80,7 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
     () => () => {
       setPhone(stored.phone);
       setAddress(stored.address);
+      setAttempted(false);
       setSmsConsent(stored.smsConsent);
       setEcName(stored.ecName);
       setEcRelationship(stored.ecRelationship);
@@ -63,20 +91,42 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
 
   useEffect(revert, [revert]);
 
+  const addressChanged = (["street", "suburb", "state", "postcode"] as const).some(
+    (part) => address[part] !== stored.address[part],
+  );
   const dirty =
     phone !== stored.phone ||
-    address !== stored.address ||
+    addressChanged ||
     smsConsent !== stored.smsConsent ||
     ecName !== stored.ecName ||
     ecRelationship !== stored.ecRelationship ||
     ecPhone !== stored.ecPhone;
 
+  // The line on file could not be read as parts and nothing has been typed
+  // over it yet: show it, so the member can see what they told us.
+  const previousLine =
+    !addressChanged && !completeAuAddress(stored.address) && stored.addressLine
+      ? stored.addressLine
+      : null;
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const parts = completeAuAddress(address);
+    if (!parts) {
+      setAttempted(true);
+      return;
+    }
     await save(
       {
         phone: phone.trim(),
-        address: address.trim(),
+        // The parts, plus the line made from them so this page's copy of the
+        // profile reads right straight away. The server composes the line
+        // itself and does not take this one on trust.
+        address_street: parts.street,
+        address_suburb: parts.suburb,
+        address_state: parts.state,
+        address_postcode: parts.postcode,
+        address: composeAuAddress(parts),
         sms_whatsapp_consent: smsConsent,
         emergency_contact_name: ecName.trim(),
         emergency_contact_relationship: ecRelationship.trim(),
@@ -137,20 +187,19 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
                 </span>
               </label>
             </div>
-            <div>
-              <Label htmlFor="account-address">Address</Label>
-              <Input
-                id="account-address"
-                required
-                maxLength={300}
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-medium">Home address</legend>
+              <AddressFields
+                idPrefix="account-address"
                 value={address}
-                onChange={(e) => {
-                  setAddress(e.target.value);
+                onChange={(next) => {
+                  setAddress(next);
                   clearSaveError();
                 }}
-                className="mt-1.5"
+                previousLine={previousLine}
+                showProblems={attempted}
               />
-            </div>
+            </fieldset>
 
             <fieldset className="space-y-4 rounded-md border p-4">
               <legend className="px-1 text-sm font-medium">Emergency contact</legend>
