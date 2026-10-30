@@ -485,7 +485,14 @@ describe("loadClubUser", () => {
       sessions_attended: 1,
     });
     // Straight off the profile row, not filled in from elsewhere.
-    expect(read.profile).toMatchObject({ gi_size: "A2", belt_size: "3", medical_notes: null });
+    expect(read.profile).toMatchObject({
+      first_name: "Ada",
+      middle_name: null,
+      last_name: "Lovelace",
+      gi_size: "A2",
+      belt_size: "3",
+      medical_notes: null,
+    });
     expect(read.memberships).toEqual([
       expect.objectContaining({ id: "m1", plan_name: "Semester 1 2026", checkin_count: 1 }),
     ]);

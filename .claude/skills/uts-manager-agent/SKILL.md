@@ -180,7 +180,8 @@ scripts/agent.sh get_user '{"user_id":"<uuid>"}'
   `roles`, `lifecycle_status`, `sessions_attended` (exact, lifetime),
   `latest_plan_kind` / `latest_membership_status` /
   `latest_sessions_remaining`, `first_seen_at`.
-- `profile`: the club's live record. Preferred name, date of birth, address,
+- `profile`: the club's live record. `first_name` / `middle_name` /
+  `last_name` and the preferred name, date of birth, address,
   UTS student number, emergency contact, `medical_notes`, `is_minor` and the
   guardian block, SMS/WhatsApp consent, `gi_size` / `belt_size`, and
   `media_consent` (`null` means never asked, not "no") with who last set it.
