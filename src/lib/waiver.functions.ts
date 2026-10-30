@@ -13,6 +13,7 @@ import {
   isFutureSigningDate,
   isMinorOn,
   isPaperWaiver,
+  isSameOnlineSubmission,
   nameWithPreferred,
   splitFullName,
   nextUtcDay,
@@ -118,6 +119,15 @@ export type WaiverSubmitResult = {
    */
   reply_to_confirmation: boolean;
 };
+
+/**
+ * What the signing endpoint says when a resent submission id does not belong
+ * to the request carrying it (see `isSameOnlineSubmission`). A real signer
+ * only meets it if their browser somehow reused an id, and reloading mints a
+ * new one; it deliberately says nothing about the waiver the id named.
+ */
+export const RESUBMISSION_REFUSED =
+  "We couldn't save this waiver. Please reload the page and sign again.";
 
 /**
  * Mint a fresh download link for an already-stored waiver PDF.
@@ -1190,9 +1200,14 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       // job; adopt the row that won rather than failing a signed waiver.
       const { data: raced } = await admin
         .from("waivers")
-        .select("id, pdf_path")
+        .select("id, pdf_path, signer_meta, email, date_of_birth")
         .eq("client_submission_id", submissionId)
         .maybeSingle();
+      // Same rule as the lookup before any work: only ever hand back a link to
+      // the row this signer's own retry wrote.
+      if (raced && !isSameOnlineSubmission(raced, { email, date_of_birth: data.date_of_birth })) {
+        throw new Error(RESUBMISSION_REFUSED);
+      }
       if (raced) {
         const url = await signStoredPdf(admin, raced.pdf_path);
         // The other attempt in this race is the one that will mint the token
