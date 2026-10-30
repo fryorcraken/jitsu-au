@@ -151,7 +151,8 @@ instead — every duplicate is a future contradiction.
 - **Data / auth:** Supabase (Postgres + Auth + Storage), `@tanstack/react-query`.
 - **Build:** Vite 8 + Nitro (default deploy target **Cloudflare**), configured
   through `@lovable.dev/vite-tanstack-config`.
-- **Forms/validation:** react-hook-form + Zod. **PDF:** `pdf-lib`. **Signatures:**
+- **Forms/validation:** Zod, with every form that writes going through
+  `useResilientSubmit` (see "The UX bar"). **PDF:** `pdf-lib`. **Signatures:**
   `signature_pad`. **Email:** `@react-email/*` + `@lovable.dev/email-js`.
 - **Package manager:** **Bun** (`bun.lock`, `bunfig.toml`).
 
@@ -207,7 +208,9 @@ src/
     sitemap[.]xml.ts        /sitemap.xml
     routeTree.gen.ts      AUTO-GENERATED route tree — never edit by hand
   components/
-    ui/                   shadcn/ui primitives (generated; avoid hand-editing)
+    ui/                   shadcn/ui primitives (generated; avoid hand-editing). Only
+                          the ones in use are kept: add one back through shadcn,
+                          with its package, when a screen needs it
     site/                 App chrome + shared UX: SiteLayout/MemberLayout/KbLayout,
                           SiteHeader, SiteFooter, SignaturePad, AuthPending,
                           SubmitStatus, StatusPill, Loading, LoadFailure,
