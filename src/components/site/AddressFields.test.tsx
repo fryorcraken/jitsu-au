@@ -71,4 +71,30 @@ describe("AddressFields", () => {
     expect(screen.getByLabelText("Postcode")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("A postcode is four digits.")).toBeInTheDocument();
   });
+
+  it("asks about a postcode that does not usually go with the state, without blocking", () => {
+    render(
+      <AddressFields
+        idPrefix="address"
+        value={{ street: "1 Broadway", suburb: "Ultimo", state: "VIC", postcode: "2007" }}
+        onChange={() => {}}
+        showProblems
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/usually in NSW, not VIC/);
+    // A note, not an error: nothing is marked invalid.
+    expect(screen.getByLabelText("Postcode")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("holds the note back while the postcode itself is wrong", () => {
+    render(
+      <AddressFields
+        idPrefix="address"
+        value={{ street: "1 Broadway", suburb: "Ultimo", state: "VIC", postcode: "20x7" }}
+        onChange={() => {}}
+        showProblems
+      />,
+    );
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
 });

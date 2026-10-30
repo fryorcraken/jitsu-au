@@ -287,3 +287,27 @@ export function sameAuAddress(a: string | null | undefined, b: string | null | u
     pa.postcode === pb.postcode
   );
 }
+
+/**
+ * A gentle "is that right?" when a postcode does not usually belong to the
+ * state chosen, or `null` when there is nothing to say.
+ *
+ * A note and never a refusal. Australia Post's leading digits are a strong
+ * rule with real exceptions: towns on a border carry the neighbouring state's
+ * postcode (Barooga NSW is 3644), and refusing those would stop a real person
+ * signing. What this catches is the common slip, the wrong state picked from
+ * the list next to a right postcode, which would otherwise be printed on a
+ * signed waiver and counted in the wrong state. The same table is what keeps
+ * `splitAuAddress` from reading "Ultimo VIC 2007" as an address.
+ */
+export function postcodeStateNote(d: AuAddressDraft): string | null {
+  const postcode = d.postcode.trim();
+  if (!d.state || !/^[0-9]{4}$/.test(postcode)) return null;
+  if (POSTCODE_LEAD[d.state].test(postcode)) return null;
+  const usual = AU_STATES.filter((state) => POSTCODE_LEAD[state].test(postcode));
+  if (usual.length === 0) {
+    return `${postcode} doesn't look like an Australian postcode. Please check it.`;
+  }
+  const states = usual.join(" or ");
+  return `${postcode} is usually in ${states}, not ${d.state}. Please check the state, unless you're just over the border.`;
+}

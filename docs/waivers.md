@@ -305,7 +305,11 @@ before the suburb, no postcode, an overseas address) is shown above four empty
 boxes instead, so they can see what they told us last time. The same goes for
 the account page and for a manager filing a paper form. A form left open
 across the change still submits its one line, which is stored as typed with
-no parts.
+no parts. A postcode that does not usually belong to the state
+chosen (2007 with VIC) gets a note under the boxes asking the person to check
+the state, never a refusal: border towns carry the neighbouring state's
+postcode (Barooga NSW is 3644), and refusing those would stop real people
+signing (`postcodeStateNote`).
 
 The server decides which existing person a child's waiver belongs to by matching
 **first name, last name and date of birth within that one household**. Nothing

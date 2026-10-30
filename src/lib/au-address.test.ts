@@ -12,6 +12,7 @@ import {
   draftAddressLine,
   EMPTY_AU_ADDRESS,
   isBlankAuAddress,
+  postcodeStateNote,
   resolveAddressInput,
   sameAuAddress,
   splitAuAddress,
@@ -279,5 +280,45 @@ describe("control characters", () => {
         hint: "Please keep the street address on one line",
       },
     ]);
+  });
+});
+
+describe("postcodeStateNote", () => {
+  it("says nothing while the postcode and state agree, or are not both in", () => {
+    expect(postcodeStateNote(broadway)).toBeNull();
+    expect(postcodeStateNote({ ...broadway, state: "" })).toBeNull();
+    expect(postcodeStateNote({ ...broadway, postcode: "20" })).toBeNull();
+  });
+
+  // The slip it is for: a right postcode next to the wrong state from the list.
+  it("asks about a state the postcode does not usually belong to, naming the usual one", () => {
+    expect(postcodeStateNote({ ...broadway, state: "VIC" })).toBe(
+      "2007 is usually in NSW, not VIC. Please check the state, unless you're just over the border.",
+    );
+  });
+
+  it("names every state a postcode can belong to", () => {
+    expect(postcodeStateNote({ ...broadway, state: "QLD", postcode: "2600" })).toMatch(
+      /usually in ACT or NSW, not QLD/,
+    );
+  });
+
+  it("flags a postcode no state uses", () => {
+    expect(postcodeStateNote({ ...broadway, postcode: "0100" })).toMatch(
+      /doesn't look like an Australian postcode/,
+    );
+  });
+
+  // A note, never a refusal: a border town's real postcode must still go in.
+  it("never stops a border town's real address being accepted", () => {
+    const barooga = {
+      street: "1 Vermont St",
+      suburb: "Barooga",
+      state: "NSW" as const,
+      postcode: "3644",
+    };
+    expect(postcodeStateNote(barooga)).not.toBeNull();
+    expect(auAddressProblems(barooga)).toEqual([]);
+    expect(completeAuAddress(barooga)).toEqual(barooga);
   });
 });

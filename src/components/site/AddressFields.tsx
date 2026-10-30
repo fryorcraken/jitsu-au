@@ -10,6 +10,7 @@ import {
   AU_STATE_NAMES,
   auAddressFieldId,
   auAddressProblems,
+  postcodeStateNote,
   type AuAddressDraft,
   type AuAddressPart,
   type AuState,
@@ -109,6 +110,10 @@ export function AddressFields({
   };
 
   const { className: stateClass, ...stateRest } = props("state");
+  // Not shown while the postcode box is itself flagged as wrong: one thing to
+  // fix at a time, and the error is the one that stops the form.
+  const postcodeFlagged = Boolean(messageFor(id("postcode")));
+  const note = postcodeFlagged ? null : postcodeStateNote(value);
 
   return (
     <div className="space-y-3">
@@ -181,6 +186,18 @@ export function AddressFields({
           {messageFor(id("postcode"))}
         </div>
       </div>
+      {/* Under both boxes rather than one, because it is about the pair: the
+          slip it catches is usually the state, not the postcode. A note, not
+          an error: it never stops anybody sending (see postcodeStateNote).
+          Polite live region so a screen reader hears it once, as it appears. */}
+      <p
+        id={`${idPrefix}_postcode_note`}
+        role="status"
+        aria-live="polite"
+        className="text-xs text-muted-foreground empty:hidden"
+      >
+        {note}
+      </p>
     </div>
   );
 }
