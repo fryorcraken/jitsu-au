@@ -66,7 +66,9 @@
                 "get_club_settings",
                 "get_site_banner",
                 "list_blog_posts",
-                "get_blog_post"
+                "get_blog_post",
+                "list_calendar_events",
+                "list_calendar_rsvps"
               ],
               "description": "The read-only action to run."
             },
@@ -123,7 +125,12 @@
                 "resend_email",
                 "save_blog_post",
                 "delete_blog_post",
-                "upload_blog_image"
+                "upload_blog_image",
+                "create_calendar_entry",
+                "edit_calendar_entry",
+                "cancel_calendar_entry",
+                "stop_calendar_repeat",
+                "delete_calendar_entry"
               ],
               "description": "The action to run."
             },

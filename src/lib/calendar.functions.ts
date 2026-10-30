@@ -21,8 +21,11 @@ import {
 } from "@/lib/validation";
 import {
   CLUB_TIME_ZONE,
+  WEEKDAY_LABELS,
   diffOccurrences,
+  firstDateToCome,
   generateOccurrences,
+  weeklyRunsShareADate,
   withoutHiddenInviteOnly,
 } from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
@@ -74,6 +77,42 @@ async function requireManager(context: { supabase: CalendarClient; userId: strin
   if (error) throw new Error(error.message);
   if (!isMgr) throw new Error("Forbidden");
 }
+
+/**
+ * Why the manager calendar refused a change, for a caller that has to act on it
+ * rather than read it. The screen shows `message`; the manager agent API turns
+ * `reason` into a status code and an error code (`docs/manager-agent-api.md`).
+ *
+ * - `not_found`: no such date (or repeat) on the calendar.
+ * - `not_repeating`: asked for "this and every future date" on a one-off.
+ * - `repeating_date`: asked to delete one date of a repeat, which the next
+ *   top-up would only put back.
+ * - `checked_in`: asked to delete a class people were checked in to.
+ * - `already_on_calendar`: asked to add something that is already there.
+ * - `no_dates`: asked to add a weekly entry that would never put a date on the
+ *   calendar (its last date has passed, or no date in it is on that weekday).
+ */
+export type CalendarRefusal =
+  | "not_found"
+  | "not_repeating"
+  | "repeating_date"
+  | "checked_in"
+  | "already_on_calendar"
+  | "no_dates";
+
+export class CalendarEntryError extends Error {
+  reason: CalendarRefusal;
+  details?: Record<string, unknown>;
+  constructor(reason: CalendarRefusal, message: string, details?: Record<string, unknown>) {
+    super(message);
+    this.name = "CalendarEntryError";
+    this.reason = reason;
+    this.details = details;
+  }
+}
+
+const NO_SUCH_DATE = "That date is no longer on the calendar. Refresh the list and try again.";
+const NOT_REPEATING = "That entry does not repeat.";
 
 /** A YYYY-MM-DD date `days` from now (UTC date grid). */
 function dateFromNow(days: number): string {
@@ -422,7 +461,20 @@ export async function listManagerEventRows(admin: CalendarClient) {
     .order("starts_at", { ascending: true })
     .limit(1000);
   if (error) throw new Error(error.message);
-  const events = (data ?? []).map(projectEvent);
+  // Who can see a date is its own invite-only flag OR its weekly entry's (the
+  // read policies and `withoutHiddenInviteOnly` both ask both), so the list
+  // reports that, not the date's own column, which an entry made invite only
+  // "from this date on" leaves false on the dates before it.
+  const { data: inviteSeries, error: iErr } = await admin
+    .from("calendar_series")
+    .select("id")
+    .eq("invite_only", true);
+  if (iErr) throw new Error(iErr.message);
+  const inviteOnlySeries = new Set((inviteSeries ?? []).map((s) => s.id));
+  const events = (data ?? []).map((e) => ({
+    ...projectEvent(e),
+    invite_only: e.invite_only || (e.series_id !== null && inviteOnlySeries.has(e.series_id)),
+  }));
 
   // Attach a per-event RSVP tally so the manager sees interest at a glance.
   // Chunked: `.in()` becomes a query-string filter, and a few hundred UUIDs
@@ -460,6 +512,15 @@ export const listManagerEvents = createServerFn({ method: "GET" })
 
 /** Who responded to one date, with names and emails. */
 export async function listEventRsvpRows(admin: CalendarClient, data: EventRsvpsInput) {
+  // An empty list has to mean "nobody has replied", never "no such date".
+  const { data: event, error: evErr } = await admin
+    .from("calendar_events")
+    .select("id")
+    .eq("id", data.event_id)
+    .maybeSingle();
+  if (evErr) throw new Error(evErr.message);
+  if (!event) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
+
   const { data: rows, error } = await admin
     .from("event_rsvps")
     .select("user_id, response, updated_at")
@@ -516,13 +577,14 @@ export const listEventRsvps = createServerFn({ method: "POST" })
  * Materialize a series' occurrences into `calendar_events` for [from, through],
  * skipping any that already exist (idempotent — we diff against existing starts
  * rather than relying on ON CONFLICT, since the uniqueness index is partial).
+ * Returns the dates it added.
  */
 async function materializeSeries(
   admin: CalendarClient,
   series: CalendarSeriesRow,
   fromISODate: string,
   throughISODate: string,
-): Promise<number> {
+): Promise<CalendarEventSelection[]> {
   const occ = generateOccurrences(
     {
       weekday: series.weekday,
@@ -535,7 +597,7 @@ async function materializeSeries(
     throughISODate,
     CLUB_TIME_ZONE,
   );
-  if (occ.length === 0) return 0;
+  if (occ.length === 0) return [];
 
   const { data: existing, error: exErr } = await admin
     .from("calendar_events")
@@ -559,10 +621,15 @@ async function materializeSeries(
     visibility: series.visibility,
     invite_only: series.invite_only,
   }));
-  if (rows.length === 0) return 0;
-  const { error: insErr } = await admin.from("calendar_events").insert(rows);
+  if (rows.length === 0) return [];
+  const { data: inserted, error: insErr } = await admin
+    .from("calendar_events")
+    .insert(rows)
+    .select(EVENT_COLUMNS);
   if (insErr) throw new Error(insErr.message);
-  return rows.length;
+  return [...(inserted ?? [])].sort(
+    (a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime(),
+  );
 }
 
 /**
@@ -615,15 +682,104 @@ export async function topUpHorizon(admin: CalendarClient): Promise<void> {
 }
 
 /**
+ * Refuse an entry that is already on the calendar:
+ *
+ * - a one-off with the same title and start as a date already there (a
+ *   one-off or one week of a repeat). A CANCELLED date there only counts if it
+ *   also ends at the same time: "cancel this date and add a one-off" is how a
+ *   single class is made longer, and that one-off starts where the cancelled
+ *   date did.
+ * - a weekly entry with the same title, weekday and time as an active one that
+ *   holds, or will hold, any of the same dates (`weeklyRunsShareADate`). Next
+ *   semester's run of a class is added while this semester's is still on, and
+ *   is not a duplicate of it.
+ *
+ * Nobody adds the same class twice on purpose, and the one way it happens by
+ * accident is a retry: a manager's agent that never heard back from its first
+ * try and sends it again. There is no submission id to dedupe on (that would
+ * need a column), so the entry itself is the key. Check-then-insert, so two
+ * truly simultaneous tries can still both land; that is the screen's double
+ * click, which its busy state already covers.
+ */
+async function refuseDuplicateEntry(admin: CalendarClient, data: CreateCalendarEntryInput) {
+  if (data.repeat.type === "never") {
+    const { data: same, error } = await admin
+      .from("calendar_events")
+      .select("id, series_id, status, ends_at")
+      .eq("title", data.title)
+      .eq("starts_at", data.repeat.starts_at);
+    if (error) throw new Error(error.message);
+    // Instants, not strings: PostgREST answers "+00:00" where the input says "Z".
+    const endsAt = new Date(data.repeat.ends_at).getTime();
+    const existing =
+      same?.find((e) => e.status !== "cancelled") ??
+      same?.find((e) => new Date(e.ends_at).getTime() === endsAt);
+    if (!existing) return;
+    const cancelled = existing.status === "cancelled";
+    throw new CalendarEntryError(
+      "already_on_calendar",
+      cancelled
+        ? `"${data.title}" is already on the calendar at that time, cancelled. Restore it rather than adding it again.`
+        : `"${data.title}" is already on the calendar at that time. To add a second one, give it a different title.`,
+      { event_id: existing.id, series_id: existing.series_id, status: existing.status },
+    );
+  }
+  const run = {
+    weekday: data.repeat.weekday,
+    starts_on: data.repeat.starts_on,
+    ends_on: data.repeat.ends_on ?? null,
+  };
+  const { data: same, error } = await admin
+    .from("calendar_series")
+    .select("id, starts_on, ends_on")
+    .eq("title", data.title)
+    .eq("weekday", data.repeat.weekday)
+    .eq("start_time", data.repeat.start_time)
+    .eq("is_active", true);
+  if (error) throw new Error(error.message);
+  const existing = (same ?? []).find((s) => weeklyRunsShareADate(s, run, dateFromNow(0)));
+  if (!existing) return;
+  throw new CalendarEntryError(
+    "already_on_calendar",
+    `"${data.title}" already repeats every ${WEEKDAY_LABELS[data.repeat.weekday]} at ${data.repeat.start_time}. To add a second one, give it a different title.`,
+    { series_id: existing.id },
+  );
+}
+
+/**
  * Put something on the calendar. One entry point for both a one-off and a weekly
  * entry — repeating is a property of the thing, not a different thing.
  * `actingAs` is the manager, recorded as the entry's `created_by`.
+ *
+ * `id` is the date for a one-off and the repeat (the series) for a weekly entry;
+ * `dates` is every date this call put on the calendar, which for a weekly entry
+ * is the ones inside the horizon (more appear as they get close).
  */
 export async function createCalendarEntryRow(
   admin: CalendarClient,
   data: CreateCalendarEntryInput,
   actingAs: string,
 ) {
+  // Dates are only ever generated from today on, so a weekly entry whose last
+  // date has passed, or whose dates hold no such weekday, would be saved and
+  // never appear: reported as "added" with nothing to show for it.
+  if (
+    data.repeat.type === "weekly" &&
+    !firstDateToCome(
+      {
+        weekday: data.repeat.weekday,
+        starts_on: data.repeat.starts_on,
+        ends_on: data.repeat.ends_on ?? null,
+      },
+      dateFromNow(0),
+    )
+  ) {
+    throw new CalendarEntryError(
+      "no_dates",
+      `No ${WEEKDAY_LABELS[data.repeat.weekday]} from ${data.repeat.starts_on} to ${data.repeat.ends_on} is still to come, so this would put nothing on the calendar. Check the day and the dates.`,
+    );
+  }
+  await refuseDuplicateEntry(admin, data);
   const details = {
     title: data.title,
     description: data.description ?? null,
@@ -638,10 +794,16 @@ export async function createCalendarEntryRow(
     const { data: created, error } = await admin
       .from("calendar_events")
       .insert({ ...details, starts_at: data.repeat.starts_at, ends_at: data.repeat.ends_at })
-      .select("id")
+      .select(EVENT_COLUMNS)
       .single();
     if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
-    return { ok: true as const, id: created.id, repeats: false as const, generated: 1 };
+    return {
+      ok: true as const,
+      id: created.id,
+      repeats: false as const,
+      generated: 1,
+      dates: [projectEvent(created)],
+    };
   }
 
   const { weekday, start_time, duration_minutes, starts_on, ends_on } = data.repeat;
@@ -659,13 +821,19 @@ export async function createCalendarEntryRow(
     .single();
   if (error || !created) throw new Error(error?.message || "Could not add it to the calendar.");
 
-  const generated = await materializeSeries(
+  const dates = await materializeSeries(
     admin,
     created as CalendarSeriesRow,
     starts_on > dateFromNow(0) ? starts_on : dateFromNow(0),
     dateFromNow(HORIZON_DAYS),
   );
-  return { ok: true as const, id: created.id, repeats: true as const, generated };
+  return {
+    ok: true as const,
+    id: created.id,
+    repeats: true as const,
+    generated: dates.length,
+    dates: dates.map(projectEvent),
+  };
 }
 
 /** Manager: put something on the calendar. */
@@ -710,12 +878,14 @@ export async function updateCalendarEntryRow(
   if (Object.keys(patch).length === 0) return { ok: true as const, id, updated: 0 };
 
   if (scope === "event") {
-    const { error } = await admin
+    const { data: changed, error } = await admin
       .from("calendar_events")
       .update({ ...patch, updated_at: now })
-      .eq("id", id);
+      .eq("id", id)
+      .select("id");
     if (error) throw new Error(error.message);
-    return { ok: true as const, id, updated: 1 };
+    if (!changed?.length) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
+    return { ok: true as const, id, updated: changed.length };
   }
 
   // Series scope: resolve the clicked date's series, then rewrite from that
@@ -726,7 +896,8 @@ export async function updateCalendarEntryRow(
     .eq("id", id)
     .maybeSingle();
   if (evErr) throw new Error(evErr.message);
-  if (!ev?.series_id) throw new Error("That entry does not repeat.");
+  if (!ev) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
+  if (!ev.series_id) throw new CalendarEntryError("not_repeating", NOT_REPEATING);
   const from = ev.starts_at > now ? ev.starts_at : now;
 
   const { error: sErr } = await admin
@@ -734,13 +905,14 @@ export async function updateCalendarEntryRow(
     .update({ ...patch, updated_at: now })
     .eq("id", ev.series_id);
   if (sErr) throw new Error(sErr.message);
-  const { error: eErr } = await admin
+  const { data: changed, error: eErr } = await admin
     .from("calendar_events")
     .update({ ...patch, updated_at: now })
     .eq("series_id", ev.series_id)
-    .gte("starts_at", from);
+    .gte("starts_at", from)
+    .select("id");
   if (eErr) throw new Error(eErr.message);
-  return { ok: true as const, id, updated: 1 };
+  return { ok: true as const, id, updated: changed?.length ?? 0 };
 }
 
 /** Manager: edit an entry's details, for one date or this and every future one. */
@@ -755,37 +927,82 @@ export const updateCalendarEntry = createServerFn({ method: "POST" })
 /**
  * Stop a repeating entry. Future dates are removed and the rule is deactivated;
  * past dates stay, because they happened.
+ *
+ * A date still to start that somebody is already checked in to stays too. The
+ * check-in screen opens on the class that is on now or NEXT, so people are
+ * checked in to the evening class before it starts, and their check-ins cascade
+ * with the date with no credit given back (the reason `deleteEventRow` refuses).
+ * Such a class is happening, so it keeps its place on the calendar.
+ *
+ * Safe to repeat: the rule is switched off first, and a second call on a repeat
+ * already stopped clears any future dates a first call left behind without
+ * moving the date it stopped on.
  */
 export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepeatingInput) {
   const now = new Date().toISOString();
   const { data: series, error: sReadErr } = await admin
     .from("calendar_series")
-    .select("starts_on")
+    .select("starts_on, is_active")
     .eq("id", data.series_id)
     .maybeSingle();
   if (sReadErr) throw new Error(sReadErr.message);
-  if (!series) throw new Error("That repeating entry no longer exists.");
+  if (!series) {
+    throw new CalendarEntryError("not_found", "That repeating entry no longer exists.");
+  }
 
-  const { error: dErr } = await admin
+  // Off first, so the horizon top-up stops adding dates before the ones it
+  // added are cleared away.
+  if (series.is_active) {
+    // `ends_on` has a CHECK against `starts_on`, so an entry stopped before its
+    // first date ends on that date rather than today. is_active = false is what
+    // actually stops it; the date is only for the record.
+    const today = dateFromNow(0);
+    const { error: sErr } = await admin
+      .from("calendar_series")
+      .update({
+        is_active: false,
+        ends_on: series.starts_on > today ? series.starts_on : today,
+        updated_at: now,
+      })
+      .eq("id", data.series_id);
+    if (sErr) throw new Error(sErr.message);
+  }
+
+  const { data: future, error: fErr } = await admin
     .from("calendar_events")
-    .delete()
+    .select("id")
     .eq("series_id", data.series_id)
     .gte("starts_at", now);
-  if (dErr) throw new Error(dErr.message);
-  // `ends_on` has a CHECK against `starts_on`, so an entry stopped before its
-  // first date ends on that date rather than today. is_active = false is what
-  // actually stops it; the date is only for the record.
-  const today = dateFromNow(0);
-  const { error: sErr } = await admin
-    .from("calendar_series")
-    .update({
-      is_active: false,
-      ends_on: series.starts_on > today ? series.starts_on : today,
-      updated_at: now,
-    })
-    .eq("id", data.series_id);
-  if (sErr) throw new Error(sErr.message);
-  return { ok: true as const };
+  if (fErr) throw new Error(fErr.message);
+  const futureIds = (future ?? []).map((e) => e.id);
+  const checkedIn = new Set<string>();
+  const removable: string[] = [];
+  // Chunked for the same reason as the RSVP tally above: `.in()` is a
+  // query-string filter, and a year of weekly dates is a long one.
+  const CHUNK = 100;
+  for (let i = 0; i < futureIds.length; i += CHUNK) {
+    const ids = futureIds.slice(i, i + CHUNK);
+    const { data: rows, error: cErr } = await admin
+      .from("session_checkins")
+      .select("event_id")
+      .in("event_id", ids);
+    if (cErr) throw new Error(cErr.message);
+    for (const r of rows ?? []) checkedIn.add(r.event_id);
+    removable.push(...ids.filter((id) => !checkedIn.has(id)));
+  }
+  for (let i = 0; i < removable.length; i += CHUNK) {
+    const { error: dErr } = await admin
+      .from("calendar_events")
+      .delete()
+      .in("id", removable.slice(i, i + CHUNK));
+    if (dErr) throw new Error(dErr.message);
+  }
+  return {
+    ok: true as const,
+    already_stopped: !series.is_active,
+    removed: removable.length,
+    kept_checked_in: [...checkedIn],
+  };
 }
 
 /** Manager: stop a repeating entry. */
@@ -806,12 +1023,14 @@ export async function cancelEventRows(admin: CalendarClient, data: CancelEventIn
   const status = data.cancelled ? "cancelled" : "scheduled";
 
   if (data.scope === "event") {
-    const { error } = await admin
+    const { data: changed, error } = await admin
       .from("calendar_events")
       .update({ status, updated_at: now })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .select("id");
     if (error) throw new Error(error.message);
-    return { ok: true as const, id: data.id, cancelled: data.cancelled };
+    if (!changed?.length) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
+    return { ok: true as const, id: data.id, cancelled: data.cancelled, updated: changed.length };
   }
 
   // Series scope: this date and every future one. `id` is the event that was
@@ -822,14 +1041,21 @@ export async function cancelEventRows(admin: CalendarClient, data: CancelEventIn
     .eq("id", data.id)
     .maybeSingle();
   if (evErr) throw new Error(evErr.message);
-  if (!ev?.series_id) throw new Error("That entry does not repeat.");
-  const { error } = await admin
+  if (!ev) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
+  if (!ev.series_id) throw new CalendarEntryError("not_repeating", NOT_REPEATING);
+  const { data: changed, error } = await admin
     .from("calendar_events")
     .update({ status, updated_at: now })
     .eq("series_id", ev.series_id)
-    .gte("starts_at", ev.starts_at);
+    .gte("starts_at", ev.starts_at)
+    .select("id");
   if (error) throw new Error(error.message);
-  return { ok: true as const, id: data.id, cancelled: data.cancelled };
+  return {
+    ok: true as const,
+    id: data.id,
+    cancelled: data.cancelled,
+    updated: changed?.length ?? 0,
+  };
 }
 
 export const cancelEvent = createServerFn({ method: "POST" })
@@ -840,8 +1066,30 @@ export const cancelEvent = createServerFn({ method: "POST" })
     return cancelEventRows(await adminClient(), data);
   });
 
-/** Delete one date outright, for a mistake made before anybody turned up. */
+/**
+ * Delete one date outright, for a mistake made before anybody turned up.
+ *
+ * Only a one-off. A date a repeat generated would only be put back by the next
+ * horizon top-up, so the honest moves there are cancelling it or stopping the
+ * repeat. The screen offers neither Delete on such a date; this is the rule
+ * for a caller that is not the screen.
+ */
 export async function deleteEventRow(admin: CalendarClient, data: DeleteEventInput) {
+  const { data: ev, error: evErr } = await admin
+    .from("calendar_events")
+    .select("id, series_id")
+    .eq("id", data.id)
+    .maybeSingle();
+  if (evErr) throw new Error(evErr.message);
+  if (!ev) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
+  if (ev.series_id) {
+    throw new CalendarEntryError(
+      "repeating_date",
+      "That date is part of a weekly entry, so it cannot be deleted on its own. Cancel this date instead, or stop the entry repeating.",
+      { series_id: ev.series_id },
+    );
+  }
+
   // Check-ins cascade with the event, and their credits do NOT come back:
   // deleting a class five people were checked in to would silently burn five
   // sessions with no record that it happened. Delete is for a mistake made
@@ -853,8 +1101,10 @@ export async function deleteEventRow(admin: CalendarClient, data: DeleteEventInp
     .eq("event_id", data.id);
   if (cErr) throw new Error(cErr.message);
   if ((count ?? 0) > 0) {
-    throw new Error(
+    throw new CalendarEntryError(
+      "checked_in",
       `${count} ${count === 1 ? "person has" : "people have"} been checked in to this class, so deleting it would take their sessions with it. Cancel it instead.`,
+      { checked_in: count },
     );
   }
 

@@ -15,8 +15,8 @@ import {
   CLUB_TIME_ZONE,
   DEFAULT_EVENT_LOCATION,
   WEEKDAY_LABELS,
+  clubLocalToIso,
   defaultEndForStart,
-  zonedWallTimeToUtc,
 } from "@/lib/calendar";
 import {
   cancelEvent,
@@ -63,17 +63,6 @@ type RsvpRow = {
 type Scope = "event" | "series";
 
 const TZ = CLUB_TIME_ZONE;
-
-/**
- * Read a `datetime-local` value ("YYYY-MM-DDTHH:MM") as CLUB wall-clock time.
- * `new Date(value)` would parse it in the browser's zone, so a manager working
- * from a laptop set to UTC would save 18:00 and see it listed back as 5:00 am.
- * The list and the public page both render in club time.
- */
-function clubLocalToIso(value: string): string {
-  const [date, time] = value.split("T");
-  return zonedWallTimeToUtc(date, time.slice(0, 5), TZ).toISOString();
-}
 
 function fmt(iso: string): string {
   return new Date(iso).toLocaleString("en-AU", {
@@ -313,14 +302,20 @@ function ManagerCalendarPage() {
     const ok = await confirm({
       title: `Stop "${ev.title}" repeating?`,
       description:
-        "Every future date comes off the calendar. Dates that have already happened stay on the record, with their check-ins.",
+        "Every future date comes off the calendar, except one people are already checked in to. Dates that have already happened stay on the record, with their check-ins.",
       confirmLabel: "Stop repeating",
     });
     if (!ok) return;
     setBusy(true);
     try {
-      await endRepeat({ data: { series_id: ev.series_id } });
-      toast.success("It stops repeating. Past dates are untouched.");
+      const res = await endRepeat({ data: { series_id: ev.series_id } });
+      // A class people are already checked in to stays, so say why it is still
+      // listed, or pressing Stop again looks like the fix.
+      toast.success(
+        res.kept_checked_in.length
+          ? "It stops repeating. The next class stays on the calendar because people are already checked in to it. Cancel it if it is not going ahead."
+          : "It stops repeating. Past dates are untouched.",
+      );
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not stop it repeating");

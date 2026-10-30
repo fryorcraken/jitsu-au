@@ -53,6 +53,59 @@ export function weeklyOccurrenceDates(weekday: number, fromISO: string, toISO: s
   return out;
 }
 
+/** A weekly run of dates: a weekday, a first date and an optional last one (YYYY-MM-DD). */
+export type WeeklyRun = { weekday: number; starts_on: string; ends_on: string | null };
+
+/** The first date on or after `fromISO` that falls on `weekday`. */
+function firstOnWeekday(fromISO: string, weekday: number): string {
+  return weeklyOccurrenceDates(weekday, fromISO, addDays(fromISO, 6))[0];
+}
+
+/** The last date on or before `toISO` that falls on `weekday`. */
+function lastOnWeekday(toISO: string, weekday: number): string {
+  return weeklyOccurrenceDates(weekday, addDays(toISO, -6), toISO)[0];
+}
+
+function addDays(dateISO: string, days: number): string {
+  const { y, m, d } = parseDateOnly(dateISO);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * The first date a new weekly run would put on the calendar, or null when it
+ * would put none at all: dates are only ever generated from today on, so a run
+ * whose last date has passed, or whose dates hold no matching weekday, adds
+ * nothing however long it is left.
+ */
+export function firstDateToCome(run: WeeklyRun, todayISO: string): string | null {
+  const first = firstOnWeekday(run.starts_on > todayISO ? run.starts_on : todayISO, run.weekday);
+  return run.ends_on && first > run.ends_on ? null : first;
+}
+
+/**
+ * Whether a new weekly run would put a class on a date an existing run on the
+ * same weekday already has, or will. Compared on the dates the two actually
+ * hold, not the dates typed in: a run ending on the Friday a semester ends and
+ * the next one starting that Friday share no Monday, and a run whose last date
+ * has passed is over even though it still counts as active until somebody
+ * stops it.
+ */
+export function weeklyRunsShareADate(
+  existing: Omit<WeeklyRun, "weekday">,
+  next: WeeklyRun,
+  todayISO: string,
+): boolean {
+  const from = firstDateToCome(next, todayISO);
+  if (!from) return false;
+  const to = next.ends_on ? lastOnWeekday(next.ends_on, next.weekday) : null;
+  const existingTo = existing.ends_on ? lastOnWeekday(existing.ends_on, next.weekday) : null;
+  if (existingTo && existingTo < todayISO) return false;
+  const existingFrom = firstOnWeekday(existing.starts_on, next.weekday);
+  // A run with no such weekday between its dates holds nothing to clash with.
+  if (existingTo && existingTo < existingFrom) return false;
+  return (!existingTo || existingTo >= from) && (!to || to >= existingFrom);
+}
+
 /**
  * Minutes `timeZone` is ahead of UTC at the given absolute instant (e.g. +600
  * for AEST, +660 for AEDT). Uses Intl so DST is correct without a tz library.
@@ -103,6 +156,27 @@ export function zonedWallTimeToUtc(dateStr: string, timeStr: string, timeZone: s
   // If the offset changed (spring-forward / fall-back), re-resolve once.
   const finalMs = offset2 === offset1 ? candidate : guessUtc - offset2 * 60000;
   return new Date(finalMs);
+}
+
+/**
+ * Read a club wall-clock time ("YYYY-MM-DDTHH:MM", the shape a `datetime-local`
+ * picker gives) as an instant, in ISO form. `new Date(value)` would read it in
+ * the zone of whatever runs the code, so a manager on a laptop set to UTC would
+ * save 18:00 and see it listed back as 5:00 am. The manager calendar's pickers
+ * and the manager agent API's one-off times both come through here.
+ */
+export function clubLocalToIso(value: string, timeZone: string = CLUB_TIME_ZONE): string {
+  const [date, time] = value.split("T");
+  return zonedWallTimeToUtc(date, time.slice(0, 5), timeZone).toISOString();
+}
+
+/**
+ * The club wall-clock time at `instant`, as "YYYY-MM-DDTHH:MM": the reverse of
+ * `clubLocalToIso`, so a time read back can be sent back unchanged.
+ */
+export function clubLocalDateTime(instant: Date, timeZone: string = CLUB_TIME_ZONE): string {
+  const shifted = new Date(instant.getTime() + tzOffsetMinutes(instant, timeZone) * 60000);
+  return shifted.toISOString().slice(0, 16);
 }
 
 /** A new Date `minutes` after `d` (never mutates `d`). */
