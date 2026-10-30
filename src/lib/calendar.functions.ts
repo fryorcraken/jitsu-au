@@ -45,6 +45,7 @@ import type {
 } from "@/lib/validation";
 import type { AppClient } from "@/lib/profile-types";
 import { userEmails } from "@/lib/supabase-rpc";
+import { chunks } from "@/lib/id-chunks";
 import { SITE_ORIGIN, linkOrigin } from "@/lib/site-origin";
 
 /**
@@ -476,18 +477,15 @@ export async function listManagerEventRows(admin: CalendarClient) {
     invite_only: e.invite_only || (e.series_id !== null && inviteOnlySeries.has(e.series_id)),
   }));
 
-  // Attach a per-event RSVP tally so the manager sees interest at a glance.
-  // Chunked: `.in()` becomes a query-string filter, and a few hundred UUIDs
-  // blow past the proxy's request-line limit. A failure here must surface —
-  // silently rendering "0 going" everywhere would be read as "nobody came".
-  const ids = events.map((e) => e.id);
+  // Attach a per-event RSVP tally so the manager sees interest at a glance,
+  // in slices (`chunks`). A failure here must surface — silently rendering
+  // "0 going" everywhere would be read as "nobody came".
   const counts = new Map<string, { going: number; maybe: number; declined: number }>();
-  const CHUNK = 100;
-  for (let i = 0; i < ids.length; i += CHUNK) {
+  for (const slice of chunks(events.map((e) => e.id))) {
     const { data: rsvps, error: rErr } = await admin
       .from("event_rsvps")
       .select("event_id, response")
-      .in("event_id", ids.slice(i, i + CHUNK));
+      .in("event_id", slice);
     if (rErr) throw new Error(rErr.message);
     for (const r of rsvps ?? []) {
       const tally = counts.get(r.event_id) ?? { going: 0, maybe: 0, declined: 0 };
@@ -974,14 +972,10 @@ export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepea
     .eq("series_id", data.series_id)
     .gte("starts_at", now);
   if (fErr) throw new Error(fErr.message);
-  const futureIds = (future ?? []).map((e) => e.id);
   const checkedIn = new Set<string>();
   const removable: string[] = [];
-  // Chunked for the same reason as the RSVP tally above: `.in()` is a
-  // query-string filter, and a year of weekly dates is a long one.
-  const CHUNK = 100;
-  for (let i = 0; i < futureIds.length; i += CHUNK) {
-    const ids = futureIds.slice(i, i + CHUNK);
+  // In slices: a year of weekly dates is a long `.in()` list.
+  for (const ids of chunks((future ?? []).map((e) => e.id))) {
     const { data: rows, error: cErr } = await admin
       .from("session_checkins")
       .select("event_id")
@@ -990,11 +984,8 @@ export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepea
     for (const r of rows ?? []) checkedIn.add(r.event_id);
     removable.push(...ids.filter((id) => !checkedIn.has(id)));
   }
-  for (let i = 0; i < removable.length; i += CHUNK) {
-    const { error: dErr } = await admin
-      .from("calendar_events")
-      .delete()
-      .in("id", removable.slice(i, i + CHUNK));
+  for (const ids of chunks(removable)) {
+    const { error: dErr } = await admin.from("calendar_events").delete().in("id", ids);
     if (dErr) throw new Error(dErr.message);
   }
   return {
