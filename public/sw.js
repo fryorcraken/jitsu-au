@@ -45,7 +45,13 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_ASSETS))
+      // `reload` skips the browser's HTTP cache. The host serves offline.html
+      // with no cache-control, so without it a new worker could store the copy
+      // the browser already holds, which is the old one a version bump is
+      // meant to replace.
+      .then((cache) =>
+        cache.addAll(SHELL_ASSETS.map((url) => new Request(url, { cache: "reload" }))),
+      )
       .then(() => self.skipWaiting()),
   );
 });

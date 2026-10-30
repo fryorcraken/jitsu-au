@@ -807,7 +807,7 @@ redirect would hand one person's `Set-Cookie` to the next. The cookie's own
 attributes and lifetime are in `src/lib/email-settings-session.ts`.
 
 - **On Lovable's hosting the `no-referrer` never reaches the browser**: the
-  platform sets `strict-origin-when-cross-origin` on every response, over ours.
+  token paths arrive with `strict-origin-when-cross-origin`, over ours.
   The tokens stay safe because no token URL is ever a page, and the two HTML
   documents that can appear at one carry a `no-referrer` meta tag. The evidence
   and the rule are in the `security-headers.ts` module comment.

@@ -45,9 +45,12 @@
  * adds there, and a local production build sends `no-referrer` correctly. The
  * platform's own responses carry the same value too: `jitsu.au/<any path>` is a
  * 302 to the new host that never reaches this app, and it says
- * `strict-origin-when-cross-origin`. So the hosting layer sets that value on
- * every response and overrides ours. Taking the `/*` rule out of
- * `public/_headers` cannot change it, so do not try.
+ * `strict-origin-when-cross-origin`. So the hosting layer puts that value on
+ * responses, over ours. What cannot be told from outside, and Lovable does not
+ * document, is whether it is the platform's own default or our `/*` rule in
+ * `public/_headers` applied after the app; the redirect points at the former.
+ * Only removing the rule, publishing and re-checking would settle it, and the
+ * fix below does not depend on the answer.
  *
  * What keeps the tokens out of a `Referer` is therefore not this header. It is
  * that no token URL is ever a page: the email-settings link and the

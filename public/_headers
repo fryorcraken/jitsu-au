@@ -3,9 +3,9 @@
 # same values on every response the server itself builds.
 #
 # Cloudflare reads this file when it serves this project's assets (the live
-# `/assets/*` files carry the immutable rule below, so it is honoured). The
-# hosting layer then sets its own Referrer-Policy on every response, so the
-# token-path values here, like the middleware's, do not reach the browser: see
+# `/assets/*` files arrive with the immutable rule below, which fits it being
+# honoured). The hosting layer puts its own Referrer-Policy on the token paths
+# too, so the values here, like the middleware's, do not reach the browser: see
 # src/lib/security-headers.ts for what was checked and what protects the tokens
 # instead. Check a token path with `curl -I`, not `/`.
 #

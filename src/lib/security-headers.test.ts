@@ -217,3 +217,14 @@ describe("the HTML documents that can render at a token URL", () => {
     });
   }
 });
+
+describe("the offline card reaching installed apps", () => {
+  // The host serves offline.html with no cache-control, so a worker that
+  // precaches through the browser's HTTP cache can store the old copy, and the
+  // meta tag above would never reach an install. `reload` goes to the network.
+  const sw = readFileSync(join(process.cwd(), "public/sw.js"), "utf8");
+
+  it("precaches the shell past the browser's HTTP cache", () => {
+    expect(sw).toMatch(/new Request\(url, \{ cache: "reload" \}\)/);
+  });
+});
