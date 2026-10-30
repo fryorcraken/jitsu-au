@@ -24,6 +24,14 @@ function person(over: Partial<VCardPerson> = {}): VCardPerson {
   };
 }
 
+/** The day every card here is built on, so "still a minor" never drifts. */
+const NOW = new Date("2026-10-30T00:00:00Z");
+
+/** An account-holding minor: twelve on NOW. */
+function minor(over: Partial<VCardPerson> = {}): VCardPerson {
+  return person({ is_minor: true, date_of_birth: "2014-05-01", ...over });
+}
+
 /** The card's lines, unfolded, without the CRLFs. */
 function lines(card: string): string[] {
   return card.replace(/\r\n /g, "").split("\r\n").filter(Boolean);
@@ -123,16 +131,30 @@ describe("buildVCard", () => {
     );
   });
 
-  it("writes one number once, as the guardian's, wherever the family typed it", () => {
+  it("writes one number once, with every label it was typed under", () => {
     // An account-holding minor whose parent filled every field with their own
     // number. Three entries for one number would call it the child's mobile first.
     const card = buildVCard(
-      person({
-        is_minor: true,
+      minor({
         phone: "0400 000 003",
         guardian_phone: "0400000003",
         emergency_contact_phone: "0400 000 003",
       }),
+      NOW,
+    );
+    expect(contactLines(card).filter((l) => l.startsWith("TEL"))).toEqual([
+      "TEL;TYPE=X-Guardian and emergency:0400 000 003",
+    ]);
+  });
+
+  it("knows a number written internationally is the same number", () => {
+    const card = buildVCard(
+      minor({
+        phone: "0400 000 003",
+        guardian_phone: "+61 400 000 003",
+        emergency_contact_phone: null,
+      }),
+      NOW,
     );
     expect(contactLines(card).filter((l) => l.startsWith("TEL"))).toEqual([
       "TEL;TYPE=X-Guardian:0400 000 003",
@@ -141,11 +163,8 @@ describe("buildVCard", () => {
 
   it("labels a minor's email as the guardian's when it is the guardian's address", () => {
     const card = buildVCard(
-      person({
-        is_minor: true,
-        email: "parent@example.com",
-        guardian_email: "Parent@example.com",
-      }),
+      minor({ email: "parent@example.com", guardian_email: "Parent@example.com" }),
+      NOW,
     );
     expect(contactLines(card).filter((l) => l.startsWith("EMAIL"))).toEqual([
       "EMAIL;TYPE=X-Guardian:parent@example.com",
@@ -154,13 +173,13 @@ describe("buildVCard", () => {
 
   it("keeps a minor's own number and email beside their guardian's", () => {
     const card = buildVCard(
-      person({
-        is_minor: true,
+      minor({
         guardian_name: "Pat Lovelace",
         guardian_relationship: "Parent",
         guardian_phone: "0400 000 003",
         guardian_email: "parent@example.com",
       }),
+      NOW,
     );
     expect(contactLines(card)).toEqual([
       "TEL;TYPE=CELL:0400 000 001",
@@ -172,6 +191,30 @@ describe("buildVCard", () => {
     expect(lines(card).find((l) => l.startsWith("NOTE:"))).toContain(
       "Guardian: Pat Lovelace (Parent)",
     );
+  });
+
+  it("drops the guardian once a minor has turned 18, whatever the waiver tick says", () => {
+    const grownUp = { guardian_name: "Pat Lovelace", guardian_phone: "0400 000 003" };
+    // Signed at 17, and 18 today.
+    expect(buildVCard(minor({ ...grownUp, date_of_birth: "2008-10-30" }), NOW)).not.toContain(
+      "Guardian",
+    );
+    // The day before their birthday they are still 17.
+    expect(buildVCard(minor({ ...grownUp, date_of_birth: "2008-10-31" }), NOW)).toContain(
+      "TEL;TYPE=X-Guardian:0400 000 003",
+    );
+    // With no birthday on file, the tick is all there is to go on.
+    expect(buildVCard(minor({ ...grownUp, date_of_birth: null }), NOW)).toContain(
+      "TEL;TYPE=X-Guardian:0400 000 003",
+    );
+  });
+
+  it("keeps a dependant's guardian after they turn 18", () => {
+    const card = buildVCard(
+      person({ guardian_user_id: GUARDIAN, guardian_phone: "0400 000 003" }),
+      NOW,
+    );
+    expect(card).toContain("TEL;TYPE=X-Guardian:0400 000 003");
   });
 
   it("ignores guardian details on an adult's record", () => {

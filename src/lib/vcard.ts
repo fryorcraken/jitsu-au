@@ -19,6 +19,7 @@
 // carries how to reach somebody and nothing else. Medical notes, consents, the
 // student number and kit sizes stay on the person page.
 
+import { ageOn } from "@/lib/dates";
 import { isDependant } from "@/lib/household";
 import { escapeIcsText, foldIcsLine } from "@/lib/ics";
 import { profileFullName } from "@/lib/validation";
@@ -80,33 +81,58 @@ type ContactPoint = { value: string; type: string };
 /**
  * The phone numbers or emails to write, each at most once, in the order given.
  *
- * Anything that is also one of `guardians` is labelled Guardian whichever slot
- * it came in through, because a family usually types the same parent's number
- * into the child's own field, the guardian field and the emergency field. Three
- * entries for one number, the first calling it the child's mobile, is exactly
- * how a manager ends up believing they can ring a ten-year-old.
+ * A family usually types the same parent's number into the child's own field,
+ * the guardian field and the emergency field. Three entries for one number, the
+ * first calling it the child's mobile, is exactly how a manager ends up
+ * believing they can ring a ten-year-old. So a value written twice becomes one
+ * entry carrying every label it came in with ("Guardian and emergency"), and
+ * anything that is one of `guardians` is labelled Guardian whichever slot it
+ * came in through. `ownType` is for a value that is only the person's own.
  */
 function contactPoints(
-  entries: { value: string | null; type: string }[],
+  entries: { value: string | null; label: string | null }[],
   guardians: (string | null)[],
   key: (value: string) => string,
+  ownType: string,
 ): ContactPoint[] {
   const guardianKeys = new Set(guardians.map(clean).flatMap((g) => (g ? [key(g)] : [])));
-  const seen = new Set<string>();
-  const points: ContactPoint[] = [];
+  const byKey = new Map<string, { value: string; labels: string[] }>();
   for (const entry of entries) {
     const value = clean(entry.value);
     if (!value) continue;
     const k = key(value);
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    points.push({ value, type: guardianKeys.has(k) ? customType("Guardian") : entry.type });
+    if (!k) continue;
+    let point = byKey.get(k);
+    if (!point) {
+      point = { value, labels: guardianKeys.has(k) ? ["Guardian"] : [] };
+      byKey.set(k, point);
+    }
+    if (entry.label && !point.labels.includes(entry.label)) point.labels.push(entry.label);
   }
-  return points;
+  return [...byKey.values()].map(({ value, labels }) => ({
+    value,
+    type: labels.length
+      ? customType(labels.map((l, i) => (i === 0 ? l : l.toLowerCase())).join(" and "))
+      : ownType,
+  }));
 }
 
-/** Build the card. Lines are CRLF-separated and folded, ending in a CRLF. */
-export function buildVCard(p: VCardPerson): string {
+/**
+ * The digits that identify a phone number, so one number typed two ways is
+ * still one number. An Australian number written internationally drops its
+ * trunk 0 after the 61 ("+61 400 000 001" is "0400 000 001"), so that form is
+ * put back to the national one.
+ */
+function phoneKey(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 11 && digits.startsWith("61") ? `0${digits.slice(2)}` : digits;
+}
+
+/**
+ * Build the card. Lines are CRLF-separated and folded, ending in a CRLF.
+ * `now` decides whether somebody is still a minor.
+ */
+export function buildVCard(p: VCardPerson, now: Date = new Date()): string {
   const lines: string[] = ["BEGIN:VCARD", "VERSION:3.0"];
   const add = (line: string) => lines.push(foldIcsLine(line));
   const text = (value: string) => escapeIcsText(value);
@@ -124,21 +150,27 @@ export function buildVCard(p: VCardPerson): string {
 
   const dependant = isDependant(p);
   // Who the club reaches about this person, when that is not them. A dependant
-  // always has one (it is what makes them a dependant), whatever `is_minor`
-  // says; an account-holding minor has one on their waiver.
-  const hasGuardian = dependant || p.is_minor;
+  // always has one (it is what makes them a dependant), whatever their age. An
+  // account holder has one only while they are still a minor: `is_minor` is
+  // the tick on the waiver they signed, so somebody who signed at 17 still
+  // carries it at 20, and their parent's details do not belong in a manager's
+  // phone as the contact for an adult. Without a birthday the tick is all
+  // there is to go on.
+  const age = ageOn(p.date_of_birth, now);
+  const hasGuardian = dependant || (age === null ? p.is_minor : age < 18);
   const guardianPhone = hasGuardian ? p.guardian_phone : null;
   const guardianEmail = hasGuardian ? p.guardian_email : null;
 
   const phones = contactPoints(
     [
-      { value: p.phone, type: "CELL" },
-      { value: guardianPhone, type: customType("Guardian") },
-      { value: p.emergency_contact_phone, type: customType("Emergency") },
+      { value: p.phone, label: null },
+      { value: guardianPhone, label: "Guardian" },
+      { value: p.emergency_contact_phone, label: "Emergency" },
     ],
     // A dependant's own number is their account holder's.
     [guardianPhone, dependant ? p.phone : null],
-    (phone) => phone.replace(/\D/g, ""),
+    phoneKey,
+    "CELL",
   );
   for (const tel of phones) add(`TEL;TYPE=${tel.type}:${text(tel.value)}`);
 
@@ -146,13 +178,14 @@ export function buildVCard(p: VCardPerson): string {
     // No INTERNET type: it is 3.0's default anyway, and Android turns a type
     // it has no slot for into the label, so it could show up as "INTERNET".
     [
-      { value: p.email, type: "HOME" },
-      { value: guardianEmail, type: customType("Guardian") },
+      { value: p.email, label: null },
+      { value: guardianEmail, label: "Guardian" },
     ],
     // A dependant has no mailbox of their own: the one on file is the account
     // holder's, so it is labelled as theirs rather than passed off as the child's.
     [guardianEmail, dependant ? p.email : null],
     (email) => email.toLowerCase(),
+    "HOME",
   );
   for (const email of emails) add(`EMAIL;TYPE=${email.type}:${text(email.value)}`);
 

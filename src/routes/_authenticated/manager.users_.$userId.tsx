@@ -81,8 +81,9 @@ function downloadContactCard(detail: Detail, userId: string) {
   const card = buildVCard({
     ...detail.profile,
     // A dependant's record often has no guardian name typed on it, but the
-    // household always knows who holds their account.
-    guardian_name: detail.profile.guardian_name ?? detail.household.guardian?.name ?? null,
+    // household always knows who holds their account. `||` rather than `??`,
+    // because a blank name on the record is no name either.
+    guardian_name: detail.profile.guardian_name?.trim() || detail.household.guardian?.name || null,
     email: detail.user.email,
     // The host being browsed, like the calendar link on /account: a card saved
     // from a preview or a local stack opens that stack's record, not a
@@ -99,12 +100,6 @@ function downloadContactCard(detail: Detail, userId: string) {
   // Not revoked straight away: Safari and an installed app hand the download
   // off after the click returns, and a revoked URL gives them an empty file.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  // Every person has an email, so none here means the lookup failed. The card
-  // still has their phone and address, but it will sit in a phone for years, so
-  // say what it is missing rather than let it look complete.
-  if (!detail.user.email) {
-    toast.warning("Saved without an email, because we could not look it up. Reload to try again.");
-  }
 }
 
 /** A copy of `record` without `key`. */
@@ -912,6 +907,18 @@ function ManagerUserPage() {
           </Button>
         </div>
       </div>
+
+      {/* Every person has an email, so none here means the lookup failed. A
+          contact card downloaded now would still have their phone and address
+          and sit in somebody's phone for years looking complete, so this says
+          so before the click, and stays on screen rather than fading as a
+          toast would. */}
+      {!summary.email ? (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+          We could not look up their email, so a contact card downloaded now will not include one.
+          Reload the page to try again.
+        </p>
+      ) : null}
 
       <EmailCard
         userId={userId}
