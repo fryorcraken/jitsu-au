@@ -1800,6 +1800,7 @@ One row is one counted use of something limited:
 | --------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------- |
 | `form:<interest\|contact\|waiver\|code_of_conduct>` | the network: an IPv4 address, or an IPv6 /64 | `client_submission_id` (none for the code of conduct) | submissions of that form from that network     |
 | `email:recipient`                                   | SHA-256 of the normalized address            | the email's idempotency key                           | confirmations to one typed-in address          |
+| `email:visitor-network`                             | the network the submission came from         | the email's idempotency key                           | confirmations caused from one network          |
 | `email:visitor-total`                               | `club`                                       | the email's idempotency key                           | confirmations to typed-in addresses altogether |
 | `email:manager:<lead\|message\|waiver>`             | `club`                                       | the submission's id                                   | managers' per-submission copies of that kind   |
 | `email:manager-paused:<kind>`                       | `club`                                       | none                                                  | "we've paused these" notes, at most one a day  |
@@ -1823,7 +1824,14 @@ which network submitted what), and then:
 - Under both, it inserts the row and returns `allowed = true`.
 
 A NULL (or omitted) limit means none over that window; the optional arguments
-carry `DEFAULT NULL` so the generated types print them as optional. The limits
+carry `DEFAULT NULL` so the generated types print them as optional.
+
+**`public.release_rate_limit(_bucket, _dedupe_key)`** (service role only)
+deletes the one row that key claimed in that bucket, and nothing else; a key
+that claimed nothing is a no-op. An email counts against two or three caps
+before it is sent, and this is how the ones already claimed are given back
+when a later cap refuses it or the send fails, so an address never loses its
+allowance to an email that did not go. The limits
 themselves and what a refused person is told are app code, in
 `src/lib/rate-limit.ts`; the calls, and the rule that every one of them fails
 open, are `src/lib/rate-limit.server.ts`. What this promises is checked against

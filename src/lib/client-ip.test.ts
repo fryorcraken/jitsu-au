@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientIp } from "./client-ip";
+import { clientIp, isCloudflareWorkerAddress } from "./client-ip";
 
 const headers =
   (h: Record<string, string>) =>
@@ -31,5 +31,32 @@ describe("clientIp", () => {
   it("is null when no header names an address", () => {
     expect(clientIp(headers({}))).toBeNull();
     expect(clientIp(headers({ "x-forwarded-for": " , ", "cf-connecting-ip": " " }))).toBeNull();
+  });
+  it("does not take Cloudflare's own Worker address for the visitor's", () => {
+    // A request one Worker makes to another arrives with cf-connecting-ip set
+    // to the Worker's address. Trusting that would count every visitor as one
+    // network and record the proxy on every waiver.
+    expect(
+      clientIp(
+        headers({
+          "cf-connecting-ip": "2a06:98c0:3600::103",
+          "x-forwarded-for": "203.0.113.7",
+        }),
+      ),
+    ).toBe("203.0.113.7");
+    // ...though with nothing better to go on, it is still an address.
+    expect(clientIp(headers({ "cf-connecting-ip": "2a06:98c0:3600::103" }))).toBe(
+      "2a06:98c0:3600::103",
+    );
+  });
+});
+
+describe("isCloudflareWorkerAddress", () => {
+  it("covers 2a06:98c0::/29 and nothing either side of it", () => {
+    expect(isCloudflareWorkerAddress("2a06:98c0:3600::103")).toBe(true);
+    expect(isCloudflareWorkerAddress("2A06:98C7::1")).toBe(true);
+    expect(isCloudflareWorkerAddress("2a06:98c8::1")).toBe(false);
+    expect(isCloudflareWorkerAddress("2a06:98bf::1")).toBe(false);
+    expect(isCloudflareWorkerAddress("203.0.113.7")).toBe(false);
   });
 });

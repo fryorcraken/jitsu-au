@@ -53,18 +53,25 @@ export const FORM_LIMITS: Record<PublicForm, FormLimit> = {
  *
  * - `perRecipient`: to any one typed-in address. Six covers a parent signing
  *   for three children plus themselves, with an interest form besides.
- * - `visitorTotal`: to typed-in addresses altogether, about fifty times the
- *   busiest real day. This is the one that protects the sending domain when
- *   many machines attack at once.
+ * - `perNetwork`: to typed-in addresses, from submissions on any one network.
+ *   150 covers an O-Week stall of 60 newcomers who each register and sign
+ *   (120 emails) on one campus network.
+ * - `visitorTotal`: to typed-in addresses altogether. Twice `perNetwork`, so no
+ *   single network, however it uses its own limits, can spend it alone and
+ *   leave every real visitor elsewhere without a confirmation; it takes a flood
+ *   from several networks at once, which is the case it exists for, to protect
+ *   the sending domain.
  * - `managerPerKind`: manager copies of each kind (new lead, new message, new
  *   waiver). Counted per submission, not per manager.
  *
  * Past a cap the submission is still saved and still shown on the manager
- * screens; only the email is held back.
+ * screens; only the email is held back, and every slot that email had already
+ * claimed is given back.
  */
 export const EMAIL_CAPS = {
   perRecipient: 6,
-  visitorTotal: 100,
+  perNetwork: 150,
+  visitorTotal: 300,
   managerPerKind: 20,
 } as const;
 
@@ -75,6 +82,7 @@ export type ManagerNoticeKind = "lead" | "message" | "waiver";
 export const BUCKETS = {
   form: (form: PublicForm) => `form:${form}`,
   recipient: "email:recipient",
+  visitorNetwork: "email:visitor-network",
   visitorTotal: "email:visitor-total",
   manager: (kind: ManagerNoticeKind) => `email:manager:${kind}`,
   managerPaused: (kind: ManagerNoticeKind) => `email:manager-paused:${kind}`,

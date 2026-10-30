@@ -143,7 +143,7 @@ function RegisterInterest() {
             <p className="mt-1 text-sm text-muted-foreground">
               {done.emailed
                 ? "We'll email you the link and you can sign before you come, or we'll sort it at the gym."
-                : "You can sign with the button above any time before you come, or we'll sort it at the gym."}{" "}
+                : "Sign now with the button above, or later from the Sign waiver link at the bottom of any page, or we'll sort it at the gym."}{" "}
               Either way, just turn up to any beginners class ({beginnerDaysShort}). Your first two
               are free.
             </p>

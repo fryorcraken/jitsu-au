@@ -81,10 +81,27 @@ BEGIN
     RAISE EXCEPTION 'day-old hits were not deleted';
   END IF;
 
+  -- A slot given back is free again, and only that key's slot goes.
+  SELECT * INTO r FROM public.claim_rate_limit('test:release', 'addr', 'mail-1', NULL, 2);
+  SELECT * INTO r FROM public.claim_rate_limit('test:release', 'addr', 'mail-2', NULL, 2);
+  SELECT * INTO r FROM public.claim_rate_limit('test:release', 'addr', 'mail-3', NULL, 2);
+  IF r.allowed THEN RAISE EXCEPTION 'a third email got past a cap of two'; END IF;
+  PERFORM public.release_rate_limit('test:release', 'mail-1');
+  IF (SELECT count(*) FROM public.rate_limit_hits WHERE bucket = 'test:release') <> 1 THEN
+    RAISE EXCEPTION 'release did not remove exactly the one slot';
+  END IF;
+  SELECT * INTO r FROM public.claim_rate_limit('test:release', 'addr', 'mail-3', NULL, 2);
+  IF NOT r.allowed THEN RAISE EXCEPTION 'a released slot was not free again'; END IF;
+  PERFORM public.release_rate_limit('test:release', 'never-claimed');
+
   -- Nobody but the server can call it or read what it keeps.
   IF has_function_privilege('anon', 'public.claim_rate_limit(text, text, text, integer, integer)', 'EXECUTE')
      OR has_function_privilege('authenticated', 'public.claim_rate_limit(text, text, text, integer, integer)', 'EXECUTE') THEN
     RAISE EXCEPTION 'a client role can call claim_rate_limit';
+  END IF;
+  IF has_function_privilege('anon', 'public.release_rate_limit(text, text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.release_rate_limit(text, text)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'a client role can call release_rate_limit';
   END IF;
 END
 $$;

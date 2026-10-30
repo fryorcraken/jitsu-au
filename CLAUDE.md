@@ -275,10 +275,13 @@ Read `src/routes/README.md` before touching routes. Key points:
 - **Every write path that accepts a caller who is not signed in is rate
   limited per network** (#52): `submitInterest`, `submitContact`,
   `submitWaiverWithPdf` and `acceptCodeOfConduct` each call `limitPublicForm`
-  (`src/lib/rate-limit.server.ts`) right after the honeypot, passing their
-  `client_submission_id` so a retry is not counted twice. A new public write
+  (`src/lib/rate-limit.server.ts`) before they write anything, passing their
+  `client_submission_id` so a retry is not counted twice. The first three do it
+  right after the honeypot; the code of conduct only once it knows the signer,
+  and only for one who is not signed in. A new public write
   path does the same, with a `FORM_LIMITS` entry in `src/lib/rate-limit.ts`;
-  any email it sends to a typed-in address goes through `claimVisitorEmail`.
+  any email it sends to a typed-in address goes through `claimVisitorEmail`,
+  and gives its slots back with `releaseVisitorEmail` if the send fails.
   Both fail open. `src/lib/public-write-limits.test.ts` holds each path to it.
 
 ## Supabase clients — pick the right one

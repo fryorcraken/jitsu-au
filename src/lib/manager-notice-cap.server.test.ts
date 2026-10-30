@@ -49,8 +49,15 @@ describe("mayNotifyManagers", () => {
       expect(p.subject).toBe("Lots of waivers signed today, so we've paused those emails");
       expect(p.html).toContain("https://utsjitsu.com.au/manager/waivers");
       expect(p.text).toContain("More than 20 waivers have been signed");
-      // Approving a bot's waiver opens an account and emails a stranger.
-      expect(p.text).toMatch(/Don.t approve anyone you don.t recognise/);
+      // An O-Week stall reaches the cap with real newcomers, whom no manager
+      // recognises yet, so the note must not call them a bot or tell managers
+      // to turn strangers away. It says what approving does instead.
+      expect(p.text).toMatch(/busy day/);
+      expect(p.text).not.toMatch(/recognise/);
+      expect(p.text).toMatch(/Approving a waiver opens an account and emails the person/);
+      // The one-a-day note says it is one a day, so a second busy spell is
+      // not mistaken for the emails having resumed.
+      expect(p.text).toMatch(/won.t send another one/);
       expect(p.html).not.toContain("—");
     }
     expect(new Set(payloads.map((p) => p.idempotency_key)).size).toBe(2);

@@ -67,7 +67,8 @@ account emails too, with nothing on any screen to say so. Now:
 | Cap                                                                                     | Limit (rolling 24 hours) | Past it                                                                  |
 | --------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------ |
 | Interest confirmation, contact acknowledgement, waiver confirmation, to any one address | 6                        | that email is not sent                                                   |
-| The same three, to typed-in addresses altogether                                        | 100                      | that email is not sent                                                   |
+| The same three, from submissions on any one network                                     | 150                      | that email is not sent                                                   |
+| The same three, to typed-in addresses altogether                                        | 300                      | that email is not sent                                                   |
 | Managers' copy of each kind (new lead, new message, new waiver), counted per submission | 20 of each kind          | one "we've paused these" note to each manager, then nothing of that kind |
 
 The numbers and their reasons are `EMAIL_CAPS` in `src/lib/rate-limit.ts`;
@@ -84,17 +85,32 @@ counting is `public.claim_rate_limit` (`docs/database.md`, `rate_limit_hits`).
 - **Six per address** covers a parent signing for three children and themselves
   in an evening, with an interest form besides. It stops a bot pointing the
   club at one stranger. The address is counted by its SHA-256, never stored.
-- **A hundred altogether** is about fifty times the busiest real day. It is the
-  one that protects the domain when many machines attack at once, which no
-  per-network limit can see.
+- **150 per network** covers an O-Week stall of 60 newcomers who each register
+  and sign on one campus network (120 emails).
+- **300 altogether is twice that on purpose.** No single network, however it
+  spends its own form limits, can use up the club-wide allowance and leave
+  every real visitor elsewhere without a confirmation for a day: that takes a
+  flood from several networks at once, which is the case this cap is for, to
+  protect the domain. (It was 100 with no per-network share at first, and one
+  machine inside its own form limits could spend it in an hour.)
 - **The per-address cap is claimed first**, so a flood aimed at one address
-  stops there and does not also spend the allowance real visitors' emails come
-  out of.
+  stops there and spends nothing else.
+- **A slot is only spent on an email that went.** If a later cap refuses, or
+  the send fails, every slot that email claimed is given back
+  (`releaseVisitorEmail`, `public.release_rate_limit`), so a parent signing
+  for their children during a flood, or while the email provider is down, does
+  not lose the day's allowance to emails they never received.
 - **The managers get one note, not silence.** The copy that reaches the cap is
   replaced by "Lots of new sign-ups today, so we've paused those emails"
-  (`manager-notices-paused.tsx`), saying where the rest are; the waiver one
-  adds not to approve anyone they do not recognise. After it, nothing of that
-  kind until the day's count is back under the cap. We chose this over folding
+  (`manager-notices-paused.tsx`), saying where the rest are. It does not call
+  them a bot: 20 waivers in a day is also what a good O-Week stall looks like,
+  and every newcomer is somebody a manager does not recognise yet. So it says
+  it could be either, and the waiver one says what approving does (opens an
+  account, emails the person) rather than telling managers to turn strangers
+  away. After it, nothing of that kind until the day's count is back under the
+  cap, and at most one note a day: the note says so, so a second busy spell
+  within the day is not mistaken for the emails having resumed. We chose this
+  over folding
   these emails into the nightly digest: on a normal day a real lead or a real
   question should reach a manager now, not at 9am tomorrow.
 - **Retries are free.** Each claim is keyed on the email's idempotency key (and

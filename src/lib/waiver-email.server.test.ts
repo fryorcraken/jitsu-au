@@ -5,13 +5,18 @@ import { sendWaiverEmails } from "./waiver-email.server";
 
 const { sendLovableEmail } = vi.hoisted(() => ({ sendLovableEmail: vi.fn() }));
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
-const { claimVisitorEmail, claimManagerNotice } = vi.hoisted(() => ({
+const { claimVisitorEmail, claimManagerNotice, releaseVisitorEmail } = vi.hoisted(() => ({
   claimVisitorEmail: vi.fn(),
   claimManagerNotice: vi.fn(),
+  releaseVisitorEmail: vi.fn(),
 }));
 // The caps (#52). Open by default, so every other test here sees the sends
 // they always did; the cap tests below close one or the other.
-vi.mock("@/lib/rate-limit.server", () => ({ claimVisitorEmail, claimManagerNotice }));
+vi.mock("@/lib/rate-limit.server", () => ({
+  claimVisitorEmail,
+  claimManagerNotice,
+  releaseVisitorEmail,
+}));
 
 // Build a minimal fake service-role client good enough for the code paths under
 // test: `.from("user_roles").select().eq()` and `.auth.admin.getUserById()`.
@@ -250,5 +255,23 @@ describe("sendWaiverEmails", () => {
     expect(claimManagerNotice).toHaveBeenCalledWith(admin, "waiver", "w10");
     expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).toEqual(["ada@example.com"]);
     expect(result.memberEmailed).toBe(true);
+  });
+  it("gives the member's slots back when their confirmation fails to send", async () => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockRejectedValue(new Error("provider down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const admin = fakeAdmin({ roles: [] });
+
+    const result = await sendWaiverEmails({
+      waiverId: "w11",
+      memberName: "Ada Lovelace",
+      memberGreetingName: "Addy",
+      memberEmail: "ada@example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin,
+    });
+
+    expect(releaseVisitorEmail).toHaveBeenCalledWith(admin, "waiver-member-w11");
+    expect(result.memberEmailed).toBe(false);
   });
 });

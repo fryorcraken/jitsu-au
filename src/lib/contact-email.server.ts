@@ -14,7 +14,7 @@ import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirma
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { mayNotifyManagers } from "@/lib/manager-notice-cap.server";
-import { claimVisitorEmail } from "@/lib/rate-limit.server";
+import { claimVisitorEmail, releaseVisitorEmail } from "@/lib/rate-limit.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
@@ -64,24 +64,60 @@ export async function sendContactEmails({
   const sendUrl = process.env.LOVABLE_SEND_URL;
 
   // The reply-to is resolved once, before rendering, so the footer's promise
-  // and the header agree (see `clubReplyTo`).
-  const [replyTo, notifyRecipients] = await Promise.all([
+  // and the header agree (see `clubReplyTo`). The acknowledgement's cap is
+  // asked alongside it, and the managers' straight after, unawaited until the
+  // acknowledgement is dealt with: the visitor waits on all of this.
+  const senderKey = `contact-sender-${messageId}`;
+  const [replyTo, notifyRecipients, mayAcknowledge] = await Promise.all([
     clubReplyTo(admin),
     getManagerEmails(admin),
+    claimVisitorEmail(admin, email, senderKey),
   ]);
-  const senderEl = React.createElement(ContactConfirmationEmail, {
-    siteName: SITE_NAME,
-    siteUrl: SITE_ORIGIN,
-    name,
-    subject,
-    message,
-    phoneDisplay: VENUE_PHONE_DISPLAY,
-    phoneTel: VENUE_PHONE_TEL,
-    whatsappUrl: WHATSAPP_URL,
-    replyTo,
+  const notifyManagersP = mayNotifyManagers(admin, {
+    kind: "message",
+    submissionKey: messageId,
+    recipients: notifyRecipients,
+    screenUrl: MANAGER_CONTACT_URL,
+    apiKey,
+    sendUrl,
   });
-  const senderHtml = await render(senderEl);
-  const senderText = await render(senderEl, { plainText: true });
+
+  const sent: string[] = [];
+
+  // Acknowledgement to whoever wrote in, unless a cap held it back.
+  if (mayAcknowledge) {
+    const senderEl = React.createElement(ContactConfirmationEmail, {
+      siteName: SITE_NAME,
+      siteUrl: SITE_ORIGIN,
+      name,
+      subject,
+      message,
+      phoneDisplay: VENUE_PHONE_DISPLAY,
+      phoneTel: VENUE_PHONE_TEL,
+      whatsappUrl: WHATSAPP_URL,
+      replyTo,
+    });
+    try {
+      await sendEmail({
+        apiKey,
+        sendUrl,
+        to: email,
+        // Fixed wording. This is the one email the site sends to an address
+        // nobody has verified, so the subject line stays out of the sender's
+        // hands: `name` is whatever they typed into a public form.
+        subject: `We got your message at ${SITE_NAME}`,
+        html: await render(senderEl),
+        text: await render(senderEl, { plainText: true }),
+        idempotencyKey: senderKey,
+        replyTo,
+      });
+      sent.push(email);
+    } catch (e) {
+      console.error(`[contact-email] failed to email the sender:`, e);
+      // It did not go, so it must not count against that address's day.
+      await releaseVisitorEmail(admin, senderKey);
+    }
+  }
 
   const managerEl = React.createElement(ContactNotificationEmail, {
     siteName: SITE_NAME,
@@ -93,40 +129,7 @@ export async function sendContactEmails({
   });
   const managerHtml = await render(managerEl);
   const managerText = await render(managerEl, { plainText: true });
-
-  const sent: string[] = [];
-
-  // Acknowledgement to whoever wrote in.
-  const senderKey = `contact-sender-${messageId}`;
-  if (await claimVisitorEmail(admin, email, senderKey)) {
-    try {
-      await sendEmail({
-        apiKey,
-        sendUrl,
-        to: email,
-        // Fixed wording. This is the one email the site sends to an address
-        // nobody has verified, so the subject line stays out of the sender's
-        // hands: `name` is whatever they typed into a public form.
-        subject: `We got your message at ${SITE_NAME}`,
-        html: senderHtml,
-        text: senderText,
-        idempotencyKey: senderKey,
-        replyTo,
-      });
-      sent.push(email);
-    } catch (e) {
-      console.error(`[contact-email] failed to email the sender:`, e);
-    }
-  }
-
-  const notifyManagers = await mayNotifyManagers(admin, {
-    kind: "message",
-    submissionKey: messageId,
-    recipients: notifyRecipients,
-    screenUrl: MANAGER_CONTACT_URL,
-    apiKey,
-    sendUrl,
-  });
+  const notifyManagers = await notifyManagersP;
 
   // The message itself, to each manager. Reply-To is the visitor, so a
   // manager's own "Reply" button answers them rather than the noreply sender.

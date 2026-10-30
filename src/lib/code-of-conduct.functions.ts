@@ -369,13 +369,6 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, accepted_at: null };
 
-    // Public in the sense that matters (#52): a link from any waiver
-    // confirmation is enough, no login, and every agreement is a new row. The
-    // form carries no submission id, so each press counts; at the limit that
-    // allows, nobody real ever notices.
-    const { limitPublicForm } = await import("@/lib/rate-limit.server");
-    await limitPublicForm("code_of_conduct", null);
-
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
 
     // Refuse to file an agreement against text the person did not see. The page
@@ -393,6 +386,19 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
       throw new Error(
         "We couldn't tell who you are. Open the link from your email, or sign in to your account, then try again.",
       );
+    }
+
+    // Public in the sense that matters (#52): a link from any waiver
+    // confirmation is enough, no login, and every agreement is a new row. So
+    // somebody who is NOT signed in is limited per network, like the other
+    // public forms. Counted only here, after the stale-version and who-are-you
+    // refusals, so a press that was going to be turned away anyway (or a bot
+    // sending junk tokens) spends nothing of the network's allowance; and a
+    // signed-in member is not counted at all. The page does not retry by
+    // itself, so there is no submission id to pass: each press is a press.
+    if (!signer.signedIn) {
+      const { limitPublicForm } = await import("@/lib/rate-limit.server");
+      await limitPublicForm("code_of_conduct", null);
     }
 
     const getHeader = await requestHeaderGetter();

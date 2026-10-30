@@ -16,14 +16,14 @@ export const PAUSED_NOTICE_COPY: Record<
     heading: "We've paused the email for each new sign-up",
     happened: "people have registered interest",
     where: "Users page",
-    advice: "Real people are in there too, so have a look when you get a chance.",
+    advice: "Have a look when you get a chance: on a busy day they are all real people.",
   },
   message: {
     subject: "Lots of contact messages today, so we've paused those emails",
     heading: "We've paused the email for each new message",
     happened: "contact messages have come in",
     where: "contact inbox",
-    advice: "Some may be real questions, so have a look when you get a chance.",
+    advice: "Have a look when you get a chance: some may be real questions waiting for an answer.",
   },
   waiver: {
     subject: "Lots of waivers signed today, so we've paused those emails",
@@ -31,6 +31,6 @@ export const PAUSED_NOTICE_COPY: Record<
     happened: "waivers have been signed",
     where: "Waivers page",
     advice:
-      "Don't approve anyone you don't recognise. Approving a waiver opens an account and emails the person.",
+      "Look through them before approving. Approving a waiver opens an account and emails the person, so leave any that look made up (nonsense names, throwaway addresses) for now.",
   },
 };

@@ -14,7 +14,7 @@ import { InterestConfirmationEmail } from "@/lib/email-templates/interest-confir
 import { InterestNotificationEmail } from "@/lib/email-templates/interest-notification";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { mayNotifyManagers } from "@/lib/manager-notice-cap.server";
-import { claimVisitorEmail } from "@/lib/rate-limit.server";
+import { claimVisitorEmail, releaseVisitorEmail } from "@/lib/rate-limit.server";
 import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 
@@ -86,35 +86,65 @@ export async function sendInterestEmails({
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
   const applicantKey = `interest-applicant-${registrationId}`;
-  const mayEmailApplicant = await claimVisitorEmail(admin, email, applicantKey);
+  const [mayEmailApplicant, notifyRecipients] = await Promise.all([
+    claimVisitorEmail(admin, email, applicantKey),
+    getManagerEmails(admin),
+  ]);
+  // The managers' cap is independent of the applicant's, so it is asked now
+  // and only awaited once the applicant's email is dealt with: the visitor is
+  // waiting on this whole function before their screen moves on.
+  const notifyManagersP = mayNotifyManagers(admin, {
+    kind: "lead",
+    submissionKey: registrationId,
+    recipients: notifyRecipients,
+    screenUrl: MANAGER_DASHBOARD_URL,
+    apiKey,
+    sendUrl,
+  });
 
-  // Mint the proof-of-click token that rides on the applicant's waiver link.
-  // Best-effort: if minting fails they still get a working (unverified) prefill
-  // link, which is exactly the behaviour before verification existed. Not
-  // minted at all for an email that is not going out.
-  let verificationToken: string | null = null;
+  const sent: string[] = [];
+  let applicantEmailed = false;
+
+  // Confirmation to the applicant, unless a cap held it back, in which case
+  // there is nothing to mint or render either.
   if (mayEmailApplicant) {
+    // Mint the proof-of-click token that rides on the applicant's waiver link.
+    // Best-effort: if minting fails they still get a working (unverified)
+    // prefill link, which is exactly the behaviour before verification existed.
+    let verificationToken: string | null = null;
     try {
       const { mintVerificationToken } = await import("@/lib/email-verification.server");
       verificationToken = await mintVerificationToken(admin, { email, purpose: "interest" });
     } catch (e) {
       console.error("[interest-email] could not mint a verification token:", e);
     }
+
+    const applicantEl = React.createElement(InterestConfirmationEmail, {
+      siteName: SITE_NAME,
+      siteUrl: SITE_ORIGIN,
+      name,
+      waiverUrl: buildWaiverUrl({ name, email, phone, token: verificationToken }),
+    });
+    try {
+      await sendEmail({
+        apiKey,
+        sendUrl,
+        to: email,
+        subject: `You're on the list at ${SITE_NAME}. Sign your waiver next`,
+        html: await render(applicantEl),
+        text: await render(applicantEl, { plainText: true }),
+        idempotencyKey: applicantKey,
+        // Nothing in this email offers a reply, so only the header needs it.
+        replyTo: await clubReplyTo(admin),
+      });
+      sent.push(email);
+      applicantEmailed = true;
+    } catch (e) {
+      console.error(`[interest-email] failed to email the applicant:`, e);
+      // It did not go, so it must not count against that address's day.
+      await releaseVisitorEmail(admin, applicantKey);
+    }
   }
-
-  const waiverUrl = buildWaiverUrl({ name, email, phone, token: verificationToken });
-
-  const applicantEl = React.createElement(InterestConfirmationEmail, {
-    siteName: SITE_NAME,
-    siteUrl: SITE_ORIGIN,
-    name,
-    waiverUrl,
-  });
-  const [applicantHtml, notifyRecipients] = await Promise.all([
-    render(applicantEl),
-    getManagerEmails(admin),
-  ]);
-  const applicantText = await render(applicantEl, { plainText: true });
 
   const managerEl = React.createElement(InterestNotificationEmail, {
     siteName: SITE_NAME,
@@ -126,39 +156,7 @@ export async function sendInterestEmails({
   });
   const managerHtml = await render(managerEl);
   const managerText = await render(managerEl, { plainText: true });
-
-  const sent: string[] = [];
-  let applicantEmailed = false;
-
-  // Confirmation to the applicant.
-  if (mayEmailApplicant) {
-    try {
-      await sendEmail({
-        apiKey,
-        sendUrl,
-        to: email,
-        subject: `You're on the list at ${SITE_NAME}. Sign your waiver next`,
-        html: applicantHtml,
-        text: applicantText,
-        idempotencyKey: applicantKey,
-        // Nothing in this email offers a reply, so only the header needs it.
-        replyTo: await clubReplyTo(admin),
-      });
-      sent.push(email);
-      applicantEmailed = true;
-    } catch (e) {
-      console.error(`[interest-email] failed to email the applicant:`, e);
-    }
-  }
-
-  const notifyManagers = await mayNotifyManagers(admin, {
-    kind: "lead",
-    submissionKey: registrationId,
-    recipients: notifyRecipients,
-    screenUrl: MANAGER_DASHBOARD_URL,
-    apiKey,
-    sendUrl,
-  });
+  const notifyManagers = await notifyManagersP;
 
   // New-lead notification to each manager, replying to the lead (the same
   // Reply-To rule as the contact form; interestSchema validated the address).

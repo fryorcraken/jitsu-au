@@ -37,15 +37,37 @@ vi.mock("@tanstack/react-start", () => {
   return { createServerFn, createMiddleware: chain, useServerFn: chain };
 });
 
-const { limitPublicForm, adminFrom, createClient, sendInterestEmails } = vi.hoisted(() => ({
+const {
+  limitPublicForm,
+  adminFrom,
+  createClient,
+  sendInterestEmails,
+  getUser,
+  getUserById,
+  lookupVerificationToken,
+  requestHeaders,
+} = vi.hoisted(() => ({
   limitPublicForm: vi.fn(),
   adminFrom: vi.fn(),
   createClient: vi.fn(),
   sendInterestEmails: vi.fn(),
+  getUser: vi.fn(),
+  getUserById: vi.fn(),
+  lookupVerificationToken: vi.fn(),
+  requestHeaders: {} as Record<string, string>,
 }));
 vi.mock("@/lib/rate-limit.server", () => ({ limitPublicForm }));
 vi.mock("@/integrations/supabase/client.server", () => ({
-  supabaseAdmin: { from: adminFrom, rpc: adminFrom, storage: { from: adminFrom } },
+  supabaseAdmin: {
+    from: adminFrom,
+    rpc: adminFrom,
+    storage: { from: adminFrom },
+    auth: { getUser, admin: { getUserById } },
+  },
+}));
+vi.mock("@/lib/email-verification.server", () => ({ lookupVerificationToken }));
+vi.mock("@/lib/request-headers", () => ({
+  requestHeaderGetter: async () => (name: string) => requestHeaders[name],
 }));
 vi.mock("@supabase/supabase-js", () => ({ createClient }));
 vi.mock("@/lib/interest-email.server", () => ({ sendInterestEmails }));
@@ -104,16 +126,17 @@ async function handler(name: "interest" | "contact" | "waiver" | "code_of_conduc
   return (await import("./code-of-conduct.functions")).acceptCodeOfConduct;
 }
 
+// The code of conduct is not here: it is limited only once it knows who is
+// signing, so it has its own block below.
 const cases = [
   { form: "interest", data: interest, submissionId: SUBMISSION },
   { form: "contact", data: contact, submissionId: SUBMISSION },
   { form: "waiver", data: waiver, submissionId: SUBMISSION },
-  // The code-of-conduct form carries no submission id, so every press counts.
-  { form: "code_of_conduct", data: codeOfConduct, submissionId: null },
 ] as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const k of Object.keys(requestHeaders)) delete requestHeaders[k];
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => {
@@ -161,5 +184,77 @@ describe("an interest registration under its limit", () => {
 
     await expect(fn.run(interest)).resolves.toEqual({ ok: true, duplicate: true, emailed: false });
     expect(sendInterestEmails).not.toHaveBeenCalled();
+  });
+});
+
+const MEMBER = "aaaaaaaa-0000-4000-8000-000000000001";
+
+/**
+ * Just enough of the club for an agreement to get as far as being filed:
+ * version 1 live, a profile for the member, and a recorded insert.
+ */
+function clubWithCodeOfConduct() {
+  const insert = vi.fn().mockResolvedValue({ error: null });
+  const rows: Record<string, unknown[]> = {
+    code_of_conduct_versions: [
+      { version: 1, asks_reagreement: true, required_version: 1, is_current: true },
+    ],
+    profiles: [{ first_name: "Ada", last_name: "Lovelace", middle_name: "", preferred_name: "" }],
+    email_verification_tokens: [],
+  };
+  adminFrom.mockImplementation((table: string) => {
+    const result = { data: rows[table] ?? [], error: null };
+    const q: Record<string, unknown> = {
+      select: () => q,
+      eq: () => q,
+      update: () => q,
+      insert,
+      maybeSingle: async () => ({ data: (rows[table] ?? [])[0] ?? null, error: null }),
+      then: (ok: (v: unknown) => unknown, ko: (e: unknown) => unknown) =>
+        Promise.resolve(result).then(ok, ko),
+    };
+    return q;
+  });
+  getUserById.mockResolvedValue({ data: { user: { email: "ada@example.com" } } });
+  lookupVerificationToken.mockResolvedValue({
+    id: "t1",
+    user_id: MEMBER,
+    email: "ada@example.com",
+  });
+  return { insert };
+}
+
+describe("a code-of-conduct agreement", () => {
+  it("from an emailed link is refused over its network's limit, before it is filed", async () => {
+    const { insert } = clubWithCodeOfConduct();
+    limitPublicForm.mockRejectedValue(new Error(REFUSAL));
+    const fn = (await handler("code_of_conduct")) as unknown as Runnable;
+
+    await expect(fn.run(codeOfConduct)).rejects.toThrow(REFUSAL);
+
+    // No submission id: the page does not retry by itself, so a press is a press.
+    expect(limitPublicForm).toHaveBeenCalledWith("code_of_conduct", null);
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("that was going to be refused anyway spends nothing of the network's allowance", async () => {
+    // A tab left open across a manager's republish, or a bot sending junk:
+    // turned away by the version check, and never counted.
+    clubWithCodeOfConduct();
+    const fn = (await handler("code_of_conduct")) as unknown as Runnable;
+
+    await expect(fn.run({ ...codeOfConduct, version: 2 })).rejects.toThrow(/updated/);
+    expect(limitPublicForm).not.toHaveBeenCalled();
+  });
+
+  it("from a signed-in member is not limited at all", async () => {
+    const { insert } = clubWithCodeOfConduct();
+    requestHeaders.authorization = "Bearer session-token";
+    getUser.mockResolvedValue({ data: { user: { id: MEMBER, email: "ada@example.com" } } });
+    const fn = (await handler("code_of_conduct")) as unknown as Runnable;
+
+    await expect(fn.run({ ...codeOfConduct, token: "" })).resolves.toMatchObject({ ok: true });
+    expect(limitPublicForm).not.toHaveBeenCalled();
+    expect(insert).toHaveBeenCalledOnce();
   });
 });

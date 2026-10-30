@@ -11,6 +11,7 @@ import {
   claimRateLimit,
   claimVisitorEmail,
   enforcePublicFormLimit,
+  releaseVisitorEmail,
 } from "./rate-limit.server";
 import { EMAIL_CAPS, FORM_LIMITS } from "./rate-limit";
 
@@ -18,7 +19,9 @@ type Reply = { allowed: boolean; retry_after_seconds: number };
 
 /** An admin client whose `rpc` answers each claim in turn from `replies`. */
 function fakeAdmin(...replies: Array<Reply | Error>) {
-  const rpc = vi.fn(async (_fn: string, _args: Record<string, unknown>) => {
+  const rpc = vi.fn(async (fn: string, _args: Record<string, unknown>) => {
+    // A release answers nothing and takes no reply off the queue.
+    if (fn === "release_rate_limit") return { data: null, error: null };
     const next = replies.shift() ?? { allowed: true, retry_after_seconds: 0 };
     if (next instanceof Error) return { data: null, error: { message: next.message } };
     return { data: [next], error: null };
@@ -140,12 +143,17 @@ describe("enforcePublicFormLimit", () => {
 });
 
 describe("claimVisitorEmail", () => {
-  it("checks the address, then the club-wide total, each keyed on the email", async () => {
-    const { admin, rpc } = fakeAdmin(ok, ok);
+  const claims = (rpc: ReturnType<typeof fakeAdmin>["rpc"]) =>
+    rpc.mock.calls.filter(([fn]) => fn === "claim_rate_limit").map(([, args]) => args);
+  const releases = (rpc: ReturnType<typeof fakeAdmin>["rpc"]) =>
+    rpc.mock.calls.filter(([fn]) => fn === "release_rate_limit").map(([, args]) => args);
+
+  it("checks the address, then the network and the club, each keyed on the email", async () => {
+    const { admin, rpc } = fakeAdmin(ok, ok, ok);
     await expect(
-      claimVisitorEmail(admin, " Ada@Example.com ", "interest-applicant-r1"),
+      claimVisitorEmail(admin, " Ada@Example.com ", "interest-applicant-r1", "203.0.113.7"),
     ).resolves.toBe(true);
-    const [perAddress, total] = rpc.mock.calls.map(([, args]) => args);
+    const [perAddress, perNetwork, total] = claims(rpc);
     expect(perAddress).toMatchObject({
       _bucket: "email:recipient",
       _dedupe_key: "interest-applicant-r1",
@@ -155,28 +163,79 @@ describe("claimVisitorEmail", () => {
     // does not make it a different address.
     expect(perAddress._subject).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(rpc.mock.calls)).not.toMatch(/ada@example\.com/i);
+    expect(perNetwork).toMatchObject({
+      _bucket: "email:visitor-network",
+      _subject: "203.0.113.7",
+      _dedupe_key: "interest-applicant-r1",
+      _day_max: EMAIL_CAPS.perNetwork,
+    });
     expect(total).toMatchObject({
       _bucket: "email:visitor-total",
       _subject: "club",
       _dedupe_key: "interest-applicant-r1",
       _day_max: EMAIL_CAPS.visitorTotal,
     });
+    expect(releases(rpc)).toEqual([]);
 
-    const again = fakeAdmin(ok, ok);
-    await claimVisitorEmail(again.admin, "ada@example.com", "contact-sender-m1");
-    expect(again.rpc.mock.calls[0][1]._subject).toBe(perAddress._subject);
+    const again = fakeAdmin(ok, ok, ok);
+    await claimVisitorEmail(again.admin, "ada@example.com", "contact-sender-m1", "203.0.113.7");
+    expect(claims(again.rpc)[0]._subject).toBe(perAddress._subject);
   });
 
-  it("holds the email back once that address has had its emails today", async () => {
+  it("holds the email back once that address has had its emails today, spending nothing else", async () => {
     const { admin, rpc } = fakeAdmin(no(3600));
-    await expect(claimVisitorEmail(admin, "ada@example.com", "k")).resolves.toBe(false);
-    // ...without spending the club-wide allowance real visitors draw on.
-    expect(rpc).toHaveBeenCalledTimes(1);
+    await expect(claimVisitorEmail(admin, "ada@example.com", "k", "203.0.113.7")).resolves.toBe(
+      false,
+    );
+    expect(claims(rpc)).toHaveLength(1);
   });
 
-  it("holds the email back once the club has sent its day's worth", async () => {
-    const { admin } = fakeAdmin(ok, no(3600));
-    await expect(claimVisitorEmail(admin, "ada@example.com", "k")).resolves.toBe(false);
+  it("holds the email back once that network has had its share, and gives the rest back", async () => {
+    // Before this, one network inside its own form limits could spend the
+    // whole club-wide allowance and leave every real visitor without a
+    // confirmation for a day.
+    const { admin, rpc } = fakeAdmin(ok, no(3600), ok);
+    await expect(claimVisitorEmail(admin, "ada@example.com", "k", "203.0.113.7")).resolves.toBe(
+      false,
+    );
+    expect(
+      releases(rpc)
+        .map((a) => a._bucket)
+        .sort(),
+    ).toEqual(["email:recipient", "email:visitor-network", "email:visitor-total"]);
+    for (const r of releases(rpc)) expect(r._dedupe_key).toBe("k");
+  });
+
+  it("holds the email back once the club has sent its day's worth, and gives the address its slot back", async () => {
+    // Before this, a refusal here still spent one of the address's six, so a
+    // parent signing for their children during a flood could use up a day's
+    // allowance without receiving a single email.
+    const { admin, rpc } = fakeAdmin(ok, ok, no(3600));
+    await expect(claimVisitorEmail(admin, "ada@example.com", "k", "203.0.113.7")).resolves.toBe(
+      false,
+    );
+    expect(releases(rpc).map((a) => a._bucket)).toContain("email:recipient");
+  });
+
+  it("counts no network when the request has no usable address", async () => {
+    const { admin, rpc } = fakeAdmin(ok, ok);
+    await expect(claimVisitorEmail(admin, "ada@example.com", "k", null)).resolves.toBe(true);
+    expect(claims(rpc).map((a) => a._bucket)).toEqual(["email:recipient", "email:visitor-total"]);
+  });
+});
+
+describe("releaseVisitorEmail", () => {
+  it("gives back every slot the email could have claimed, and survives a failure", async () => {
+    const rpc = vi
+      .fn()
+      .mockResolvedValueOnce({ data: null, error: { message: "boom" } })
+      .mockResolvedValue({ data: null, error: null });
+    await releaseVisitorEmail({ rpc } as unknown as SupabaseClient<Database>, "k");
+    expect(rpc.mock.calls.map(([fn, args]) => [fn, args._bucket, args._dedupe_key])).toEqual([
+      ["release_rate_limit", "email:recipient", "k"],
+      ["release_rate_limit", "email:visitor-network", "k"],
+      ["release_rate_limit", "email:visitor-total", "k"],
+    ]);
   });
 });
 

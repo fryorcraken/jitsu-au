@@ -121,21 +121,56 @@ export async function limitPublicForm(
 }
 
 /**
- * May the club email this typed-in address now? Claims the slot if so.
+ * Give back one slot a key claimed. Best-effort: a failed release leaves the
+ * slot counted, which is the safe direction for a cap, and is only logged.
+ */
+export async function releaseRateLimit(
+  admin: AdminClient,
+  bucket: string,
+  dedupeKey: string,
+): Promise<void> {
+  try {
+    const { error } = await admin.rpc("release_rate_limit", {
+      _bucket: bucket,
+      _dedupe_key: dedupeKey,
+    });
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    console.error(`[rate-limit] could not give back a ${bucket} slot:`, e);
+  }
+}
+
+/** The caps a visitor email counts against, besides the address's own. */
+const VISITOR_EMAIL_BUCKETS = [
+  BUCKETS.recipient,
+  BUCKETS.visitorNetwork,
+  BUCKETS.visitorTotal,
+] as const;
+
+/**
+ * May the club email this typed-in address now? Claims the slots if so.
  *
- * Two caps, the per-address one first so a flood aimed at one stranger is
- * stopped there and does not also use up the club-wide allowance that real
- * visitors' confirmations come out of. The address is counted by its SHA-256,
- * so the counter never holds it in the clear.
+ * Three caps (`EMAIL_CAPS`): the address, the network the submission came
+ * from, and the club. The address first, so a flood aimed at one stranger is
+ * stopped there and spends nothing else. Then the other two together. If any
+ * refuses, the slots the others took are given back, so an address never
+ * loses its day's allowance to an email that did not go; a failed send gives
+ * them back the same way (`releaseVisitorEmail`).
  *
- * `idempotencyKey` is the email's own key, so a retried send of the same email
- * is not counted twice.
+ * The address is counted by its SHA-256, so the counter never holds it in the
+ * clear. `idempotencyKey` is the email's own key, so a retried send of the
+ * same email is not counted twice.
+ *
+ * `network` is resolved from the current request when not given; a request
+ * with no usable address (a test, a script) is simply not counted per network.
  */
 export async function claimVisitorEmail(
   admin: AdminClient,
   address: string,
   idempotencyKey: string,
+  network?: string | null,
 ): Promise<boolean> {
+  const net = network === undefined ? networkKey(clientIp(await requestHeaderGetter())) : network;
   const perAddress = await claimRateLimit(admin, {
     bucket: BUCKETS.recipient,
     subject: await hashToken(normalizeEmail(address)),
@@ -146,17 +181,46 @@ export async function claimVisitorEmail(
     console.warn(`[rate-limit] held back ${idempotencyKey}: that address has had its emails today`);
     return false;
   }
-  const total = await claimRateLimit(admin, {
-    bucket: BUCKETS.visitorTotal,
-    subject: CLUB_SUBJECT,
-    dedupeKey: idempotencyKey,
-    perDay: EMAIL_CAPS.visitorTotal,
-  });
-  if (!total.allowed) {
-    console.warn(`[rate-limit] held back ${idempotencyKey}: the club-wide daily cap is reached`);
-    return false;
-  }
-  return true;
+  const [perNetwork, total] = await Promise.all([
+    net
+      ? claimRateLimit(admin, {
+          bucket: BUCKETS.visitorNetwork,
+          subject: net,
+          dedupeKey: idempotencyKey,
+          perDay: EMAIL_CAPS.perNetwork,
+        })
+      : Promise.resolve({ allowed: true, retryAfterSeconds: 0 }),
+    claimRateLimit(admin, {
+      bucket: BUCKETS.visitorTotal,
+      subject: CLUB_SUBJECT,
+      dedupeKey: idempotencyKey,
+      perDay: EMAIL_CAPS.visitorTotal,
+    }),
+  ]);
+  if (perNetwork.allowed && total.allowed) return true;
+  console.warn(
+    `[rate-limit] held back ${idempotencyKey}: ${
+      perNetwork.allowed
+        ? "the club-wide daily cap is reached"
+        : "that network has had its share today"
+    }`,
+  );
+  await releaseVisitorEmail(admin, idempotencyKey);
+  return false;
+}
+
+/**
+ * Give back every slot a visitor email claimed: after a later cap refused it,
+ * or after its send failed. Releasing a bucket the key never claimed is a
+ * no-op, so this does not need to know how far the claim got.
+ */
+export async function releaseVisitorEmail(
+  admin: AdminClient,
+  idempotencyKey: string,
+): Promise<void> {
+  await Promise.all(
+    VISITOR_EMAIL_BUCKETS.map((bucket) => releaseRateLimit(admin, bucket, idempotencyKey)),
+  );
 }
 
 /**

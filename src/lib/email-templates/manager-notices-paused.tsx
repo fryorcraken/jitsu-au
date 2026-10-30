@@ -34,9 +34,10 @@ export const ManagerNoticesPausedEmail = ({
         <Container style={container}>
           <Heading style={h1}>{copy.heading}</Heading>
           <Text style={text}>
-            More than {cap} {copy.happened} in the last 24 hours. That is far more than usual, so it
-            is probably a bot, and the site is already limiting it. Rather than fill your inbox, we
-            have stopped sending an email for each one.
+            More than {cap} {copy.happened} in the last 24 hours, which is far more than usual. It
+            could be a busy day, like an open day or O-Week, or it could be a bot, which the site is
+            already limiting. Either way, rather than fill your inbox, we have stopped sending an
+            email for each one.
           </Text>
           <Text style={text}>
             Nothing is lost. Every one is saved and listed on the {copy.where}:
@@ -48,7 +49,9 @@ export const ManagerNoticesPausedEmail = ({
           </Text>
           <Text style={text}>{copy.advice}</Text>
           <Text style={text}>
-            The emails start again by themselves once things are back to normal.
+            The emails start again by themselves once things quieten down. If it gets this busy
+            again within a day of this email, we won&apos;t send another one, so check the page
+            above until then.
           </Text>
           <Text style={footer}>
             You&apos;re receiving this because you&apos;re a manager of {siteName}.

@@ -20,7 +20,7 @@ import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
 import { mayNotifyManagers } from "@/lib/manager-notice-cap.server";
-import { claimVisitorEmail } from "@/lib/rate-limit.server";
+import { claimVisitorEmail, releaseVisitorEmail } from "@/lib/rate-limit.server";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
 import { idempotencyKeyFor } from "@/lib/email-resend";
 
@@ -248,14 +248,32 @@ export async function sendWaiverEmails({
   // signing is public, so the address is whatever was typed. Capped here and
   // not in `sendWaiverConfirmation`, which a manager's Resend also goes
   // through and which is not a public write.
-  const sendConfirmation = async () =>
-    (await claimVisitorEmail(admin, memberEmail, `waiver-member-${waiverId}`))
-      ? sendWaiverConfirmation(member)
-      : { sent: false, skipped: false, replyTo: null };
-  const [confirmation, notifyRecipients] = await Promise.all([
-    sendConfirmation(),
-    getManagerEmails(admin),
-  ]);
+  const memberKey = `waiver-member-${waiverId}`;
+  const sendConfirmation = async () => {
+    if (!(await claimVisitorEmail(admin, memberEmail, memberKey))) {
+      return { sent: false, skipped: false, replyTo: null };
+    }
+    const result = await sendWaiverConfirmation(member);
+    // It did not go, so it must not count against that address's day.
+    if (!result.sent) await releaseVisitorEmail(admin, memberKey);
+    return result;
+  };
+  // The managers' recipients and their cap, alongside the member's email
+  // rather than after it: the signer is waiting on all of this.
+  const managers = async () => {
+    const recipients = await getManagerEmails(admin);
+    const notify = await mayNotifyManagers(admin, {
+      kind: "waiver",
+      submissionKey: waiverId,
+      recipients,
+      screenUrl: WAIVER_REVIEW_URL,
+      apiKey,
+      sendUrl,
+    });
+    return { recipients, notify };
+  };
+  const [confirmation, { recipients: notifyRecipients, notify: notifyManagers }] =
+    await Promise.all([sendConfirmation(), managers()]);
 
   const managerEl = React.createElement(WaiverNotificationEmail, {
     siteName: SITE_NAME,
@@ -281,14 +299,6 @@ export async function sendWaiverEmails({
       [guardianEmail, memberEmail].filter((e): e is string => Boolean(e)).map(normalizeEmail),
     ),
   ];
-  const notifyManagers = await mayNotifyManagers(admin, {
-    kind: "waiver",
-    submissionKey: waiverId,
-    recipients: notifyRecipients,
-    screenUrl: WAIVER_REVIEW_URL,
-    apiKey,
-    sendUrl,
-  });
   for (const to of notifyManagers ? notifyRecipients : []) {
     try {
       await sendEmail({

@@ -1646,19 +1646,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      claim_rate_limit: {
-        Args: {
-          _bucket: string
-          _day_max?: number
-          _dedupe_key?: string
-          _hour_max?: number
-          _subject: string
-        }
-        Returns: {
-          allowed: boolean
-          retry_after_seconds: number
-        }[]
-      }
       clear_email_confirmation: {
         Args: { _user_id: string }
         Returns: undefined

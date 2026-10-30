@@ -149,3 +149,22 @@ REVOKE ALL ON FUNCTION public.claim_rate_limit(TEXT, TEXT, TEXT, INTEGER, INTEGE
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_rate_limit(TEXT, TEXT, TEXT, INTEGER, INTEGER)
   TO service_role;
+
+-- Give back a slot that was claimed but not used.
+--
+-- An email is counted against two or three caps (the address, the network,
+-- the club) and then sent. If a later cap refuses it, or the send fails, the
+-- earlier claims would otherwise stand, and an address could lose its whole
+-- day's allowance to emails that never went. Removes the one row this key
+-- claimed in this bucket, nothing else; a key that claimed nothing is a no-op.
+CREATE OR REPLACE FUNCTION public.release_rate_limit(_bucket TEXT, _dedupe_key TEXT)
+RETURNS VOID
+LANGUAGE sql
+SET search_path = ''
+AS $$
+  DELETE FROM public.rate_limit_hits h
+  WHERE h.bucket = _bucket AND h.dedupe_key = _dedupe_key;
+$$;
+
+REVOKE ALL ON FUNCTION public.release_rate_limit(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.release_rate_limit(TEXT, TEXT) TO service_role;
