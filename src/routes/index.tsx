@@ -132,7 +132,7 @@ function Home() {
             {
               icon: Shield,
               title: "Practical self-defence",
-              body: "Tested against a partner who resists, so it works when it matters. A tap stops everything.",
+              body: "Tested against a partner who resists, building up as your skill does, so it works when it matters.",
             },
             {
               icon: Users,
