@@ -13,7 +13,11 @@ import { waiverClass } from "@/lib/status-colours";
 import { formatDateTime } from "@/lib/dates";
 import { listWaivers, getWaiverPdfUrl, setWaiverApproval } from "@/lib/waiver.functions";
 import { approvalConfirmation, runApproval } from "@/lib/waiver-approval";
-import type { WaiverApprovalStatus } from "@/lib/validation";
+import {
+  isApprovedWaiverStatus,
+  type WaiverApprovalStatus,
+  type WaiverListStatus,
+} from "@/lib/validation";
 import {
   getGoogleDriveStatus,
   listMyDriveUploads,
@@ -38,9 +42,9 @@ type Row = {
   signed_at: string;
   template_version: number | null;
   pdf_path: string | null;
-  // Derived server-side: the person's latest approved waiver is "active",
-  // older approved ones are "superseded", the rest are "pending".
-  status: "pending" | "active" | "superseded";
+  // Derived server-side by `deriveWaiverListStatuses`, which owns this
+  // vocabulary; spelling the union out again here is how the two drift.
+  status: WaiverListStatus;
   approved_at: string | null;
   // A scanned paper form a manager filed, rather than one signed on the site.
   is_paper: boolean;
@@ -301,15 +305,7 @@ function WaiversPage() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          {r.status === "pending" ? (
-                            <Button
-                              size="sm"
-                              onClick={() => setApproval(r, "approved")}
-                              disabled={approvingId === r.id}
-                            >
-                              {approvingId === r.id ? "Approving..." : "Approve"}
-                            </Button>
-                          ) : (
+                          {isApprovedWaiverStatus(r.status) ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -317,6 +313,14 @@ function WaiversPage() {
                               disabled={approvingId === r.id}
                             >
                               {approvingId === r.id ? "Updating..." : "Revoke approval"}
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => setApproval(r, "approved")}
+                              disabled={approvingId === r.id}
+                            >
+                              {approvingId === r.id ? "Approving..." : "Approve"}
                             </Button>
                           )}
                           {r.pdf_path ? (
