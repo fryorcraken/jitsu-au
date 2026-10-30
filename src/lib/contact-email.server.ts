@@ -13,6 +13,8 @@ import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { ContactConfirmationEmail } from "@/lib/email-templates/contact-confirmation";
 import { ContactNotificationEmail } from "@/lib/email-templates/contact-notification";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
+import { mayNotifyManagers } from "@/lib/manager-notice-cap.server";
+import { claimVisitorEmail } from "@/lib/rate-limit.server";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
 import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
@@ -39,6 +41,12 @@ export interface ContactEmailParams {
  * visitor just sent — the row is already committed by the time this runs, and a
  * message stored without an email beats an error screen over a stored message.
  * Returns a small summary useful for logging/tests.
+ *
+ * Both halves are capped (#52, `src/lib/rate-limit.ts`): the acknowledgement
+ * by how often the club may email that address, and in total, today; the
+ * managers' copy by how many new-message emails have gone out today. The
+ * acknowledgement is the one email the site sends to an address nobody has
+ * verified, which is exactly what makes it the one a bot would aim.
  */
 export async function sendContactEmails({
   messageId,
@@ -89,31 +97,43 @@ export async function sendContactEmails({
   const sent: string[] = [];
 
   // Acknowledgement to whoever wrote in.
-  try {
-    await sendEmail({
-      apiKey,
-      sendUrl,
-      to: email,
-      // Fixed wording. This is the one email the site sends to an address
-      // nobody has verified, so the subject line stays out of the sender's
-      // hands: `name` is whatever they typed into a public form.
-      subject: `We got your message at ${SITE_NAME}`,
-      html: senderHtml,
-      text: senderText,
-      idempotencyKey: `contact-sender-${messageId}`,
-      replyTo,
-    });
-    sent.push(email);
-  } catch (e) {
-    console.error(`[contact-email] failed to email the sender:`, e);
+  const senderKey = `contact-sender-${messageId}`;
+  if (await claimVisitorEmail(admin, email, senderKey)) {
+    try {
+      await sendEmail({
+        apiKey,
+        sendUrl,
+        to: email,
+        // Fixed wording. This is the one email the site sends to an address
+        // nobody has verified, so the subject line stays out of the sender's
+        // hands: `name` is whatever they typed into a public form.
+        subject: `We got your message at ${SITE_NAME}`,
+        html: senderHtml,
+        text: senderText,
+        idempotencyKey: senderKey,
+        replyTo,
+      });
+      sent.push(email);
+    } catch (e) {
+      console.error(`[contact-email] failed to email the sender:`, e);
+    }
   }
+
+  const notifyManagers = await mayNotifyManagers(admin, {
+    kind: "message",
+    submissionKey: messageId,
+    recipients: notifyRecipients,
+    screenUrl: MANAGER_CONTACT_URL,
+    apiKey,
+    sendUrl,
+  });
 
   // The message itself, to each manager. Reply-To is the visitor, so a
   // manager's own "Reply" button answers them rather than the noreply sender.
   // The bare address only: `name` is free text from a public form and has no
   // business in a header. contactSchema has already rejected anything that is
   // not a single well-formed address.
-  for (const to of notifyRecipients) {
+  for (const to of notifyManagers ? notifyRecipients : []) {
     try {
       await sendEmail({
         apiKey,

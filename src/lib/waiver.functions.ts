@@ -118,6 +118,13 @@ export type WaiverSubmitResult = {
    * contact form instead, which is always true.
    */
   reply_to_confirmation: boolean;
+  /**
+   * Whether the confirmation email went out at all, so the page only says
+   * "we have emailed you the same link" when it is true. False when the send
+   * failed, when the email was held back by a cap (#52), and on every fast
+   * path, for the same reason as `reply_to_confirmation`.
+   */
+  confirmation_emailed: boolean;
 };
 
 /**
@@ -755,7 +762,15 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         pdf_ready: false,
         code_of_conduct_url: null,
         reply_to_confirmation: false,
+        confirmation_emailed: false,
       };
+
+    // Turn somebody away once their network has signed too many (#52), before
+    // any auth user, row or PDF exists. The submission id makes a retry of an
+    // already-signed waiver free, so the duplicate check below still answers
+    // it. Throws the message the signer sees.
+    const { limitPublicForm } = await import("@/lib/rate-limit.server");
+    await limitPublicForm("waiver", data.client_submission_id || null);
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin;
@@ -789,6 +804,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           // confirmation email already carries the working link.
           code_of_conduct_url: null,
           reply_to_confirmation: false,
+          confirmation_emailed: false,
           // Nor does it re-apply the gi size. This return sits above the point
           // where the email is normalized and identity is established, so
           // `applyWaiverGiSize` has neither the person nor the proof it needs,
@@ -1178,6 +1194,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           pdf_ready: Boolean(url),
           code_of_conduct_url: null,
           reply_to_confirmation: false,
+          confirmation_emailed: false,
         };
       }
     }
@@ -1227,10 +1244,12 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
      * aware of it. The emails degrade to "no download link, we will sort it
      * out" rather than not being sent at all.
      */
-    const notify = async (pdfUrl: string | null): Promise<boolean> => {
+    const notify = async (
+      pdfUrl: string | null,
+    ): Promise<{ reply_to_confirmation: boolean; confirmation_emailed: boolean }> => {
       try {
         const { sendWaiverEmails } = await import("./waiver-email.server");
-        const { memberReplyTo } = await sendWaiverEmails({
+        const { memberReplyTo, memberEmailed } = await sendWaiverEmails({
           waiverId: inserted.id,
           // The participant: who the managers' email says the waiver is for.
           // Still the child on a child's waiver, since they are who signed up
@@ -1274,11 +1293,15 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
           // signer, because the address it carries is the parent's.
           signedByName: signingForDependant ? contacts.guardianName || null : null,
         });
-        // Whether the page may say "reply to your confirmation email".
-        return Boolean(memberReplyTo);
+        // Whether the page may say "reply to your confirmation email", and
+        // whether it may say an email went at all.
+        return {
+          reply_to_confirmation: Boolean(memberReplyTo),
+          confirmation_emailed: memberEmailed,
+        };
       } catch (e) {
         console.error("[submitWaiverWithPdf] failed to send waiver emails:", e);
-        return false;
+        return { reply_to_confirmation: false, confirmation_emailed: false };
       }
     };
 
@@ -1333,14 +1356,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       });
     } catch (e) {
       console.error("[submitWaiverWithPdf] PDF generation failed:", e);
-      const replyToConfirmation = await notify(null);
       return {
         ok: true,
         waiver_id: inserted.id,
         pdf_url: null,
         pdf_ready: false,
         code_of_conduct_url: codeOfConductUrl,
-        reply_to_confirmation: replyToConfirmation,
+        ...(await notify(null)),
       };
     }
 
@@ -1350,14 +1372,13 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
     if (upErr) {
       console.error("[submitWaiverWithPdf] PDF upload failed:", upErr);
-      const replyToConfirmation = await notify(null);
       return {
         ok: true,
         waiver_id: inserted.id,
         pdf_url: null,
         pdf_ready: false,
         code_of_conduct_url: codeOfConductUrl,
-        reply_to_confirmation: replyToConfirmation,
+        ...(await notify(null)),
       };
     }
 
@@ -1376,7 +1397,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     } catch (e) {
       console.error("[submitWaiverWithPdf] could not mint the email PDF link:", e);
     }
-    const replyToConfirmation = await notify(emailUrl);
+    const emailed = await notify(emailUrl);
 
     return {
       ok: true,
@@ -1384,7 +1405,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       pdf_url: signedUrl,
       pdf_ready: Boolean(signedUrl),
       code_of_conduct_url: codeOfConductUrl,
-      reply_to_confirmation: replyToConfirmation,
+      ...emailed,
     };
   });
 

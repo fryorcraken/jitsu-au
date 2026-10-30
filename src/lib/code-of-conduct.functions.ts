@@ -378,6 +378,13 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, accepted_at: null };
 
+    // Public in the sense that matters (#52): a link from any waiver
+    // confirmation is enough, no login, and every agreement is a new row. The
+    // form carries no submission id, so each press counts; at the limit that
+    // allows, nobody real ever notices.
+    const { limitPublicForm } = await import("@/lib/rate-limit.server");
+    await limitPublicForm("code_of_conduct", null);
+
     const { supabaseAdmin: admin } = await import("@/integrations/supabase/client.server");
 
     // Refuse to file an agreement against text the person did not see. The page

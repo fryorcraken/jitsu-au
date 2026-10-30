@@ -19,6 +19,8 @@ import { WaiverNotificationEmail } from "@/lib/email-templates/waiver-notificati
 import { SITE_ORIGIN } from "@/lib/site-origin";
 import { SITE_NAME } from "@/lib/email-sender";
 import { getManagerEmails } from "@/lib/manager-recipients.server";
+import { mayNotifyManagers } from "@/lib/manager-notice-cap.server";
+import { claimVisitorEmail } from "@/lib/rate-limit.server";
 import { waiverNotificationSubject } from "@/lib/email-templates/waiver-notification-subject";
 import { idempotencyKeyFor } from "@/lib/email-resend";
 
@@ -231,17 +233,27 @@ export async function sendWaiverEmails({
    * decide whether "reply to your confirmation email" would be true.
    */
   memberReplyTo: string | null;
+  /** Whether the member's confirmation went out at all. */
+  memberEmailed: boolean;
 }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) {
     console.warn("[waiver-email] LOVABLE_API_KEY not set — skipping waiver emails");
-    return { sent: [], skipped: true, memberReplyTo: null };
+    return { sent: [], skipped: true, memberReplyTo: null, memberEmailed: false };
   }
   const sendUrl = process.env.LOVABLE_SEND_URL;
   const { waiverId, memberEmail, pdfUrl, admin } = member;
 
+  // The member's copy is capped like every email to a typed-in address (#52):
+  // signing is public, so the address is whatever was typed. Capped here and
+  // not in `sendWaiverConfirmation`, which a manager's Resend also goes
+  // through and which is not a public write.
+  const sendConfirmation = async () =>
+    (await claimVisitorEmail(admin, memberEmail, `waiver-member-${waiverId}`))
+      ? sendWaiverConfirmation(member)
+      : { sent: false, skipped: false, replyTo: null };
   const [confirmation, notifyRecipients] = await Promise.all([
-    sendWaiverConfirmation(member),
+    sendConfirmation(),
     getManagerEmails(admin),
   ]);
 
@@ -269,7 +281,15 @@ export async function sendWaiverEmails({
       [guardianEmail, memberEmail].filter((e): e is string => Boolean(e)).map(normalizeEmail),
     ),
   ];
-  for (const to of notifyRecipients) {
+  const notifyManagers = await mayNotifyManagers(admin, {
+    kind: "waiver",
+    submissionKey: waiverId,
+    recipients: notifyRecipients,
+    screenUrl: WAIVER_REVIEW_URL,
+    apiKey,
+    sendUrl,
+  });
+  for (const to of notifyManagers ? notifyRecipients : []) {
     try {
       await sendEmail({
         apiKey,
@@ -287,7 +307,12 @@ export async function sendWaiverEmails({
     }
   }
 
-  return { sent, skipped: false, memberReplyTo: confirmation.replyTo };
+  return {
+    sent,
+    skipped: false,
+    memberReplyTo: confirmation.replyTo,
+    memberEmailed: confirmation.sent,
+  };
 }
 
 export interface AccountActivatedEmailParams {

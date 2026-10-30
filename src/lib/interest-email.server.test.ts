@@ -9,6 +9,13 @@ const { sendLovableEmail, getManagerEmails } = vi.hoisted(() => ({
 }));
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
 vi.mock("@/lib/manager-recipients.server", () => ({ getManagerEmails }));
+const { claimVisitorEmail, claimManagerNotice } = vi.hoisted(() => ({
+  claimVisitorEmail: vi.fn(),
+  claimManagerNotice: vi.fn(),
+}));
+// The caps (#52). Open by default, so every other test here sees the sends
+// they always did; the cap tests below close one or the other.
+vi.mock("@/lib/rate-limit.server", () => ({ claimVisitorEmail, claimManagerNotice }));
 vi.mock("@/lib/email-verification.server", () => ({
   mintVerificationToken: () => Promise.resolve("utsj_test"),
 }));
@@ -55,6 +62,8 @@ describe("sendInterestEmails", () => {
     // calls and resolved values unless cleared here.
     vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    claimVisitorEmail.mockResolvedValue(true);
+    claimManagerNotice.mockResolvedValue("send");
   });
   afterEach(() => {
     if (original === undefined) delete process.env.LOVABLE_API_KEY;
@@ -76,7 +85,7 @@ describe("sendInterestEmails", () => {
       admin,
     });
 
-    expect(result).toEqual({ sent: [], skipped: true });
+    expect(result).toEqual({ sent: [], skipped: true, applicantEmailed: false });
     expect(from).not.toHaveBeenCalled();
     // getManagerEmails is mocked, so `from` alone can no longer catch a lookup
     // moved above the key check.
@@ -106,5 +115,52 @@ describe("sendInterestEmails", () => {
     expect(toLead.reply_to).toBeUndefined();
     expect(toManagers).toHaveLength(2);
     for (const p of toManagers) expect(p.reply_to).toBe("ada@example.com");
+  });
+
+  it("holds back the applicant's confirmation once that address is capped, and says so", async () => {
+    // Before #52 a bot could make the club email any address as often as it
+    // liked. The lead is still filed and the managers still hear about it.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockResolvedValue({ success: true });
+    getManagerEmails.mockResolvedValue(["manager-a@example.com"]);
+    claimVisitorEmail.mockResolvedValue(false);
+    const admin = {} as SupabaseClient<Database>;
+
+    const result = await sendInterestEmails({
+      registrationId: "r3",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      phone: null,
+      message: null,
+      admin,
+    });
+
+    expect(claimVisitorEmail).toHaveBeenCalledWith(
+      admin,
+      "ada@example.com",
+      "interest-applicant-r3",
+    );
+    expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).toEqual(["manager-a@example.com"]);
+    expect(result.applicantEmailed).toBe(false);
+  });
+
+  it("sends the managers nothing once the day's new-lead emails are paused", async () => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockResolvedValue({ success: true });
+    getManagerEmails.mockResolvedValue(["manager-a@example.com", "manager-b@example.com"]);
+    claimManagerNotice.mockResolvedValue("paused");
+
+    const result = await sendInterestEmails({
+      registrationId: "r4",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      phone: null,
+      message: null,
+      admin: {} as SupabaseClient<Database>,
+    });
+
+    expect(claimManagerNotice).toHaveBeenCalledWith(expect.anything(), "lead", "r4");
+    expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).toEqual(["ada@example.com"]);
+    expect(result.applicantEmailed).toBe(true);
   });
 });
