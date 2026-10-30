@@ -41,11 +41,17 @@ describe("homepage FAQ selection", () => {
     expect(homepageFaqIds).not.toContain("what-to-wear");
   });
 
-  it("includes the experience, fitness/age, intensity and trial reassurances", () => {
+  it("includes the experience, fitness/age, intensity and JJJ-vs-BJJ reassurances", () => {
     expect(homepageFaqIds).toContain("experience");
     expect(homepageFaqIds).toContain("fitness-age");
     expect(homepageFaqIds).toContain("training-intensity");
-    expect(homepageFaqIds).toContain("trial-offer");
+    expect(homepageFaqIds).toContain("jjj-vs-bjj");
+  });
+
+  // The homepage already states the free trial in its hero, its CTA and both
+  // "Start your free trial" buttons, so the FAQ slot is better spent elsewhere.
+  it("leaves the trial offer to /faq", () => {
+    expect(homepageFaqIds).not.toContain("trial-offer");
   });
 
   // Nervous beginners worry they are too unfit or too old, and people looking

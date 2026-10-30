@@ -63,9 +63,11 @@ export const faqItems: FaqItem[] = [
 // actually strikes. "fitness-age" and "training-intensity" answer the two
 // worries a nervous beginner brings (am I fit/young enough, will I get hurt)
 // and the one a self-defence seeker brings (is it hard enough to work). They
-// displaced "jjj-vs-bjj", which stays on /faq. Deliberately chosen to COMPLEMENT the "Your first class"
-// page (which already covers gear + what to wear), so the gear / clothing
-// questions are intentionally excluded here to avoid redundancy.
+// displaced "trial-offer", which stays on /faq: the homepage already states the
+// free trial in the hero, the CTA and both "Start your free trial" buttons.
+// Deliberately chosen to COMPLEMENT the "Your first class" page (which already
+// covers gear + what to wear), so the gear / clothing questions are
+// intentionally excluded here to avoid redundancy.
 //
 // "open-to-public" leads because the club's name reads as a university club,
 // and someone who assumes they are not eligible leaves without asking. It sits
@@ -76,7 +78,7 @@ export const homepageFaqIds = [
   "experience",
   "fitness-age",
   "training-intensity",
-  "trial-offer",
+  "jjj-vs-bjj",
 ] as const;
 
 export const homepageFaqItems: FaqItem[] = homepageFaqIds.map((id) => {
