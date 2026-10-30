@@ -767,11 +767,12 @@ its nightly email once:
 - **The digest's URL is a literal in SQL**, not `SITE_ORIGIN`, because pg_cron
   cannot read the app's config. `src/lib/notification-digest-url.test.ts` fails
   if the two disagree, so moving the domain again takes a migration too.
-- **Not everything that says `jitsu.au` is the address.** `notify.jitsu.au` is
-  the verified email sender domain, the calendar feed's event UIDs end in
-  `@jitsu.au` (changing them would duplicate every event in every subscriber's
-  calendar), and `dependant.jitsu.au` is the reserved address domain for
-  dependants. All three stay as they are. Anything else is a mistake:
+- **Not everything that says `jitsu.au` is the address.** The calendar feed's
+  event UIDs end in `@jitsu.au` (changing them would duplicate every event in
+  every subscriber's calendar), and `dependant.jitsu.au` is the reserved
+  address domain for dependants. Both stay as they are. The email sender moved
+  separately, from `notify.jitsu.au` to `notify.utsjitsu.com.au`, in October
+  2026 (`docs/emails.md`). Anything else is a mistake:
   `src/lib/seo.test.ts` ("the old domain") fails on any other mention of
   `jitsu.au`, in any case, in every text file under `src/`, `public/`,
   `scripts/`, `e2e/` and `.claude/skills/`, whether a URL or copy. It skips
