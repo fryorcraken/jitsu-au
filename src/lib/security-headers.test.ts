@@ -9,6 +9,7 @@ import {
   carriesTokenInPath,
   referrerPolicyFor,
 } from "./security-headers";
+import { renderErrorPage } from "./error-page";
 
 describe("carriesTokenInPath", () => {
   it("recognises the three routes that take a token in the path", () => {
@@ -194,4 +195,25 @@ describe("public/_headers", () => {
     // this same file at build time.
     expect(rules[0]?.headers["cache-control"]).toBeUndefined();
   });
+});
+
+describe("the HTML documents that can render at a token URL", () => {
+  // The hosting layer replaces this module's `no-referrer` header with its own
+  // value (see the module comment), so on these two pages the meta tag is what
+  // actually keeps the token out of a `Referer`. It has to come before the
+  // first thing on the page that makes a request, or that request goes first.
+  const documents = {
+    "the server's error page": renderErrorPage(),
+    "the offline card": readFileSync(join(process.cwd(), "public/offline.html"), "utf8"),
+  };
+  const META = '<meta name="referrer" content="no-referrer" />';
+
+  for (const [name, html] of Object.entries(documents)) {
+    it(`${name} sends no referrer, whatever header arrived`, () => {
+      const meta = html.indexOf(META);
+      expect(meta, name).toBeGreaterThan(-1);
+      const firstRequest = html.search(/\s(href|src)=/);
+      if (firstRequest > -1) expect(meta, name).toBeLessThan(firstRequest);
+    });
+  }
 });

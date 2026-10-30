@@ -19,7 +19,9 @@
  * Bump CACHE_VERSION to evict everything on the next deploy.
  */
 
-const CACHE_VERSION = "v1";
+// v2: offline.html gained its `no-referrer` meta tag (src/lib/security-headers.ts),
+// and an install keeps its cached copy until the cache name changes.
+const CACHE_VERSION = "v2";
 const ASSET_CACHE = `uts-jitsu-assets-${CACHE_VERSION}`;
 const SHELL_CACHE = `uts-jitsu-shell-${CACHE_VERSION}`;
 const CURRENT_CACHES = [ASSET_CACHE, SHELL_CACHE];

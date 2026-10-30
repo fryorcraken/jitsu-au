@@ -2,9 +2,12 @@
 # app's request middleware, which is where src/lib/security-headers.ts sets the
 # same values on every response the server itself builds.
 #
-# Cloudflare reads this file when it serves this project's assets. If it turns
-# out to be ignored here, nothing is lost: the middleware is the real fix and
-# covers every route. Confirm with `curl -I https://utsjitsu.com.au/` once deployed.
+# Cloudflare reads this file when it serves this project's assets (the live
+# `/assets/*` files carry the immutable rule below, so it is honoured). The
+# hosting layer then sets its own Referrer-Policy on every response, so the
+# token-path values here, like the middleware's, do not reach the browser: see
+# src/lib/security-headers.ts for what was checked and what protects the tokens
+# instead. Check a token path with `curl -I`, not `/`.
 #
 # Keep these in step with TOKEN_PATH_PREFIXES in src/lib/security-headers.ts.
 # security-headers.test.ts fails if the two disagree, on the referrer policy and
