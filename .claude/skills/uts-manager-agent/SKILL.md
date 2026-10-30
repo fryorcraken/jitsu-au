@@ -1312,6 +1312,30 @@ save puts it in one. `image_rejected` (422) means this image will never work;
 Write `alt` for somebody who cannot see the picture: what is in it, not
 "image".
 
+### `start_blog_image_upload` — a one-time link to send a file to
+
+For a caller that has the file but cannot send it as `data` or `url` (an
+assistant over MCP whose only copy is in its sandbox). With this skill's token
+you can send `data` directly, so you will rarely need it.
+
+```bash
+scripts/agent.sh start_blog_image_upload '{"name":"mats.jpg","alt":"The mats laid out for grading"}'
+```
+
+The result's `command` is a `curl` that POSTs the file's raw bytes to the link.
+It reads the path from a shell variable, so set that and run it as given:
+
+```bash
+IMAGE_FILE='mats.jpg'
+# then paste the result's command
+```
+
+The answer is
+`{ "ok": true, "result": { path, url, markdown } }`, as `upload_blog_image`'s.
+The link stores one image and lasts 60 minutes. Using it again is
+`409 already_uploaded` with that image's `path` and `markdown` in
+`error.details`; `401 link_expired` means ask for a new one.
+
 ### `delete_blog_post` — remove a post for good
 
 Deletes the post and every comment on it, with no undo. To take a post off the
