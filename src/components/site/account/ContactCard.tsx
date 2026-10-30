@@ -111,8 +111,11 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const parts = completeAuAddress(address);
-    if (!parts) {
+    // The address is only checked, and only sent, when it was edited. Saving a
+    // new mobile must not depend on an address the club could not split, and
+    // it must not rewrite the address line as typed into the composed one.
+    const parts = addressChanged ? completeAuAddress(address) : null;
+    if (addressChanged && !parts) {
       setAttempted(true);
       return;
     }
@@ -122,11 +125,15 @@ export function ContactCard({ userId, voice, profile, loading, onSaved }: Detail
         // The parts, plus the line made from them so this page's copy of the
         // profile reads right straight away. The server composes the line
         // itself and does not take this one on trust.
-        address_street: parts.street,
-        address_suburb: parts.suburb,
-        address_state: parts.state,
-        address_postcode: parts.postcode,
-        address: composeAuAddress(parts),
+        ...(parts
+          ? {
+              address_street: parts.street,
+              address_suburb: parts.suburb,
+              address_state: parts.state,
+              address_postcode: parts.postcode,
+              address: composeAuAddress(parts),
+            }
+          : {}),
         sms_whatsapp_consent: smsConsent,
         emergency_contact_name: ecName.trim(),
         emergency_contact_relationship: ecRelationship.trim(),

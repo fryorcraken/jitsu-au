@@ -67,6 +67,14 @@ export function composeAuAddress(a: AuAddress): string {
   return `${a.street}, ${a.suburb} ${a.state} ${a.postcode}`;
 }
 
+/**
+ * A control character, as the database's `[[:cntrl:]]` sees one in a UTF-8
+ * locale: the C0 and C1 controls (`\p{Cc}`, tab and NEL included) and the
+ * Unicode line and paragraph separators. Anything narrower here would let a
+ * value through that the database's constraint then refuses mid-signing.
+ */
+const CONTROL = /[\p{Cc}\u2028\u2029]/u;
+
 // Mirrors `public.split_au_address` in the migration, rule for rule, so the
 // app and the database agree on which old addresses can be read as parts.
 const SPLIT =
@@ -90,8 +98,7 @@ const POSTCODE_LEAD: Record<AuState, RegExp> = {
 export function splitAuAddress(line: string | null | undefined): AuAddress | null {
   // Any control character (a newline above all) means a multi-line address,
   // which is not the shape this reads.
-  // eslint-disable-next-line no-control-regex
-  if (!line || /[\u0000-\u001f\u007f]/.test(line)) return null;
+  if (!line || CONTROL.test(line)) return null;
   const m = SPLIT.exec(line);
   if (!m) return null;
   const [, street, suburb, rawState, postcode] = m;
@@ -141,6 +148,14 @@ export function auAddressColumns(a: AuAddress | null) {
   };
 }
 
+/** What each part is called on the form, and therefore in a problem list. */
+export const AU_ADDRESS_LABELS = {
+  street: "Street address",
+  suburb: "Suburb",
+  state: "State",
+  postcode: "Postcode",
+} as const;
+
 /** Which part a problem is about. Doubles as the suffix of that input's id. */
 export type AuAddressPart = keyof AuAddress;
 
@@ -158,32 +173,25 @@ export type AuAddressProblem = { part: AuAddressPart; label: string; hint?: stri
  * digits" under the field rather than as a rejected submission.
  */
 export function auAddressProblems(d: AuAddressDraft): AuAddressProblem[] {
+  // Read off the schema itself rather than restated, so the form can never
+  // pass an address the server then refuses (a pasted tab, say): what the
+  // schema says about a part is what the person is told under it.
+  const parsed = auAddressSchema.safeParse(d);
+  if (parsed.success) return [];
   const problems: AuAddressProblem[] = [];
-  if (!d.street.trim()) problems.push({ part: "street", label: "Street address" });
-  if (!d.suburb.trim()) {
-    problems.push({ part: "suburb", label: "Suburb" });
-  } else if (/[0-9,]/.test(d.suburb)) {
+  for (const part of ["street", "suburb", "state", "postcode"] as const) {
+    const issue = parsed.error.issues.find((i) => i.path[0] === part);
+    if (!issue) continue;
+    const blank = !String(d[part] ?? "").trim();
     problems.push({
-      part: "suburb",
-      label: "Suburb",
-      hint: "Just the suburb name here. The street goes in the line above",
+      part,
+      label: AU_ADDRESS_LABELS[part],
+      // A blank part needs no explaining: "please fill this in" says it.
+      ...(blank ? {} : { hint: issue.message.replace(/\.$/, "") }),
     });
-  }
-  if (!d.state) problems.push({ part: "state", label: "State" });
-  if (!d.postcode.trim()) {
-    problems.push({ part: "postcode", label: "Postcode" });
-  } else if (!/^[0-9]{4}$/.test(d.postcode.trim())) {
-    problems.push({ part: "postcode", label: "Postcode", hint: "A postcode is four digits" });
   }
   return problems;
 }
-
-// eslint-disable-next-line no-control-regex
-const NO_CONTROL = /^[^\u0000-\u001f\u007f]*$/;
-// A suburb also carries no digit and no comma: none has either, and either
-// would make the composed line read back as a different address.
-// eslint-disable-next-line no-control-regex
-const SUBURB_CHARS = /^[^\u0000-\u001f\u007f0-9,]*$/;
 
 /**
  * A complete address as it crosses the wire. The same bounds as the database's
@@ -195,14 +203,19 @@ export const auAddressSchema = z.object({
     .string()
     .trim()
     .min(1, "Please give the street address.")
-    .max(AU_ADDRESS_LIMITS.street)
-    .regex(NO_CONTROL, "Please keep the street address on one line."),
+    .max(AU_ADDRESS_LIMITS.street, "Please keep the street address under 200 characters.")
+    .refine((v) => !CONTROL.test(v), "Please keep the street address on one line."),
   suburb: z
     .string()
     .trim()
     .min(1, "Please give the suburb.")
-    .max(AU_ADDRESS_LIMITS.suburb)
-    .regex(SUBURB_CHARS, "Please give just the suburb name."),
+    .max(AU_ADDRESS_LIMITS.suburb, "Please keep the suburb under 60 characters.")
+    // No digit and no comma: no suburb has either, and either would make the
+    // composed line read back as a different address.
+    .refine(
+      (v) => !CONTROL.test(v) && !/[0-9,]/.test(v),
+      "Just the suburb name here. The street goes in the line above.",
+    ),
   state: z.enum(AU_STATES, { message: "Please choose a state." }),
   postcode: z
     .string()
@@ -245,4 +258,32 @@ export function draftAddressLine(d: AuAddressDraft): string {
   if (done) return composeAuAddress(done);
   const locality = [d.suburb.trim(), d.state, d.postcode.trim()].filter(Boolean).join(" ");
   return [d.street.trim(), locality].filter(Boolean).join(", ");
+}
+
+/**
+ * Whether two one-line addresses are the same place: the same words once
+ * spacing and case are set aside, or the same parts once both are read.
+ *
+ * The guardian's address is stored resolved, so "the same as the
+ * participant's" is recorded as a copy of the participant's line. That copy
+ * stops matching character for character the moment the participant's line is
+ * rewritten from its parts, and a plain comparison would then show a parent
+ * as living somewhere else on their child's next waiver.
+ */
+export function sameAuAddress(a: string | null | undefined, b: string | null | undefined): boolean {
+  const flat = (v: string | null | undefined) =>
+    (v ?? "")
+      .replace(/[\s,]+/g, " ")
+      .trim()
+      .toLowerCase();
+  if (flat(a) === flat(b)) return true;
+  const pa = splitAuAddress(a);
+  const pb = splitAuAddress(b);
+  if (!pa || !pb) return false;
+  return (
+    pa.street.toLowerCase() === pb.street.toLowerCase() &&
+    pa.suburb.toLowerCase() === pb.suburb.toLowerCase() &&
+    pa.state === pb.state &&
+    pa.postcode === pb.postcode
+  );
 }

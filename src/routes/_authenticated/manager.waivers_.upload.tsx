@@ -10,7 +10,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddressFields } from "@/components/site/AddressFields";
-import { EMPTY_AU_ADDRESS, completeAuAddress, type AuAddressDraft } from "@/lib/au-address";
+import {
+  EMPTY_AU_ADDRESS,
+  auAddressFieldId,
+  auAddressProblems,
+  completeAuAddress,
+  type AuAddressDraft,
+} from "@/lib/au-address";
 import {
   MAX_SCAN_BYTES,
   isMinorOn,
@@ -233,7 +239,11 @@ function UploadPaperWaiverPage() {
       needsGuardian && !guardianSameAddress ? completeAuAddress(guardianAddress) : null;
     if (!addressParts || (needsGuardian && !guardianSameAddress && !guardianParts)) {
       setAddressAttempted(true);
-      document.getElementById(addressParts ? "guardian_address_street" : "address_street")?.focus();
+      // Straight to the box that is wrong, not the top of its block.
+      const prefix = addressParts ? "guardian_address" : "address";
+      const draft = addressParts ? guardianAddress : address;
+      const first = auAddressProblems(draft)[0];
+      document.getElementById(auAddressFieldId(prefix, first?.part ?? "street"))?.focus();
       return;
     }
     setSaving(true);

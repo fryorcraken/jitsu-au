@@ -13,6 +13,7 @@ import {
   EMPTY_AU_ADDRESS,
   isBlankAuAddress,
   resolveAddressInput,
+  sameAuAddress,
   splitAuAddress,
   type AuAddress,
 } from "./au-address";
@@ -243,5 +244,40 @@ describe("drafts on the way to an address", () => {
       address: "1 Broadway, Ultimo NSW 2007",
       parts: broadway,
     });
+  });
+});
+
+describe("sameAuAddress", () => {
+  it("reads a recomposed line as the address it was copied from", () => {
+    expect(sameAuAddress("12 Smith St, Pyrmont, NSW, 2009", "12 Smith St, Pyrmont NSW 2009")).toBe(
+      true,
+    );
+    expect(sameAuAddress("1 broadway,  ultimo nsw 2007", "1 Broadway, Ultimo NSW 2007")).toBe(true);
+  });
+
+  it("tells two different addresses apart", () => {
+    expect(sameAuAddress("1 Broadway, Ultimo NSW 2007", "9 Quay St, Haymarket NSW 2000")).toBe(
+      false,
+    );
+    expect(sameAuAddress("Rose Cottage, Glebe", "Ivy Cottage, Glebe")).toBe(false);
+  });
+});
+
+describe("control characters", () => {
+  // The database's [[:cntrl:]] in a UTF-8 locale reaches past ASCII, so the
+  // app's rule has to as well, or a pasted value fails its CHECK mid-signing.
+  it.each([
+    ["a tab", "1 Broadway\tUnit 2"],
+    ["a C1 next-line", "1 Broadway\u0085Unit 2"],
+    ["a line separator", "1 Broadway\u2028Unit 2"],
+  ])("refuses %s in the street, and says so under the field", (_why, street) => {
+    expect(auAddressSchema.safeParse({ ...broadway, street }).success).toBe(false);
+    expect(auAddressProblems({ ...broadway, street })).toEqual([
+      {
+        part: "street",
+        label: "Street address",
+        hint: "Please keep the street address on one line",
+      },
+    ]);
   });
 });

@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { nativeSelectClass } from "@/components/site/KitSizeSelect";
 import {
+  AU_ADDRESS_LABELS,
   AU_ADDRESS_LIMITS,
   AU_STATES,
   AU_STATE_NAMES,
@@ -22,7 +24,8 @@ import {
  * address has to meet live in `@/lib/au-address`; this only lays the fields
  * out and reports what was typed.
  *
- * The state is a native `<select>`, for the reasons `KitSizeSelect` gives: it
+ * The state is a native `<select>`, styled and chosen for the reasons
+ * `KitSizeSelect` gives: it
  * has to be able to stand empty, and `/waiver` is a public server-rendered page
  * where a portal-based picker would be the only one.
  *
@@ -30,9 +33,6 @@ import {
  * all four from their saved address in one tap. `section` keeps a second
  * address on the same form (a parent's) from being filled with the first.
  */
-
-const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 md:text-sm";
 
 const AUTOCOMPLETE: Record<AuAddressPart, string> = {
   street: "address-line1",
@@ -119,7 +119,7 @@ export function AddressFields({
         </p>
       )}
       <div>
-        <Label htmlFor={id("street")}>Street address</Label>
+        <Label htmlFor={id("street")}>{AU_ADDRESS_LABELS.street}</Label>
         <Input
           id={id("street")}
           autoComplete={auto("street")}
@@ -133,7 +133,7 @@ export function AddressFields({
         {messageFor(id("street"))}
       </div>
       <div>
-        <Label htmlFor={id("suburb")}>Suburb</Label>
+        <Label htmlFor={id("suburb")}>{AU_ADDRESS_LABELS.suburb}</Label>
         <Input
           id={id("suburb")}
           autoComplete={auto("suburb")}
@@ -147,7 +147,7 @@ export function AddressFields({
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label htmlFor={id("state")}>State</Label>
+          <Label htmlFor={id("state")}>{AU_ADDRESS_LABELS.state}</Label>
           <select
             id={id("state")}
             autoComplete={auto("state")}
@@ -155,7 +155,7 @@ export function AddressFields({
             disabled={disabled}
             onChange={(e) => set("state", e.target.value as AuState | "")}
             {...stateRest}
-            className={cn(selectClass, stateClass)}
+            className={cn(nativeSelectClass, stateClass)}
           >
             <option value="">Choose</option>
             {AU_STATES.map((state) => (
@@ -167,7 +167,7 @@ export function AddressFields({
           {messageFor(id("state"))}
         </div>
         <div>
-          <Label htmlFor={id("postcode")}>Postcode</Label>
+          <Label htmlFor={id("postcode")}>{AU_ADDRESS_LABELS.postcode}</Label>
           <Input
             id={id("postcode")}
             autoComplete={auto("postcode")}

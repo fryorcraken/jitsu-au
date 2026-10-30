@@ -24,6 +24,7 @@ import {
   auAddressFromRow,
   completeAuAddress,
   draftAddressLine,
+  sameAuAddress,
   splitAuAddress,
   type AuAddressDraft,
 } from "@/lib/au-address";
@@ -424,7 +425,7 @@ function Waiver() {
         if (r.guardian_relationship) setGuardianRelationship(r.guardian_relationship);
         // The guardian's address is stored resolved, so the participant's own
         // line in it means "the same", which is the tick's default.
-        if (r.guardian_address && r.guardian_address !== r.address) {
+        if (r.guardian_address && !sameAuAddress(r.guardian_address, r.address)) {
           setGuardianSameAddress(false);
           const guardianParts = splitAuAddress(r.guardian_address);
           if (guardianParts) setGuardianAddress(auAddressDraft(guardianParts));

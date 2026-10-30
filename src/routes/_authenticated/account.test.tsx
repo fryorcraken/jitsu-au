@@ -241,11 +241,6 @@ describe("/account", () => {
     expect(updateMyProfile).toHaveBeenCalledWith({
       data: {
         phone: "0411111111",
-        address_street: "1 Broadway",
-        address_suburb: "Ultimo",
-        address_state: "NSW",
-        address_postcode: "2007",
-        address: "1 Broadway, Ultimo NSW 2007",
         sms_whatsapp_consent: false,
         emergency_contact_name: "Charles Babbage",
         emergency_contact_relationship: "Colleague",
@@ -253,6 +248,30 @@ describe("/account", () => {
         userId: "u1",
       },
     });
+  });
+
+  // The address the club could not split must not stand between a member and
+  // saving a new mobile, nor be rewritten by a save that never touched it.
+  it("saves a new mobile without asking about an address that was not edited", async () => {
+    const user = userEvent.setup();
+    const { getMyProfile } = await import("@/lib/waiver.functions");
+    vi.mocked(getMyProfile).mockResolvedValueOnce({
+      ...PROFILE,
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    await renderLoaded();
+
+    await user.type(screen.getByLabelText("Mobile", { selector: "#account-phone" }), "1");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    const sent = updateMyProfile.mock.calls[0][0].data;
+    expect(sent).not.toHaveProperty("address");
+    expect(sent).not.toHaveProperty("address_street");
   });
 
   // An address the club holds only as one line it cannot read as parts: the
@@ -272,13 +291,12 @@ describe("/account", () => {
     await renderLoaded();
 
     expect(within(card("Contact")).getByText(/1 Broadway Ultimo/)).toBeInTheDocument();
-    // Changing only the mobile still has to send a whole address.
-    await user.type(screen.getByLabelText("Mobile", { selector: "#account-phone" }), "1");
+    // Starting on the address means finishing it: half an address is not sent.
+    await user.type(screen.getByLabelText("Street address"), "1 Broadway");
     await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
     expect(updateMyProfile).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Postcode")).toHaveAttribute("aria-invalid", "true");
 
-    await user.type(screen.getByLabelText("Street address"), "1 Broadway");
     await user.type(screen.getByLabelText("Suburb"), "Ultimo");
     await user.selectOptions(screen.getByLabelText("State"), "NSW");
     await user.type(screen.getByLabelText("Postcode"), "2007");
