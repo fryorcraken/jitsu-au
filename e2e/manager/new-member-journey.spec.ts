@@ -75,7 +75,12 @@ test("a new member's journey: register, sign, trial, buy, pay, and switch plans"
     // being a harmless no-op.
     await expect(visitorPage.getByLabel("Email")).toHaveValue(email);
     await visitorPage.getByLabel("Date of birth").fill("1995-05-15");
-    await visitorPage.getByLabel("Address").fill("1 Broadway, Ultimo NSW 2007");
+    // The address in its four parts. `exact`, because getByLabel matches a
+    // substring: "State" alone would also find anything mentioning a state.
+    await visitorPage.getByLabel("Street address", { exact: true }).fill("1 Broadway");
+    await visitorPage.getByLabel("Suburb", { exact: true }).fill("Ultimo");
+    await visitorPage.getByLabel("State", { exact: true }).selectOption("NSW");
+    await visitorPage.getByLabel("Postcode", { exact: true }).fill("2007");
     await visitorPage.getByLabel("Contact name").fill("Sam Marsh");
     await visitorPage.getByLabel("Relationship").fill("Sibling");
     await visitorPage.getByLabel("Contact mobile").fill("0400 000 556");
@@ -556,14 +561,16 @@ test("a parent signs for a child, and approving it unlocks the PARENT", async ({
     // A child, so the guardian block is required whatever else is on the form.
     await visitorPage.getByLabel("Date of birth").fill("2016-03-08");
     // `exact`, because the guardian block this form has now put on screen
-    // brings its own "Guardian address" and "Guardian mobile", and getByLabel
-    // matches a SUBSTRING case-insensitively: a bare "Address" resolves to two
-    // fields and fails on strict mode. The test above never hit this because an
-    // adult signing for themselves has no guardian block at all.
+    // brings its own "Guardian mobile", and getByLabel matches a SUBSTRING
+    // case-insensitively: a bare "Phone" or "Mobile" can resolve to two fields
+    // and fail on strict mode. The guardian's address stays hidden behind its
+    // "lives at the same address" tick, so the four address boxes are the
+    // participant's alone.
     await visitorPage.getByLabel("Phone", { exact: true }).fill("0400 000 557");
-    await visitorPage
-      .getByLabel("Address", { exact: true })
-      .fill("7 Pyrmont Bridge Road, Pyrmont NSW 2009");
+    await visitorPage.getByLabel("Street address", { exact: true }).fill("7 Pyrmont Bridge Road");
+    await visitorPage.getByLabel("Suburb", { exact: true }).fill("Pyrmont");
+    await visitorPage.getByLabel("State", { exact: true }).selectOption("NSW");
+    await visitorPage.getByLabel("Postcode", { exact: true }).fill("2009");
 
     await visitorPage.getByLabel("Parent or guardian name").fill(parentName);
     await visitorPage.getByLabel("Relationship to the participant").fill("Parent");

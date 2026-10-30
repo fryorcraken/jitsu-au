@@ -35,6 +35,7 @@ import type {
   SignerMeta,
 } from "@/lib/validation";
 import { beltSizeForGiSize, type GiSize } from "@/lib/kit-sizes";
+import { auAddressColumns, resolveAddressInput } from "@/lib/au-address";
 import {
   mediaConsentFromAnswers,
   missingRequiredAcks,
@@ -952,14 +953,24 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // form because blank means "the same as the participant's". Everything
     // below -- the frozen row and the PDF -- uses these resolved values, so the
     // document and the record can never disagree about who signed.
+    //
+    // The addresses arrive in parts and are composed into the one line the
+    // document prints here, once, so the row's line and its parts are the same
+    // address by construction (the database refuses a waiver where they are
+    // not: `waivers_address_matches_parts`).
+    const participantAddress = resolveAddressInput(data.address, data.address_parts);
+    const guardianAddressLine = resolveAddressInput(
+      data.guardian_address,
+      data.guardian_address_parts,
+    ).address;
     const contacts = resolveWaiverContacts({
       isMinor: needsGuardian,
-      address: data.address,
+      address: participantAddress.address,
       phone: data.phone,
       email,
       guardianName: data.guardian_name || "",
       guardianRelationship: data.guardian_relationship || "",
-      guardianAddress: data.guardian_address || "",
+      guardianAddress: guardianAddressLine,
       guardianPhone: data.guardian_phone || "",
       guardianEmail: data.guardian_email || "",
       emergencyContactIsGuardian: data.emergency_contact_is_guardian ?? false,
@@ -1155,7 +1166,8 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         last_name: data.last_name,
         preferred_name: data.preferred_name || null,
         date_of_birth: data.date_of_birth,
-        address: data.address,
+        address: participantAddress.address,
+        ...auAddressColumns(participantAddress.parts),
         phone: data.phone,
         email,
         uts_student_number: data.uts_student_number?.trim() || null,
@@ -1327,7 +1339,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
         first_name: data.first_name,
         preferred_name: data.preferred_name || "",
         date_of_birth: data.date_of_birth,
-        address: data.address,
+        address: participantAddress.address,
         phone: data.phone,
         email,
         emergency_contact_name: contacts.emergencyContactName,
@@ -2023,14 +2035,16 @@ export async function filePaperWaiver(
   // the "emergency contact is the guardian" flag: they carry whatever the
   // manager read off the page, and an old form's single contact block falls
   // through to the guardian by name.
+  const participantAddress = resolveAddressInput(data.address, data.address_parts);
   const paperContacts = resolveWaiverContacts({
     isMinor: needsGuardian,
-    address: data.address,
+    address: participantAddress.address,
     phone: data.phone,
     email,
     guardianName: data.guardian_name || "",
     guardianRelationship: data.guardian_relationship || "",
-    guardianAddress: data.guardian_address || "",
+    guardianAddress: resolveAddressInput(data.guardian_address, data.guardian_address_parts)
+      .address,
     guardianPhone: data.guardian_phone || "",
     guardianEmail: data.guardian_email || "",
     emergencyContactIsGuardian: false,
@@ -2205,7 +2219,8 @@ export async function filePaperWaiver(
     last_name: data.last_name,
     preferred_name: data.preferred_name || null,
     date_of_birth: data.date_of_birth,
-    address: data.address,
+    address: participantAddress.address,
+    ...auAddressColumns(participantAddress.parts),
     phone: data.phone,
     email,
     uts_student_number: data.uts_student_number?.trim() || null,

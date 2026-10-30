@@ -24,7 +24,11 @@ const PROFILE = {
   preferred_name: null,
   display_name: null,
   date_of_birth: "1990-12-10",
-  address: "1 Broadway, Ultimo NSW",
+  address: "1 Broadway, Ultimo NSW 2007",
+  address_street: "1 Broadway",
+  address_suburb: "Ultimo",
+  address_state: "NSW",
+  address_postcode: "2007",
   phone: "0400000000",
   uts_student_number: null,
   emergency_contact_name: "Charles Babbage",
@@ -237,13 +241,113 @@ describe("/account", () => {
     expect(updateMyProfile).toHaveBeenCalledWith({
       data: {
         phone: "0411111111",
-        address: "1 Broadway, Ultimo NSW",
         sms_whatsapp_consent: false,
         emergency_contact_name: "Charles Babbage",
         emergency_contact_relationship: "Colleague",
         emergency_contact_phone: "0400000001",
         userId: "u1",
       },
+    });
+  });
+
+  // A member who lives abroad gives their address as free text, with no state
+  // list or postcode format, and it is saved as its one line with no parts.
+  it("saves an address outside Australia as its one line", async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(screen.getByLabelText("This address is outside Australia"));
+    await user.clear(screen.getByLabelText("Street address"));
+    await user.type(screen.getByLabelText("Street address"), "10 Downing St");
+    await user.clear(screen.getByLabelText(/Town or city/));
+    await user.type(screen.getByLabelText(/Town or city/), "London");
+    await user.clear(screen.getByLabelText(/Postcode/));
+    await user.type(screen.getByLabelText(/Postcode/), "SW1A 2AA");
+    await user.type(screen.getByLabelText(/Country/), "United Kingdom");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    const sent = updateMyProfile.mock.calls[0][0].data;
+    expect(sent.address).toBe("10 Downing St, London SW1A 2AA, United Kingdom");
+    expect(sent).not.toHaveProperty("address_street");
+    expect(sent).not.toHaveProperty("address_postcode");
+  });
+
+  // The club keeps no flag for "abroad", so a saved address that ends in a
+  // country has to come back with the tick on, not with a request to split it.
+  it("opens an address saved as outside Australia with the tick on, and asks nothing", async () => {
+    const { getMyProfile } = await import("@/lib/waiver.functions");
+    vi.mocked(getMyProfile).mockResolvedValueOnce({
+      ...PROFILE,
+      address: "10 Downing St, London SW1A 2AA, United Kingdom",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    await renderLoaded();
+
+    expect(screen.getByLabelText("This address is outside Australia")).toBeChecked();
+    expect(screen.getByLabelText(/Country/)).toHaveValue("United Kingdom");
+    expect(screen.queryByText(/We have this address as/)).not.toBeInTheDocument();
+  });
+
+  // The address the club could not split must not stand between a member and
+  // saving a new mobile, nor be rewritten by a save that never touched it.
+  it("saves a new mobile without asking about an address that was not edited", async () => {
+    const user = userEvent.setup();
+    const { getMyProfile } = await import("@/lib/waiver.functions");
+    vi.mocked(getMyProfile).mockResolvedValueOnce({
+      ...PROFILE,
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    await renderLoaded();
+
+    await user.type(screen.getByLabelText("Mobile", { selector: "#account-phone" }), "1");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    const sent = updateMyProfile.mock.calls[0][0].data;
+    expect(sent).not.toHaveProperty("address");
+    expect(sent).not.toHaveProperty("address_street");
+  });
+
+  // An address the club holds only as one line it cannot read as parts: the
+  // line is shown so nobody has to remember it, and Save names the part that
+  // is missing instead of sending half an address.
+  it("asks for an address held as one line in parts before it saves", async () => {
+    const user = userEvent.setup();
+    const { getMyProfile } = await import("@/lib/waiver.functions");
+    vi.mocked(getMyProfile).mockResolvedValueOnce({
+      ...PROFILE,
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    await renderLoaded();
+
+    expect(within(card("Contact")).getByText(/1 Broadway Ultimo/)).toBeInTheDocument();
+    // Starting on the address means finishing it: half an address is not sent.
+    await user.type(screen.getByLabelText("Street address"), "1 Broadway");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+    expect(updateMyProfile).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Postcode")).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(screen.getByLabelText("Suburb"), "Ultimo");
+    await user.selectOptions(screen.getByLabelText("State"), "NSW");
+    await user.type(screen.getByLabelText("Postcode"), "2007");
+    await user.click(within(card("Contact")).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateMyProfile).toHaveBeenCalledTimes(1));
+    expect(updateMyProfile.mock.calls[0][0].data).toMatchObject({
+      address_postcode: "2007",
+      address: "1 Broadway, Ultimo NSW 2007",
     });
   });
 
@@ -527,7 +631,7 @@ describe("a parent who holds the login and does not train", () => {
     render(<AccountPage />);
     // Not `renderLoaded`: that waits for "Gi size", which is one of the fields
     // this case is about NOT rendering. The address is on the card that stays.
-    await screen.findByLabelText("Address");
+    await screen.findByLabelText("Street address");
 
     // Contact stays: it is how the club reaches the family.
     expect(card("Contact")).toBeInTheDocument();

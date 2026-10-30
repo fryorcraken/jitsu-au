@@ -374,6 +374,46 @@ describe("updateMyProfileSchema", () => {
     expect(() => updateMyProfileSchema.parse({ emergency_contact_relationship: "" })).toThrow();
   });
 
+  describe("the address", () => {
+    const parts = {
+      address_street: "1 Broadway",
+      address_suburb: "Ultimo",
+      address_state: "NSW" as const,
+      address_postcode: "2007",
+    };
+
+    // The line is the server's to compose, so a client cannot store an address
+    // whose line says one place and whose parts say another.
+    it("composes the line from the parts, whatever line was sent with them", () => {
+      expect(updateMyProfileSchema.parse({ ...parts, address: "somewhere else" })).toEqual({
+        ...parts,
+        address: "1 Broadway, Ultimo NSW 2007",
+      });
+    });
+
+    it("refuses half an address", () => {
+      const { address_postcode: _p, ...three } = parts;
+      expect(() => updateMyProfileSchema.parse(three)).toThrow(/whole address/);
+    });
+
+    it("refuses a part the database would refuse", () => {
+      expect(() => updateMyProfileSchema.parse({ ...parts, address_postcode: "207" })).toThrow();
+      expect(() => updateMyProfileSchema.parse({ ...parts, address_state: "XYZ" })).toThrow();
+    });
+
+    it("ignores a blank line sent with the parts, which it replaces anyway", () => {
+      expect(updateMyProfileSchema.parse({ ...parts, address: "" }).address).toBe(
+        "1 Broadway, Ultimo NSW 2007",
+      );
+    });
+
+    it("still takes a line on its own from an older page", () => {
+      expect(updateMyProfileSchema.parse({ address: " 1 Broadway Ultimo " })).toEqual({
+        address: "1 Broadway Ultimo",
+      });
+    });
+  });
+
   // `userId` says WHO the patch is about. It is the one key here that is not a
   // column, and the handler strips it before the UPDATE.
   it("accepts the person the patch is about, and requires it to be a uuid", () => {
@@ -428,7 +468,11 @@ describe("waiverToProfileFields", () => {
       last_name: "Lovelace",
       preferred_name: "Addy",
       date_of_birth: "1990-01-01",
-      address: "1 Example St",
+      address: "1 Example St, Ultimo NSW 2007",
+      address_street: "1 Example St",
+      address_suburb: "Ultimo",
+      address_state: "NSW",
+      address_postcode: "2007",
       phone: "0400 000 000",
       uts_student_number: "12345678",
       sms_whatsapp_consent: true,
@@ -468,6 +512,26 @@ describe("waiverToProfileFields", () => {
     expect(patch.guardian_address).toBe("2 Harris St, Ultimo NSW");
     expect(patch.guardian_phone).toBe("0400 222 222");
     expect(patch.guardian_email).toBe("charles@example.com");
+  });
+
+  // A waiver signed before addresses had parts writes four nulls beside its
+  // line, so the profile's parts can never go on describing an old address;
+  // the database then reads them back out of the line where it can.
+  it("carries an old waiver's missing parts through as nulls, never as stale parts", () => {
+    const patch = waiverToProfileFields({
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    } as never);
+    expect(patch).toMatchObject({
+      address: "1 Broadway Ultimo",
+      address_street: null,
+      address_suburb: null,
+      address_state: null,
+      address_postcode: null,
+    });
   });
 
   it("carries a declined media consent through as false", () => {
@@ -1512,6 +1576,52 @@ describe("waiverSubmitSchema", () => {
 
   it("accepts a valid adult waiver with a typed signature", () => {
     expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+  });
+
+  // New forms send the address in parts; the line above is what a client that
+  // predates them sends, and must keep working across a deploy.
+  describe("the address", () => {
+    const parts = { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" };
+    const { address: _line, ...noAddress } = validAdult;
+
+    it("accepts it in parts, with no line", () => {
+      expect(waiverSubmitSchema.safeParse({ ...noAddress, address_parts: parts }).success).toBe(
+        true,
+      );
+    });
+
+    it("still accepts a single line from an older form", () => {
+      expect(waiverSubmitSchema.safeParse(validAdult).success).toBe(true);
+    });
+
+    it("requires one or the other", () => {
+      const result = waiverSubmitSchema.safeParse(noAddress);
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map((i) => i.path.join("."))).toContain("address");
+    });
+
+    it("refuses parts the database would refuse", () => {
+      for (const bad of [
+        { ...parts, postcode: "207" },
+        { ...parts, state: "New South Wales" },
+        { ...parts, suburb: "Ultimo 2007" },
+        { ...parts, street: "" },
+      ]) {
+        expect(
+          waiverSubmitSchema.safeParse({ ...noAddress, address_parts: bad }).success,
+          JSON.stringify(bad),
+        ).toBe(false);
+      }
+    });
+
+    it("takes a guardian's own address in parts too", () => {
+      expect(
+        waiverSubmitSchema.safeParse({
+          ...validAdult,
+          guardian_address_parts: { ...parts, postcode: "x" },
+        }).success,
+      ).toBe(false);
+    });
   });
 
   it("accepts an optional verification token, and works fine without one", () => {
@@ -2566,6 +2676,37 @@ describe("paperWaiverUploadSchema", () => {
 
   it("accepts a filed adult form", () => {
     expect(paperWaiverUploadSchema.safeParse(validAdult).success).toBe(true);
+  });
+
+  // A paper form's address is transcribed in parts where it can be, or as the
+  // one line written on it where it cannot; one of the two is required.
+  // The line sent beside parts is ignored, so it is not held to anything.
+  it("does not refuse a long line it is going to ignore", () => {
+    const parts = { street: "1 Broadway", suburb: "Ultimo", state: "nsw", postcode: "2007" };
+    const result = paperWaiverUploadSchema.safeParse({
+      ...validAdult,
+      address: "x".repeat(400),
+      address_parts: parts,
+    });
+    expect(result.success).toBe(true);
+    // And a lower-case state from an agent is the state it means.
+    expect(result.data?.address_parts?.state).toBe("NSW");
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...validAdult, address: "x".repeat(301) }).success,
+    ).toBe(false);
+  });
+
+  it("takes the address in parts or as one line, but not neither", () => {
+    const { address: _line, ...noAddress } = validAdult;
+    const parts = { street: "1 Broadway", suburb: "Ultimo", state: "NSW", postcode: "2007" };
+    expect(paperWaiverUploadSchema.safeParse({ ...noAddress, address_parts: parts }).success).toBe(
+      true,
+    );
+    expect(paperWaiverUploadSchema.safeParse(noAddress).success).toBe(false);
+    expect(
+      paperWaiverUploadSchema.safeParse({ ...noAddress, address_parts: { ...parts, state: "XX" } })
+        .success,
+    ).toBe(false);
   });
 
   // Without .strict() Zod STRIPS an unknown key, so a misspelled confirm flag

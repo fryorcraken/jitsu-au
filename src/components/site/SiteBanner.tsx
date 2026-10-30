@@ -96,12 +96,23 @@ function BannerText({
 
   const content = (
     <>
-      {banner.message} <span className="underline underline-offset-2">{banner.link_label}</span>
+      {banner.message}{" "}
+      <span className="underline underline-offset-2 group-hover/banner:decoration-2 group-focus-visible/banner:decoration-2">
+        {banner.link_label}
+      </span>
     </>
   );
   if (!interactive) return <p className={className}>{content}</p>;
   return (
-    <BannerLink href={banner.link_href} className={`${className} hover:underline`}>
+    // One underline only: the link text's own. A hover underline on the whole
+    // line drew a second, offset line under the link text. Hover and keyboard
+    // focus instead darken the line (the close button's own cue, darker so the
+    // white text keeps its contrast) and thicken the link text's underline.
+    // The group is named so only this link drives that, never some ancestor.
+    <BannerLink
+      href={banner.link_href}
+      className={`${className} group/banner rounded px-1 transition hover:bg-black/10 focus-visible:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground`}
+    >
       {content}
     </BannerLink>
   );

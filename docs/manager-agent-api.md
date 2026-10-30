@@ -475,7 +475,7 @@ code_of_conduct_not_published` with its `version`, and nothing is made
     `first_published_at`, which the `Previous` label uses so a version rolled
     away from never reads as `Draft`.
 - `list_blog_posts` / `get_blog_post` / `save_blog_post` / `delete_blog_post` /
-  `upload_blog_image` (`"25"`) / `start_blog_image_upload` (`"30"`) — the blog, the agent's equivalent of
+  `upload_blog_image` (`"25"`) / `start_blog_image_upload` (`"31"`) — the blog, the agent's equivalent of
   `/manager/blog`. Every write goes through the plain functions in
   `src/lib/blog.functions.ts` that the editor's server functions also call
   (`createBlogPostRow`, `updateBlogPostRow`, `deleteBlogPostRow`,
@@ -518,7 +518,7 @@ code_of_conduct_not_published` with its `version`, and nothing is made
 image_rejected` (will never work) and `502 image_fetch_failed` (the address
     could not be read just now). Storing an image changes no post; the result's
     `path` goes in `cover_image_path` and its `markdown` in `body_md`.
-  - **`start_blog_image_upload` (`"30"`) is the route for a file the caller
+  - **`start_blog_image_upload` (`"31"`) is the route for a file the caller
     holds but cannot send.** Claude on claude.ai has the manager's photo in its
     code-execution sandbox, but an MCP call is text it types, and neither
     `upload_blog_image` route fits: base64 of a real photo is far too long to
@@ -562,6 +562,18 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
 
 ### `file_waiver`: the parts that have bitten us
 
+- **The address is taken in parts (`address_parts`), and the API also takes
+  one line (`address`) where the screen does not.** That is deliberate, not
+  drift. Both send parts when they have them and both store the same thing for
+  them (`resolveAddressInput` in `src/lib/au-address.ts`). A manager at the
+  screen can look up a missing postcode before pressing Sign; an agent working
+  through a stack of old records cannot always split what is written, and
+  guessing a postcode to make it fit would put a wrong one on a signed
+  document. A one-line address is also how an address outside Australia goes, from
+  every surface: the screens build it from their "outside Australia" boxes,
+  and an agent sends it as `address`. A line is stored as written with no parts, and the person is asked
+  for them the next time they give an address. Changing either surface's rule
+  means changing this bullet.
 - **The two surfaces present that one check differently on purpose, and
   this is not an inconsistency to tidy up.** The HTTP API returns
   `409 duplicate_waiver`, because a machine caller needs a distinct status
@@ -664,7 +676,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"29"`.
+test so the bump is a deliberate edit, and the current value is `"31"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call
