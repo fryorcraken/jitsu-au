@@ -8,9 +8,11 @@ import {
 } from "@/lib/offer-banner";
 
 /**
- * Slim, dismissible top banner carrying the club's strongest hook — the first
- * two classes are free — with a CTA into the free-trial flow. Rendered
- * site-wide above the header; dismissal persists via localStorage.
+ * Slim, dismissible top banner. While the club trains at a temporary location
+ * free trials are paused, so it says so up front (before anybody turns up
+ * expecting a free class) and points them at registering their interest, so
+ * they hear when trials reopen. Rendered site-wide above the header; dismissal
+ * persists via localStorage.
  */
 export function OfferBanner() {
   // Start hidden so the server render and first client render agree
@@ -36,16 +38,18 @@ export function OfferBanner() {
           to="/register-interest"
           className="flex flex-1 items-center justify-center gap-1.5 text-center font-medium hover:underline"
         >
-          <span aria-hidden="true">🥋</span>
+          <span aria-hidden="true">📍</span>
           <span>
-            Your first 2 classes are free. No gear, no commitment.{" "}
-            <span className="underline underline-offset-2">Start your free trial</span>
+            We're training at a temporary location, so free trials are paused for now.{" "}
+            <span className="underline underline-offset-2">
+              Register your interest and we'll tell you when they reopen
+            </span>
           </span>
         </Link>
         <button
           type="button"
           onClick={dismiss}
-          aria-label="Dismiss offer"
+          aria-label="Dismiss notice"
           className="shrink-0 rounded p-1 opacity-80 transition hover:bg-white/15 hover:opacity-100"
         >
           <X className="h-4 w-4" />

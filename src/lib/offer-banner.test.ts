@@ -60,6 +60,13 @@ describe("isOfferBannerDismissed", () => {
     };
     expect(isOfferBannerDismissed(throwing)).toBe(false);
   });
+
+  it("ignores a dismissal of the old free-trial offer", () => {
+    // Somebody who closed "your first 2 classes are free" still needs to hear
+    // that trials are paused.
+    const storage = makeStorage({ "uts-offer-banner-dismissed": "1" });
+    expect(isOfferBannerDismissed(storage)).toBe(false);
+  });
 });
 
 describe("persistOfferBannerDismissed", () => {

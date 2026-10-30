@@ -1,11 +1,20 @@
-// Business rules for the site-wide "2 free classes" offer banner.
+// Business rules for the site-wide top banner. It used to sell the "2 free
+// classes" offer; while the club trains at a temporary location it says free
+// trials are paused and asks people to register their interest instead.
 // Kept free of React/router/DOM imports so the rules stay unit-testable.
 
-/** localStorage key holding the visitor's dismissal of the offer banner. */
-export const OFFER_BANNER_STORAGE_KEY = "uts-offer-banner-dismissed";
+/**
+ * localStorage key holding the visitor's dismissal of the banner.
+ *
+ * Versioned by message: a visitor who dismissed the old free-trial offer never
+ * agreed to miss the news that trials are paused, so a new message gets a new
+ * key and is shown once to everybody. The old `uts-offer-banner-dismissed`
+ * value is simply never read again.
+ */
+export const OFFER_BANNER_STORAGE_KEY = "uts-offer-banner-dismissed-trials-paused";
 
-// Pages already inside the free-trial / waiver funnel: the offer nudge would be
-// redundant there, so the banner is suppressed.
+// Pages already inside the register-interest / waiver funnel: the nudge would
+// be redundant there, so the banner is suppressed.
 const HIDDEN_PATH_PREFIXES = ["/register-interest", "/waiver"] as const;
 
 /** Whether the banner should be hidden on the given route path. */
