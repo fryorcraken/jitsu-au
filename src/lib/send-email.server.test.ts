@@ -36,8 +36,8 @@ describe("sendEmail", () => {
     expect(sendLovableEmail).toHaveBeenCalledWith(
       {
         to: "sam@example.com",
-        from: "UTS Jitsu <noreply@notify.jitsu.au>",
-        sender_domain: "notify.jitsu.au",
+        from: "UTS Jitsu <noreply@notify.utsjitsu.com.au>",
+        sender_domain: "notify.utsjitsu.com.au",
         subject: "Hello",
         html: "<p>Hello</p>",
         text: "Hello",

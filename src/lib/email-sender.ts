@@ -4,8 +4,11 @@
 // of them ends up on a domain DMARC no longer aligns with.
 
 // The From domain must match the sender domain so DKIM/SPF align under DMARC
-// (Gmail flags misaligned From-domains as spam).
-export const SENDER_DOMAIN = "notify.jitsu.au";
+// (Gmail flags misaligned From-domains as spam). It also has to be the domain
+// the project's Lovable email setup is configured for (More -> Emails), and that
+// domain must be verified before a build carrying it is published, or every
+// email (sign-in links included) is refused.
+export const SENDER_DOMAIN = "notify.utsjitsu.com.au";
 /** The name every email is signed with, and that subjects and greetings use. */
 export const SITE_NAME = "UTS Jitsu";
 
