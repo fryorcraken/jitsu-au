@@ -208,9 +208,9 @@ src/
     sitemap[.]xml.ts        /sitemap.xml
     routeTree.gen.ts      AUTO-GENERATED route tree — never edit by hand
   components/
-    ui/                   shadcn/ui primitives (generated; avoid hand-editing). Only
-                          the ones in use are kept: add one back through shadcn,
-                          with its package, when a screen needs it
+    ui/                   shadcn/ui primitives (generated; avoid hand-editing). The
+                          unused ones were removed on 2026-10-30: add one back
+                          through shadcn, with its package, when a screen needs it
     site/                 App chrome + shared UX: SiteLayout/MemberLayout/KbLayout,
                           SiteHeader, SiteFooter, SignaturePad, AuthPending,
                           SubmitStatus, StatusPill, Loading, LoadFailure,
