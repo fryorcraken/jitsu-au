@@ -1118,6 +1118,50 @@ export function isPaperWaiver(signerMeta: unknown): boolean {
   );
 }
 
+/**
+ * What the signing endpoint says when a resent submission id does not belong
+ * to the request carrying it (see `isSameOnlineSubmission`). It deliberately
+ * says nothing about the waiver the id named. The waiver page recognises it and
+ * starts a fresh submission, so pressing "Try again" files the form as typed.
+ * A real signer only meets it after editing their email or birth date between
+ * an attempt that landed and one that could not confirm it had.
+ */
+export const RESUBMISSION_REFUSED =
+  "We couldn't save this waiver. Your details are still here, so please try again.";
+
+/**
+ * Whether a stored waiver is the one an online signing retry is asking about.
+ *
+ * The public signing endpoint resolves a resent `client_submission_id` to the
+ * row it already saved and hands back a fresh link to that row's PDF, health
+ * declaration and signature included. Without a login, the id would otherwise
+ * be the only thing standing between a caller and somebody's signed waiver, so
+ * it is not trusted on its own:
+ *
+ * - **Never a paper filing.** The id column is shared with `file_waiver`,
+ *   whose caller chooses the id, so those values can be guessable (derived from
+ *   the record, kept in import scripts). The same reasoning keeps paper rows
+ *   out of `checkWaiverSubmission`.
+ * - **The same person.** A genuine retry resends the identical payload, so the
+ *   address and birth date it carries match what was saved. Anybody else
+ *   holding the id would also need both, which costs a real signer nothing.
+ *
+ * `submittedEmail` is the address the handler would store (already chosen
+ * between participant and guardian, and normalized); the stored one was
+ * written from the same value, but is normalized again so a row written before
+ * normalization still matches its own retry.
+ */
+export function isSameOnlineSubmission(
+  stored: { signer_meta: unknown; email: string; date_of_birth: string },
+  submitted: { email: string; date_of_birth: string },
+): boolean {
+  if (isPaperWaiver(stored.signer_meta)) return false;
+  if (!submitted.email || normalizeEmail(stored.email) !== normalizeEmail(submitted.email)) {
+    return false;
+  }
+  return stored.date_of_birth.slice(0, 10) === submitted.date_of_birth.slice(0, 10);
+}
+
 /** The file types a scanned waiver can arrive as. */
 export const scanMimeTypes = ["application/pdf", "image/png", "image/jpeg"] as const;
 export type ScanMimeType = (typeof scanMimeTypes)[number];

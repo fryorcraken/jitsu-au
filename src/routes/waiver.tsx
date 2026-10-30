@@ -38,7 +38,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { listMyDependants } from "@/lib/household.functions";
 import { useResilientSubmit } from "@/hooks/use-resilient-submit";
-import { WAIVER_SUBMIT } from "@/lib/submit-resilience";
+import { newSubmissionId, WAIVER_SUBMIT } from "@/lib/submit-resilience";
 import {
   clearDraft,
   draftHasContent,
@@ -48,6 +48,7 @@ import {
 } from "@/lib/waiver-draft";
 import {
   greetingName,
+  RESUBMISSION_REFUSED,
   resolveNamePrefill,
   waiverNeedsGuardian,
   waiverPrefillSearchSchema,
@@ -962,6 +963,12 @@ function Waiver() {
       // Signed and recorded: the draft has done its job, and it holds health
       // answers and a signature that should not outlive it.
       clearDraft();
+    } else if (outcome.error.message === RESUBMISSION_REFUSED) {
+      // The server would not let this id stand for what is on the form now
+      // (an earlier attempt with it landed under a different email or birth
+      // date). Retrying with the same id can only be refused again, so the
+      // next "Try again" starts a fresh submission. The failure panel stays up.
+      send.adoptSubmissionId(newSubmissionId());
     }
   }
 
