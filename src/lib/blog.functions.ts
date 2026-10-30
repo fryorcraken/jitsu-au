@@ -455,23 +455,54 @@ async function blogImageInUse(admin: AdminClient, path: string): Promise<boolean
   return (asCover.data ?? []).length > 0 || (inBody.data ?? []).length > 0;
 }
 
+/** The folder a post's images are filed in. A post not saved yet files under `drafts`. */
+const blogImageFolder = (postId: string | undefined) => postId || "drafts";
+
+/** A stored image's public address, from its storage path. */
+function blogImageUrl(admin: AdminClient, path: string): string {
+  return admin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
 /**
  * Put an image in the `blog-media` bucket and return its storage path (what
  * `cover_image_path` takes) and its public address (what a Markdown image in
  * the body points at).
+ *
+ * Every image is stored under `<folder>/<id>-<name>`. The id is fresh unless
+ * the caller names one: an upload link (`blog-image-ticket.ts`) carries its
+ * own, which is how `findBlogImage` can tell that link has been used.
  */
 export async function storeBlogImage(
   admin: AdminClient,
-  file: { post_id?: string; name: string; type: BlogImageMimeType; bytes: Uint8Array },
+  file: { post_id?: string; id?: string; name: string; type: BlogImageMimeType; bytes: Uint8Array },
 ): Promise<{ path: string; url: string }> {
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${file.post_id || "drafts"}/${crypto.randomUUID()}-${safeName}`;
+  const path = `${blogImageFolder(file.post_id)}/${file.id ?? crypto.randomUUID()}-${safeName}`;
   const { error } = await admin.storage
     .from(BUCKET)
     .upload(path, file.bytes, { contentType: file.type, upsert: false });
   if (error) throw new Error(error.message);
-  const { data: pub } = admin.storage.from(BUCKET).getPublicUrl(path);
-  return { path, url: pub.publicUrl };
+  return { path, url: blogImageUrl(admin, path) };
+}
+
+/**
+ * The image already stored under this id, if there is one: the other half of
+ * `storeBlogImage`'s named id. Throws when the bucket cannot be read, so a
+ * failed look is never mistaken for "nothing there".
+ */
+export async function findBlogImage(
+  admin: AdminClient,
+  file: { post_id?: string; id: string },
+): Promise<{ path: string; url: string } | null> {
+  const folder = blogImageFolder(file.post_id);
+  const { data, error } = await admin.storage
+    .from(BUCKET)
+    .list(folder, { search: `${file.id}-`, limit: 1 });
+  if (error) throw new Error(error.message);
+  const found = (data ?? []).find((o) => o.name.startsWith(`${file.id}-`));
+  if (!found) return null;
+  const path = `${folder}/${found.name}`;
+  return { path, url: blogImageUrl(admin, path) };
 }
 
 export const listAllBlogPosts = createServerFn({ method: "GET" })

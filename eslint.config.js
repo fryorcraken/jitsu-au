@@ -1,11 +1,12 @@
 import js from "@eslint/js";
+import { defineConfig } from "eslint/config";
 import eslintPluginPrettier from "eslint-plugin-prettier/recommended";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
-export default tseslint.config(
+export default defineConfig(
   {
     // Build output and generated code (shadcn primitives, Supabase types, the
     // router tree) are not hand-maintained, so they are exempt from lint. The
@@ -34,7 +35,12 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // Spelled out rather than spread from `reactHooks.configs.recommended`:
+      // from v6 that preset also turns on the React Compiler rules, which
+      // flag dozens of working components. Adopting them is a refactor of its
+      // own, not part of a version bump.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
       "no-restricted-imports": [
         "error",
         {
@@ -47,7 +53,15 @@ export default tseslint.config(
           ],
         },
       ],
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      // A route file exports `Route = createFileRoute(...)(...)` with its page
+      // components beside it, TanStack Router's convention. Naming the route
+      // builders here lets the rule count that export as a component, as it
+      // did before v0.5, so it stays quiet about the convention and still
+      // flags anything else a route file exports.
+      "react-refresh/only-export-components": [
+        "warn",
+        { allowConstantExport: true, extraHOCs: ["createFileRoute", "createRootRouteWithContext"] },
+      ],
       "@typescript-eslint/no-unused-vars": "off",
     },
   },

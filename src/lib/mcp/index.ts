@@ -5,6 +5,7 @@ import { auth, defineMcp } from "@lovable.dev/mcp-js";
 import manifestTool from "./tools/manifest";
 import readTool from "./tools/read";
 import changeTool from "./tools/change";
+import { MAX_MCP_REQUEST_BODY_BYTES } from "./limits";
 
 // Vite inlines the stable project ref; the published SUPABASE_URL may be a proxy,
 // and the token issuer must be the direct address.
@@ -22,4 +23,5 @@ export default defineMcp({
     requireOAuthClientClaim: true,
   }),
   tools: [manifestTool, readTool, changeTool],
+  limits: { maxRequestBodySize: MAX_MCP_REQUEST_BODY_BYTES },
 });

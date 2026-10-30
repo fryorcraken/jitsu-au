@@ -853,7 +853,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     // the browser's self-reported context (timezone, screen, platform). Also
     // capture the caller's bearer token to know who is submitting.
     let signer_ip: string | null = null;
-    let signer_meta: SignerMeta = {};
+    let signer_meta: SignerMeta;
     let bearer: string | null = null;
     try {
       const { getRequestHeader } = await import("@tanstack/react-start/server");
@@ -2021,6 +2021,7 @@ export async function filePaperWaiver(
       e instanceof Error
         ? e.message
         : "We couldn't read that scan. Try a PDF, or photograph each page again.",
+      { cause: e },
     );
   }
 

@@ -50,6 +50,11 @@ the same code, not a second implementation.
   `src/lib/manager-agent-actions.ts`, so an action behaves, refuses and reports
   errors identically over HTTP and MCP. Change actions there, not in either
   front door.
+- **The MCP door accepts a request as large as the largest action input**: a
+  paper waiver's scans, sent as base64. The SDK's own default is 1 MiB, and
+  anything over it gets a 413 before the tool runs, which a waiver scan over
+  about 750 KB used to hit. The figure is derived from the actions' file limits
+  in `src/lib/mcp/limits.ts`, so raising one of those raises it too.
 - **Auth is OAuth, not a minted token.** The assistant registers itself with
   the club's Supabase Auth OAuth 2.1 server, sends the manager to
   `/.lovable/oauth/consent` (`src/routes/[.]lovable.oauth.consent.tsx`) to sign
@@ -475,7 +480,7 @@ code_of_conduct_not_published` with its `version`, and nothing is made
     `first_published_at`, which the `Previous` label uses so a version rolled
     away from never reads as `Draft`.
 - `list_blog_posts` / `get_blog_post` / `save_blog_post` / `delete_blog_post` /
-  `upload_blog_image` (`"25"`) — the blog, the agent's equivalent of
+  `upload_blog_image` (`"25"`) / `start_blog_image_upload` (`"31"`) — the blog, the agent's equivalent of
   `/manager/blog`. Every write goes through the plain functions in
   `src/lib/blog.functions.ts` that the editor's server functions also call
   (`createBlogPostRow`, `updateBlogPostRow`, `deleteBlogPostRow`,
@@ -518,12 +523,60 @@ code_of_conduct_not_published` with its `version`, and nothing is made
 image_rejected` (will never work) and `502 image_fetch_failed` (the address
     could not be read just now). Storing an image changes no post; the result's
     `path` goes in `cover_image_path` and its `markdown` in `body_md`.
+  - **`start_blog_image_upload` (`"31"`) is the route for a file the caller
+    holds but cannot send.** Claude on claude.ai has the manager's photo in its
+    code-execution sandbox, but an MCP call is text it types, and neither
+    `upload_blog_image` route fits: base64 of a real photo is far too long to
+    copy out, and the sandbox has no public address to offer. The action
+    returns a one-time link and a ready `curl` command; the sandbox POSTs the
+    raw bytes to `/api/manager/blog-image`
+    (`src/routes/api/manager/blog-image.ts`) with the link's token as its
+    bearer header, and gets back the same `path` / `url` / `markdown`. What
+    the token is and is not, all in `src/lib/blog-image-ticket.ts`:
+    - **Not a manager credential.** It is a signed ticket (HMAC, key derived
+      by HKDF from the service-role key), and storing one image is all it can
+      do. That endpoint takes no other credential, and the agent endpoint does
+      not take a ticket. The upload re-checks that the manager who asked still
+      holds the role. It is not tied to the credential it was asked with, so
+      revoking a leaked API token or an assistant's sign-in leaves links
+      already minted with it working until their hour is up; removing the
+      manager role does void them. Accepted, because tying it would cost a
+      lookup per upload to guard an hour of storing pictures that show
+      nowhere until a manager publishes them.
+    - **Works once, for an hour.** The image is stored under the ticket's own
+      id, which the upload looks for first, so a second use is
+      `409 already_uploaded` with the first image's `path` / `url` /
+      `markdown` in `error.details` (usually a retry whose answer was lost).
+      That answer is given even after the hour is up, so a late retry is not
+      told to upload again. No table holds tickets: the bucket is the record.
+      A rejected or interrupted upload stores nothing, so the same link can be
+      used again. The one gap: two uploads racing on one link with files of
+      different types both land, because the file's extension is part of its
+      name. Only the link's holder can do that, and all it costs is an extra
+      unused file.
+    - **The link points at `SITE_ORIGIN`**, wherever it was asked from, by
+      `linkOrigin`: a ticket only verifies on the server that signed it, and
+      the live address is the one host that does not redirect a bearer header
+      away. A loopback stack asked over HTTP gets a link to itself. Over MCP
+      the SDK does not say which host was asked, so it is the live site, and
+      a local stack (its own database on a loopback host) refuses with
+      `503 upload_links_unavailable` rather than hand out a link its ticket
+      cannot pass.
+    - **The command reads the file's path from a shell variable**
+      (`--data-binary "@$IMAGE_FILE"`), because a pasted path with an
+      apostrophe in it would end a quoted string early.
+    - **The sandbox has to be allowed to reach the site.** claude.ai's code
+      execution only reaches package registries by default, so the manager adds
+      the club's domain to its allowed domains once. Nothing on our side can do
+      that for them; the manifest tells the assistant to say so rather than
+      fall back to typing base64.
+
   - **`delete_blog_post` has no confirm flag**, like `delete_invoice`: it is the
     caller's job to ask the manager first. It removes the post's comments with
     it (`ON DELETE CASCADE`), and writes an audit line to the server log.
 - `list_calendar_events` / `list_calendar_rsvps` / `create_calendar_entry` /
   `edit_calendar_entry` / `cancel_calendar_entry` / `stop_calendar_repeat` /
-  `delete_calendar_entry` (`"31"`) — the club calendar, the agent's equivalent
+  `delete_calendar_entry` (`"32"`) — the club calendar, the agent's equivalent
   of `/manager/calendar`. Every read and write goes through the plain functions
   in `src/lib/calendar.functions.ts` that the screen's server functions also
   call (`listManagerEventRows`, `listEventRsvpRows`, `createCalendarEntryRow`,
@@ -758,7 +811,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"31"`.
+test so the bump is a deliberate edit, and the current value is `"32"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

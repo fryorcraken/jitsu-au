@@ -167,6 +167,65 @@ describe("KbLinkPreview", () => {
     await waitFor(() => expect(screen.queryByText("Step in, hips low.")).not.toBeInTheDocument());
   });
 
+  /** Opens the card with a tap, and waits for its dismiss layer to start listening. */
+  async function openByTap() {
+    const link = screen.getByRole("link", { name: "advanced body grab" });
+    fireEvent.pointerDown(link, { pointerType: "touch" });
+    click(link);
+    await screen.findByText("Step in, hips low.");
+    // The layer attaches its outside-press listener on the next task.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  // A finger put down on the article is usually the start of a scroll, which
+  // ends without a click. Closing on the touch itself would take the card away
+  // the moment somebody tries to read past it.
+  it("stays open when a finger lands elsewhere and scrolls", async () => {
+    preview.mockReturnValue(SYLLABUS);
+    renderLink();
+    await openByTap();
+
+    fireEvent.pointerDown(document.body, { pointerType: "touch" });
+    fireEvent.pointerCancel(document.body, { pointerType: "touch" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByText("Step in, hips low.")).toBeInTheDocument();
+  });
+
+  it("closes when a finger taps elsewhere", async () => {
+    preview.mockReturnValue(SYLLABUS);
+    renderLink();
+    await openByTap();
+
+    fireEvent.pointerDown(document.body, { pointerType: "touch" });
+    fireEvent.click(document.body);
+
+    await waitFor(() => expect(screen.queryByText("Step in, hips low.")).not.toBeInTheDocument());
+  });
+
+  it("stays open when a finger taps inside the card", async () => {
+    preview.mockReturnValue(SYLLABUS);
+    renderLink();
+    await openByTap();
+    const passage = screen.getByText("Step in, hips low.");
+
+    fireEvent.pointerDown(passage, { pointerType: "touch" });
+    fireEvent.click(passage);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(screen.getByText("Step in, hips low.")).toBeInTheDocument();
+  });
+
+  it("closes straight away when a mouse presses elsewhere", async () => {
+    preview.mockReturnValue(SYLLABUS);
+    renderLink();
+    await openByTap();
+
+    fireEvent.pointerDown(document.body, { pointerType: "mouse" });
+
+    await waitFor(() => expect(screen.queryByText("Step in, hips low.")).not.toBeInTheDocument());
+  });
+
   // React Query holds a fetch with no connection rather than failing it, so
   // "Loading" would otherwise never end.
   it("says so when it is offline with nothing saved", async () => {
