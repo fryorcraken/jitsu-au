@@ -96,7 +96,11 @@ async function resolveViewer(): Promise<Viewer> {
   const userId = data.user?.id ?? null;
   if (!userId) return anonymous;
   const access = await calendarAccess(userId);
-  return { userId, canSeeMembersOnly: access.paid || access.isManager, isManager: access.isManager };
+  return {
+    userId,
+    canSeeMembersOnly: access.paid || access.isManager,
+    isManager: access.isManager,
+  };
 }
 
 /** Whether a person holds a paid membership, and whether they are a manager. */
