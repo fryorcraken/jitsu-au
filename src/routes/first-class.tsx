@@ -16,6 +16,7 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { VENUE_PHONE_DISPLAY, VENUE_PHONE_TEL, WHATSAPP_URL } from "@/lib/venue";
+import firstClassImg from "@/assets/uts-jitsu-first-class-wrist-grab.jpg.asset.json";
 
 export const Route = createFileRoute("/first-class")({
   head: () => ({
@@ -109,6 +110,16 @@ function FirstClass() {
             <Link to="/waiver">Sign your waiver</Link>
           </Button>
         </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 pb-8">
+        <img
+          src={firstClassImg.url}
+          alt="UTS Jitsu students in white gis practising a wrist grab escape in pairs while classmates watch"
+          width={1920}
+          height={1280}
+          className="aspect-[3/2] w-full rounded-2xl object-cover shadow-lg ring-1 ring-black/5"
+        />
       </section>
 
       {/* Before your first class */}

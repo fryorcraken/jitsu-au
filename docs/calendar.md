@@ -81,6 +81,12 @@ from ordinary members. Marking a repeating entry invite only hides every date it
 generates the same way, so the series and its dates can never disagree. To let
 someone see an invite-only date, a manager creates their RSVP for it.
 
+The calendar page and the personal calendar link read through the service role,
+which skips those policies, so both apply the same rule in code through one
+shared helper (`withoutHiddenInviteOnly` in `src/lib/calendar.ts`). If it cannot
+work out who is invited, the calendar page fails to load rather than showing
+everything.
+
 An entry can be public and invite-only (only invitees see it), members-only and
 not invite-only, or any other combination. Both settings apply to repeating
 entries too, which is what the old two-form design made impossible: every date a

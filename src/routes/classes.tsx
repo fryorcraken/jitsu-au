@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Clock, MapPin, Phone } from "lucide-react";
+import classImg from "@/assets/uts-jitsu-class-instructor-demonstration.jpg.asset.json";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { Button } from "@/components/ui/button";
 import { buildPageMeta, canonicalUrl } from "@/lib/seo";
@@ -35,6 +36,16 @@ function Classes() {
           Sessions run at {VENUE_NAME}, {VENUE_STREET_ADDRESS}, a modern, well-equipped facility on
           the main UTS campus, easy to reach from the CBD.
         </p>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 pb-8">
+        <img
+          src={classImg.url}
+          alt="A UTS Jitsu black belt instructor demonstrating a leg sweep with a student while the class watches"
+          width={1920}
+          height={1280}
+          className="aspect-[3/2] w-full rounded-2xl object-cover shadow-lg ring-1 ring-black/5"
+        />
       </section>
 
       <section className="mx-auto max-w-6xl px-4">

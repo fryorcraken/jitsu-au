@@ -13,6 +13,8 @@ import {
   isFutureSigningDate,
   isMinorOn,
   isPaperWaiver,
+  isSameOnlineSubmission,
+  RESUBMISSION_REFUSED,
   nameWithPreferred,
   splitFullName,
   nextUtcDay,
@@ -773,47 +775,6 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     const admin = supabaseAdmin;
     const { renderWaiverPdf } = await import("./waiver-pdf");
 
-    // ---- Has this exact submission already been signed? ----
-    //
-    // The client resends the same id on every retry, and it retries hard: a lost
-    // reply says nothing about whether the work happened. Checking first, before
-    // any auth-user creation or PDF work, is what makes that safe. Without it a
-    // retry after a timeout would mint a SECOND signed waiver and email the
-    // member and every manager all over again.
-    const submissionId = data.client_submission_id || null;
-    if (submissionId) {
-      const { data: already, error: dupErr } = await admin
-        .from("waivers")
-        .select("id, pdf_path")
-        .eq("client_submission_id", submissionId)
-        .maybeSingle();
-      // A failed lookup must not block a signature. Falling through risks a
-      // duplicate; refusing guarantees a lost waiver, and that is the worse one.
-      if (dupErr) console.error("[submitWaiverWithPdf] submission lookup failed:", dupErr);
-      if (already) {
-        const url = await signStoredPdf(admin, already.pdf_path);
-        return {
-          ok: true,
-          waiver_id: already.id,
-          pdf_url: url,
-          pdf_ready: Boolean(url),
-          // This retry didn't mint a token itself; the original attempt's
-          // confirmation email already carries the working link.
-          code_of_conduct_url: null,
-          reply_to_confirmation: false,
-          // Nor does it re-apply the gi size. This return sits above the point
-          // where the email is normalized and identity is established, so
-          // `applyWaiverGiSize` has neither the person nor the proof it needs,
-          // and hoisting that work above the duplicate check would be a lot of
-          // machinery for a best-effort field. If the original attempt's size
-          // write failed, the size is simply not set, and the member or a
-          // manager sets it on /account. Deliberate, not an oversight.
-        };
-      }
-    }
-
-    const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
-
     // Who this waiver is for, and therefore whose address is on it.
     //
     // For a child's waiver the address IS the guardian's, everywhere below: the
@@ -825,11 +786,66 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
     //
     // The child's own reserved address exists on their auth user and appears
     // nowhere in this function.
+    //
+    // Worked out before the retry check below, which needs it to prove a
+    // resent id belongs to this signer.
     const signingForDependant = data.signing_for === "dependant";
     // Normalized so case and whitespace variants map to the one person.
     const email = normalizeEmail(
       signingForDependant ? data.guardian_email || "" : data.email || "",
     );
+
+    // ---- Has this exact submission already been signed? ----
+    //
+    // The client resends the same id on every retry, and it retries hard: a lost
+    // reply says nothing about whether the work happened. Checking first, before
+    // any auth-user creation or PDF work, is what makes that safe. Without it a
+    // retry after a timeout would mint a SECOND signed waiver and email the
+    // member and every manager all over again.
+    //
+    // ⚠️ This endpoint has no login, and the answer to a retry is a link to the
+    // signed PDF. So the id alone never earns that link: the row must be an
+    // online signing (never a paper filing, whose id a manager's script chose)
+    // and carry the same address and birth date this request does. A genuine
+    // retry resends the identical payload, so it always matches. Anything else
+    // holding a used id is refused before any work, and told nothing about the
+    // row it named.
+    const submissionId = data.client_submission_id || null;
+    if (submissionId) {
+      const { data: already, error: dupErr } = await admin
+        .from("waivers")
+        .select("id, pdf_path, signer_meta, email, date_of_birth")
+        .eq("client_submission_id", submissionId)
+        .maybeSingle();
+      // A failed lookup must not block a signature. Falling through risks a
+      // duplicate; refusing guarantees a lost waiver, and that is the worse one.
+      if (dupErr) console.error("[submitWaiverWithPdf] submission lookup failed:", dupErr);
+      if (already) {
+        if (!isSameOnlineSubmission(already, { email, date_of_birth: data.date_of_birth })) {
+          throw new Error(RESUBMISSION_REFUSED);
+        }
+        const url = await signStoredPdf(admin, already.pdf_path);
+        return {
+          ok: true,
+          waiver_id: already.id,
+          pdf_url: url,
+          pdf_ready: Boolean(url),
+          // This retry didn't mint a token itself; the original attempt's
+          // confirmation email already carries the working link.
+          code_of_conduct_url: null,
+          reply_to_confirmation: false,
+          // Nor does it re-apply the gi size. This return sits above the point
+          // where identity is established, so `applyWaiverGiSize` has neither
+          // the person nor the proof it needs, and hoisting that work above the
+          // duplicate check would be a lot of machinery for a best-effort
+          // field. If the original attempt's size write failed, the size is
+          // simply not set, and the member or a manager sets it on /account.
+          // Deliberate, not an oversight.
+        };
+      }
+    }
+
+    const full_name = composeFullName(data.first_name, data.middle_name || "", data.last_name);
 
     // Signing-context evidence for the forensic/legal record: the signer's real
     // IP plus request headers (user agent, language, client hints) merged with
@@ -1176,9 +1192,14 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
       // job; adopt the row that won rather than failing a signed waiver.
       const { data: raced } = await admin
         .from("waivers")
-        .select("id, pdf_path")
+        .select("id, pdf_path, signer_meta, email, date_of_birth")
         .eq("client_submission_id", submissionId)
         .maybeSingle();
+      // Same rule as the lookup before any work: only ever hand back a link to
+      // the row this signer's own retry wrote.
+      if (raced && !isSameOnlineSubmission(raced, { email, date_of_birth: data.date_of_birth })) {
+        throw new Error(RESUBMISSION_REFUSED);
+      }
       if (raced) {
         const url = await signStoredPdf(admin, raced.pdf_path);
         // The other attempt in this race is the one that will mint the token
