@@ -77,9 +77,9 @@ function Home() {
             <div className="absolute -inset-4 -z-10 rounded-3xl bg-primary/10 blur-2xl" />
             <img
               src={heroAsset.url}
-              alt="UTS Jitsu students training on the mat"
-              width={1600}
-              height={1205}
+              alt="A UTS Jitsu student breaking his fall mid-throw while the class trains behind him"
+              width={1920}
+              height={1280}
               fetchPriority="high"
               className="aspect-[4/3] w-full rounded-2xl object-cover shadow-xl ring-1 ring-black/5"
             />
