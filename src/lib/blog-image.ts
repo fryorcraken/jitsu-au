@@ -165,8 +165,14 @@ const IMAGE_FETCH_USER_AGENT = "UTSJitsuBlogImageFetcher/1.0 (+https://utsjitsu.
 const MAX_REDIRECTS = 5;
 const FETCH_TIMEOUT_MS = 15_000;
 
-/** Read a response body, stopping as soon as it passes the cap. */
-async function readCapped(res: Response, cap: number): Promise<Uint8Array> {
+/**
+ * Read a request's or response's body, stopping as soon as it passes the cap.
+ * Throws `BlogImageError("rejected")` for one that is too large.
+ */
+export async function readCapped(
+  res: Pick<Response, "headers" | "body" | "arrayBuffer">,
+  cap: number = MAX_BLOG_IMAGE_BYTES,
+): Promise<Uint8Array> {
   const tooLarge = () =>
     new BlogImageError(
       "rejected",
@@ -236,7 +242,7 @@ export async function fetchBlogImage(
       // Release the connection before the next hop or the refusal.
       await res.body?.cancel().catch(() => {});
       const location = res.headers.get("location");
-      let next: URL | null = null;
+      let next: URL | null;
       try {
         next = location ? new URL(location, current) : null;
       } catch {

@@ -3,6 +3,7 @@ import {
   agentGetBlogPostSchema,
   agentSaveBlogPostSchema,
   agentUploadBlogImageSchema,
+  agentStartBlogImageUploadSchema,
   CLUB_REPLY_TO_MAX,
   DEPENDANT_EMAIL_DOMAIN,
   clubReplyToSchema,
@@ -3454,5 +3455,17 @@ describe("the blog through the manager agent API", () => {
     const r = agentUploadBlogImageSchema.safeParse({ data: "A".repeat(12 * 1024 * 1024) });
     expect(r.success).toBe(false);
     expect(r.error?.issues[0].message).toMatch(/8 MB/);
+  });
+
+  // The image goes to the link, never into this call: a caller that tried to
+  // send it here as well must hear so, rather than have it silently dropped.
+  it("asks for an upload link with the image's description only", () => {
+    expect(agentStartBlogImageUploadSchema.safeParse({}).success).toBe(true);
+    expect(
+      agentStartBlogImageUploadSchema.safeParse({ post_id: ID, name: "mats.jpg", alt: "Mats" })
+        .success,
+    ).toBe(true);
+    expect(agentStartBlogImageUploadSchema.safeParse({ data: "iVBO" }).success).toBe(false);
+    expect(agentStartBlogImageUploadSchema.safeParse({ post_id: "draft" }).success).toBe(false);
   });
 });

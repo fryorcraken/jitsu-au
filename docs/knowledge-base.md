@@ -198,7 +198,9 @@ is without losing their place in a long page.
   away and it goes. A click still follows the link straight away.
 - **On a phone** (or with a pen on a tablet, which has no hover either), the
   **first tap** opens the card instead of following the link, and a **second tap** on the link, or the card's own "Go to this section"
-  / "Read the article" button, follows it. Tapping anywhere else closes it. That
+  / "Read the article" button, follows it. Tapping anywhere else closes it,
+  but scrolling does not: a finger put down to scroll the article leaves the
+  card where it is. That
   costs one extra tap for somebody who wanted to go straight there, which is the
   trade: without it a member on a phone could never peek at all, and most of
   this club reads on a phone.

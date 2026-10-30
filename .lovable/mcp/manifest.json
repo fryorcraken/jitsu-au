@@ -123,7 +123,8 @@
                 "resend_email",
                 "save_blog_post",
                 "delete_blog_post",
-                "upload_blog_image"
+                "upload_blog_image",
+                "start_blog_image_upload"
               ],
               "description": "The action to run."
             },

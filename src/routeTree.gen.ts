@@ -63,6 +63,7 @@ import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
 import { Route as ApiCalendarTokenRouteImport } from './routes/api/calendar/$token'
 import { Route as ApiManagerAgentRouteImport } from './routes/api/manager/agent'
+import { Route as ApiManagerBlogImageRouteImport } from './routes/api/manager/blog-image'
 import { Route as ApiNotificationsDigestRouteImport } from './routes/api/notifications/digest'
 import { Route as ApiVerifyEmailTokenRouteImport } from './routes/api/verify-email/$token'
 import { Route as AuthenticatedManagerBlogIdRouteImport } from './routes/_authenticated/manager.blog_.$id'
@@ -361,6 +362,11 @@ const ApiManagerAgentRoute = ApiManagerAgentRouteImport.update({
   path: '/api/manager/agent',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiManagerBlogImageRoute = ApiManagerBlogImageRouteImport.update({
+  id: '/api/manager/blog-image',
+  path: '/api/manager/blog-image',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiNotificationsDigestRoute = ApiNotificationsDigestRouteImport.update({
   id: '/api/notifications/digest',
   path: '/api/notifications/digest',
@@ -459,6 +465,7 @@ export interface FileRoutesByFullPath {
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
+  '/api/manager/blog-image': typeof ApiManagerBlogImageRoute
   '/api/notifications/digest': typeof ApiNotificationsDigestRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
   '/manager/': typeof AuthenticatedManagerIndexRoute
@@ -521,6 +528,7 @@ export interface FileRoutesByTo {
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
+  '/api/manager/blog-image': typeof ApiManagerBlogImageRoute
   '/api/notifications/digest': typeof ApiNotificationsDigestRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
   '/manager': typeof AuthenticatedManagerIndexRoute
@@ -586,6 +594,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
   '/api/calendar/$token': typeof ApiCalendarTokenRoute
   '/api/manager/agent': typeof ApiManagerAgentRoute
+  '/api/manager/blog-image': typeof ApiManagerBlogImageRoute
   '/api/notifications/digest': typeof ApiNotificationsDigestRoute
   '/api/verify-email/$token': typeof ApiVerifyEmailTokenRoute
   '/_authenticated/manager/': typeof AuthenticatedManagerIndexRoute
@@ -651,6 +660,7 @@ export interface FileRouteTypes {
     | '/manager/waivers'
     | '/api/calendar/$token'
     | '/api/manager/agent'
+    | '/api/manager/blog-image'
     | '/api/notifications/digest'
     | '/api/verify-email/$token'
     | '/manager/'
@@ -713,6 +723,7 @@ export interface FileRouteTypes {
     | '/manager/waivers'
     | '/api/calendar/$token'
     | '/api/manager/agent'
+    | '/api/manager/blog-image'
     | '/api/notifications/digest'
     | '/api/verify-email/$token'
     | '/manager'
@@ -777,6 +788,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/waivers'
     | '/api/calendar/$token'
     | '/api/manager/agent'
+    | '/api/manager/blog-image'
     | '/api/notifications/digest'
     | '/api/verify-email/$token'
     | '/_authenticated/manager/'
@@ -819,6 +831,7 @@ export interface RootRouteChildren {
   DotlovableOauthConsentRoute: typeof DotlovableOauthConsentRoute
   ApiCalendarTokenRoute: typeof ApiCalendarTokenRoute
   ApiManagerAgentRoute: typeof ApiManagerAgentRoute
+  ApiManagerBlogImageRoute: typeof ApiManagerBlogImageRoute
   ApiNotificationsDigestRoute: typeof ApiNotificationsDigestRoute
   ApiVerifyEmailTokenRoute: typeof ApiVerifyEmailTokenRoute
   LovableEmailAuthPreviewRoute: typeof LovableEmailAuthPreviewRoute
@@ -1205,6 +1218,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiManagerAgentRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/manager/blog-image': {
+      id: '/api/manager/blog-image'
+      path: '/api/manager/blog-image'
+      fullPath: '/api/manager/blog-image'
+      preLoaderRoute: typeof ApiManagerBlogImageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/notifications/digest': {
       id: '/api/notifications/digest'
       path: '/api/notifications/digest'
@@ -1376,6 +1396,7 @@ const rootRouteChildren: RootRouteChildren = {
   DotlovableOauthConsentRoute: DotlovableOauthConsentRoute,
   ApiCalendarTokenRoute: ApiCalendarTokenRoute,
   ApiManagerAgentRoute: ApiManagerAgentRoute,
+  ApiManagerBlogImageRoute: ApiManagerBlogImageRoute,
   ApiNotificationsDigestRoute: ApiNotificationsDigestRoute,
   ApiVerifyEmailTokenRoute: ApiVerifyEmailTokenRoute,
   LovableEmailAuthPreviewRoute: LovableEmailAuthPreviewRoute,

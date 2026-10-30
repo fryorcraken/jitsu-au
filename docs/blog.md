@@ -161,6 +161,14 @@ it, from the file itself or from a link to it. It is not a second editor: every
 save goes through the same functions the composer's does, so the slug, the
 excerpt, the publish date and the announcement follow every rule above.
 
+A photo the manager hands to Claude in a chat on claude.ai goes in at full
+quality. The assistant cannot type a photo out, so it asks the club for a
+one-time upload link and sends the file to it from its own sandbox. The link
+stores one picture, works for an hour, and can do nothing else. It only works
+once the manager has let Claude's sandbox reach the club's site (in claude.ai,
+the allowed domains for code execution, under Settings, Capabilities). Until
+then the assistant should say so, not fall back to a shrunken copy.
+
 Two things differ from the screen, both so that a short instruction does what a
 manager means by it. A field the assistant leaves out keeps what is stored, so
 "publish the grading post" changes nothing but its status. And a post's slug can

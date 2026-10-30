@@ -20,14 +20,7 @@ export type MarkdownDoc = {
 
 /** A formatting action, shared by the toolbar buttons and the shortcuts. */
 export type MarkdownCommand =
-  | "bold"
-  | "italic"
-  | "code"
-  | "heading"
-  | "bullet"
-  | "numbered"
-  | "quote"
-  | "link";
+  "bold" | "italic" | "code" | "heading" | "bullet" | "numbered" | "quote" | "link";
 
 /**
  * The toolbar, in order, with the shortcut each button also answers to.

@@ -84,7 +84,7 @@ async function resolveViewer(db: KbClient, opts: { strict?: boolean } = {}): Pro
     "Could not confirm who you are just now. Reload the page and try again.",
   );
 
-  let userId: string | null = null;
+  let userId: string | null;
   try {
     const { data, error } = await db.auth.getUser(bearer);
     // An `error` here is ambiguous: an expired token and an unreachable auth

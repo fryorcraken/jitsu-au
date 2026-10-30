@@ -3148,6 +3148,7 @@ export const managerAgentActions = [
   "save_blog_post",
   "delete_blog_post",
   "upload_blog_image",
+  "start_blog_image_upload",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -3599,8 +3600,7 @@ export const CLUB_INTERNATIONAL_FIELDS = [
 ] as const;
 
 export type ClubPaymentFieldKey =
-  | (typeof CLUB_ACCOUNT_FIELDS)[number]["key"]
-  | (typeof CLUB_INTERNATIONAL_FIELDS)[number]["key"];
+  (typeof CLUB_ACCOUNT_FIELDS)[number]["key"] | (typeof CLUB_INTERNATIONAL_FIELDS)[number]["key"];
 
 /**
  * The value to show and to copy for one field. Only the BSB differs from what is
@@ -4357,6 +4357,20 @@ export const agentUploadBlogImageSchema = z
     }
   });
 export type AgentUploadBlogImageInput = z.infer<typeof agentUploadBlogImageSchema>;
+
+/**
+ * Agent `start_blog_image_upload`: a one-time link the image's bytes are sent
+ * to, for an assistant that has the file but cannot type it out
+ * (`blog-image-ticket.ts`). The same descriptive fields as `upload_blog_image`;
+ * the image itself arrives at the link.
+ */
+export const agentStartBlogImageUploadSchema = z
+  .object({
+    post_id: z.string().uuid().optional(),
+    name: z.string().trim().min(1).max(255).optional(),
+    alt: z.string().trim().max(300).optional(),
+  })
+  .strict();
 
 // ---- Blog comments ----
 //

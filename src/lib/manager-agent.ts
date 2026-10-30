@@ -309,7 +309,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "30",
+  version: "31",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -322,6 +322,14 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "31",
+      // Purely additive: one new action and one new endpoint.
+      breaking: false,
+      notes: [
+        "New action start_blog_image_upload: a one-time link (POST /api/manager/blog-image, the token as a bearer header) that stores one image sent as the raw request body, for a caller that has the file but cannot send it as base64 data or a public url. It works for 60 minutes and for one image, and answers with the same path, url and markdown as upload_blog_image. A second upload with the same link is 409 already_uploaded, naming the image the first one stored.",
+      ],
+    },
     {
       version: "30",
       // Two new optional params, and one param no longer required when the
@@ -1605,7 +1613,7 @@ export const AGENT_MANIFEST: {
       name: "upload_blog_image",
       method: "POST",
       summary:
-        "Store an image for a blog post: PNG, JPEG, WebP or GIF, up to 8 MB. Send the image as base64 data, or a public https url for the server to download (the practical route over MCP, where the bytes would have to be typed out). The format is read from the image itself, so a file that is not one of the four is refused whatever it is called. Returns path (give it to save_blog_post as cover_image_path), url (where it is served from) and markdown (paste it into body_md where the image belongs). Storing an image changes no post: it shows nowhere until a save puts it in one. 422 image_rejected when the image can never be used (not an image, too large, an address that is not public https, or one that answers not found or forbidden); 502 image_fetch_failed when the address could not be read just now (no answer, too slow, busy, or a server error), which may work on a later try.",
+        "Store an image for a blog post: PNG, JPEG, WebP or GIF, up to 8 MB. Send the image as base64 data, or a public https url for the server to download. Over MCP, where the bytes would have to be typed out, use start_blog_image_upload instead if you have the file itself. The format is read from the image itself, so a file that is not one of the four is refused whatever it is called. Returns path (give it to save_blog_post as cover_image_path), url (where it is served from) and markdown (paste it into body_md where the image belongs). Storing an image changes no post: it shows nowhere until a save puts it in one. 422 image_rejected when the image can never be used (not an image, too large, an address that is not public https, or one that answers not found or forbidden); 502 image_fetch_failed when the address could not be read just now (no answer, too slow, busy, or a server error), which may work on a later try.",
       params: [
         {
           name: "data",
@@ -1628,6 +1636,31 @@ export const AGENT_MANIFEST: {
           name: "name",
           required: false,
           description: "A file name to store it under. Defaults to the one in url, else image.",
+        },
+        {
+          name: "post_id",
+          required: false,
+          description:
+            "The post it is for, which only decides the folder it is filed in. Omit for a post not saved yet.",
+        },
+      ],
+    },
+    {
+      name: "start_blog_image_upload",
+      method: "POST",
+      summary:
+        "Get a one-time link to send an image file to, for when you have the file but cannot send it as base64 data or a public url (an assistant over MCP with the file in its sandbox, say). Returns upload_url, token, expires_at and command: set the shell variable IMAGE_FILE to the file's path, then run command as given. The upload answers { ok: true, result } with the same path, url and markdown upload_blog_image returns. The link stores one image, PNG, JPEG, WebP or GIF up to 8 MB, and works for 60 minutes; it can do nothing else, and asking for it changes no post. Using it again answers 409 already_uploaded with that image's path, url and markdown in error.details, even after the 60 minutes (a retry whose answer was lost needs nothing more). An expired link that stored nothing answers 401 link_expired; ask for another. A local copy of the site asked over MCP answers 503 upload_links_unavailable, because it cannot tell its own address. If the request never reaches the club (a proxy refusal, or a host your sandbox may not reach), the person has to allow the club's site in their assistant's network settings: say so, rather than falling back to typing out base64.",
+      params: [
+        {
+          name: "alt",
+          required: false,
+          description:
+            "Words describing the image for somebody who cannot see it, used in the returned markdown. Defaults to the file name.",
+        },
+        {
+          name: "name",
+          required: false,
+          description: "A file name to store it under. Defaults to image.",
         },
         {
           name: "post_id",
