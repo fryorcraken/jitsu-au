@@ -1,11 +1,12 @@
 import js from "@eslint/js";
+import { defineConfig } from "eslint/config";
 import eslintPluginPrettier from "eslint-plugin-prettier/recommended";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
-export default tseslint.config(
+export default defineConfig(
   {
     // Build output and generated code (shadcn primitives, Supabase types, the
     // router tree) are not hand-maintained, so they are exempt from lint. The
@@ -54,11 +55,17 @@ export default tseslint.config(
       ],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
-      // ESLint 10's recommended set asks every rethrow to carry `{ cause: e }`.
-      // Not here: a server function's error is serialized to the browser with
-      // all of its own properties, `cause` included, so following the rule
-      // would ship the raw upstream error a rethrow exists to replace with
-      // words a person can act on. Log the original server side instead.
+    },
+  },
+  {
+    // ESLint 10's recommended set asks every rethrow to carry `{ cause: e }`.
+    // Not where server code lives: a server function's error is serialized to
+    // the browser with all of its own properties, `cause` included, so
+    // following the rule would ship the raw upstream error a rethrow exists to
+    // replace with words a person can act on. Log the original server side
+    // instead. Everywhere else (components, hooks, scripts) the rule stands.
+    files: ["src/lib/**/*.{ts,tsx}", "src/routes/**/*.{ts,tsx}"],
+    rules: {
       "preserve-caught-error": "off",
     },
   },

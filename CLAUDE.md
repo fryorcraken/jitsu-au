@@ -252,7 +252,9 @@ Read `src/routes/README.md` before touching routes. Key points:
 - **Server functions** live in `src/lib/*.functions.ts` and use
   `createServerFn()` from `@tanstack/react-start`. Client code calls them via
   `useServerFn(fn)` (see `src/routes/register-interest.tsx`). Validate every
-  input with a Zod `.inputValidator(...)`.
+  input with a Zod `.inputValidator(...)`, the name every server function uses
+  today (it is deprecated and goes in TanStack Start 1.169; see "The TanStack
+  versions are pinned exactly").
 - ⚠️ **`*.functions.ts` and route files are bundled to the client.** Do **not**
   top-level `import` `client.server.ts` (service-role key) from them. Instead
   lazy-load inside the handler:
@@ -665,11 +667,13 @@ So upgrade the three together, to versions that agree, and keep them exact.
 invisible to `bun run build`.
 
 ⚠️ **`@tanstack/react-start` 1.169 removes `.inputValidator()`** from server
-functions, with no alias, in favour of `.validator()`. Every server function
-here uses the old name, and so does the code Lovable writes, so going past the
-1.168 line is a rename across the repo plus a check that Lovable's editor
-writes the new name too. Until then, stay on 1.168.x. The build will not warn
-you: a removed builder method only fails at runtime, or under `typecheck`.
+functions, with no alias. Its replacement, `.validator()`, already exists on
+1.168.x, where `.inputValidator()` is only marked deprecated. So the way past
+1.169 is two steps: rename every call to `.validator()` while still on 1.168
+(`typecheck` proves each one), then bump. Check first that Lovable's editor
+writes the new name too, or its next edit reintroduces the old one. Until then,
+stay on 1.168.x. The build will not warn you: a removed builder method only
+fails at runtime, or under `typecheck`.
 
 ## Conventions & style
 
