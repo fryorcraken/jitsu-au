@@ -9,6 +9,10 @@
 // member-facing email reads it at send time, through `clubReplyTo` in
 // `send-email.server.ts`, and the manager settings screen edits it.
 //
+// `site_banner` is the notice across the top of every public page, as JSON
+// (`siteBannerSchema`). The public read and the manager screen both go through
+// `readSiteBanner`, so they can never disagree about what is stored.
+//
 // `invoice_payment_instructions` is the free text this replaced. Nothing
 // member-facing reads it any more; it survives only so the manager settings
 // screen can show what was there while the new fields are still empty.
@@ -29,8 +33,9 @@ import {
   DEFAULT_INVOICE_INSTRUCTIONS,
   parseClubPaymentDetails,
   parseClubReplyTo,
+  parseSiteBanner,
 } from "@/lib/validation";
-import type { ClubPaymentDetails } from "@/lib/validation";
+import type { ClubPaymentDetails, SiteBanner } from "@/lib/validation";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -83,6 +88,19 @@ export async function readClubReplyTo(
 ): Promise<{ ok: boolean; address: string | null }> {
   const { ok, value } = await readSetting(admin, "email_reply_to");
   return { ok, address: ok ? parseClubReplyTo(value) : null };
+}
+
+/**
+ * The site banner. `{ ok: true }` always carries a banner, which is off when
+ * nobody has set one; `ok: false` is "the store could not be read". The two are
+ * kept apart for the manager screen, which must not offer an empty form over a
+ * notice it merely failed to read. Never throws.
+ */
+export async function readSiteBanner(
+  admin: AdminClient,
+): Promise<{ ok: true; banner: SiteBanner } | { ok: false; banner: null }> {
+  const { ok, value } = await readSetting(admin, "site_banner");
+  return ok ? { ok: true, banner: parseSiteBanner(value) } : { ok: false, banner: null };
 }
 
 /**

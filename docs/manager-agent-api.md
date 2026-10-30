@@ -295,6 +295,27 @@ An "invoice" is a `memberships` row — its price/reference/status _are_ the inv
   redirect members to somebody else, and nothing on screen would show it. A
   manager changes them on the screen, signed in, after a confirm. What the
   reply-to does: `docs/emails.md`.
+- `get_site_banner` / `save_site_banner` (`"29"`) — the notice across the top
+  of every public page, read and written through `loadSiteBanner` and
+  `writeClubSetting` in `src/lib/club-settings.functions.ts`, the same calls
+  `/manager/site-banner` makes. `get_site_banner` returns `{ banner }`, off when
+  nobody has set one, or `503 settings_unreadable` (with a `Retry-After`).
+  `save_site_banner` takes any of `enabled`, `message`, `link_label` and
+  `link_href` and merges them over what is stored, so `{ "enabled": false }`
+  turns it off and keeps the message; the merged banner then has to pass
+  `siteBannerSchema`, the screen's own rules (`400 invalid_params` otherwise).
+  It refuses with `503` rather than merge over a banner it could not read.
+  **Its `link_href` can only be a page on this site** (`400 invalid_params`
+  otherwise; a full address to this site counts): an outside address is set
+  on the screen, because a club-branded link to another site across every
+  page is what a leaked token would want. And while the **stored** link goes
+  to another site (one a manager set on the screen), the only change allowed
+  is switching the banner off or replacing that link with a page here
+  (`409 outside_link` otherwise), so a token cannot reword or re-enable a
+  manager's outside link into a message of its own.
+  **Unlike `get_club_settings`, this one is writable**, deliberately: the banner
+  is public text, moves no money and no replies, and is undone by saving again,
+  the same footing as `save_blog_post`. Product rules: `docs/site-banner.md`.
 - `resend_email` (`"22"`) — `{ kind, record_id, client_submission_id? }` sends
   one email again through `resendEmail` in `src/lib/email-resend.functions.ts`,
   the function the screens' Resend buttons post to, so the email is rebuilt from
@@ -508,6 +529,18 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
 
 ### `file_waiver`: the parts that have bitten us
 
+- **The address is taken in parts (`address_parts`), and the API also takes
+  one line (`address`) where the screen does not.** That is deliberate, not
+  drift. Both send parts when they have them and both store the same thing for
+  them (`resolveAddressInput` in `src/lib/au-address.ts`). A manager at the
+  screen can look up a missing postcode before pressing Sign; an agent working
+  through a stack of old records cannot always split what is written, and
+  guessing a postcode to make it fit would put a wrong one on a signed
+  document. A one-line address is also how an address outside Australia goes, from
+  every surface: the screens build it from their "outside Australia" boxes,
+  and an agent sends it as `address`. A line is stored as written with no parts, and the person is asked
+  for them the next time they give an address. Changing either surface's rule
+  means changing this bullet.
 - **The two surfaces present that one check differently on purpose, and
   this is not an inconsistency to tidy up.** The HTTP API returns
   `409 duplicate_waiver`, because a machine caller needs a distinct status
@@ -610,7 +643,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"28"`.
+test so the bump is a deliberate edit, and the current value is `"30"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

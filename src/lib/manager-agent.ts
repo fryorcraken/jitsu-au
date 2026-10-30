@@ -309,7 +309,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "28",
+  version: "30",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -322,6 +322,26 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "30",
+      // Two new optional params, and one param no longer required when the
+      // new one replaces it. Every call that worked before still works.
+      breaking: false,
+      notes: [
+        "file_waiver takes address_parts { street, suburb, state, postcode }: the participant's address in parts, as the online form now asks for it. state is one of ACT, NSW, NT, QLD, SA, TAS, VIC, WA and postcode is four digits. Send it instead of address; address (one line, as written) is still accepted when the paper's address cannot be split, and is stored as written with no parts. One of the two is required, and address_parts wins when both are sent, with the line composed from it as \"<street>, <suburb> <STATE> <postcode>\".",
+        "file_waiver takes guardian_address_parts in the same shape, for a guardian who does not live at the participant's address. guardian_address (one line) is still accepted.",
+        "An address outside Australia has no parts: send it as the one line in address (or guardian_address), in any format, as the site's own forms do.",
+      ],
+    },
+    {
+      version: "29",
+      // Purely additive: two new actions. Nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "New action get_site_banner: the notice across the top of every public page, as { banner: { enabled, message, link_label, link_href } }. A banner nobody has set reads as enabled: false with empty strings. 503 settings_unreadable when it cannot be read, rather than an answer of off.",
+        "New action save_site_banner: send any of enabled, message, link_label and link_href; what you leave out keeps its stored value, so {\"enabled\": false} turns the banner off and keeps its message for next time. It goes live from each visitor's next page load (moving between pages in a tab already open can keep the old one for a few minutes). The message is one line, up to 200 characters. The link is optional, but link_label and link_href come together, and link_href is a page on this site (/register-interest): an outside address can only be set on the manager's Site banner screen, and a banner whose stored link goes to another site can only be switched off here (409 outside_link for anything else, unless you replace the link with a page on this site). Returns the banner as saved.",
+      ],
+    },
     {
       version: "28",
       // Three new response fields; nothing that worked before changes.
@@ -832,7 +852,18 @@ export const AGENT_MANIFEST: {
           description: "What they go by, if different from first_name.",
         },
         { name: "date_of_birth", required: true, description: "YYYY-MM-DD." },
-        { name: "address", required: true, description: "As written on the form." },
+        {
+          name: "address_parts",
+          required: false,
+          description:
+            'The participant\'s address in parts, as the online form takes it: { street, suburb, state, postcode }. state is one of ACT, NSW, NT, QLD, SA, TAS, VIC, WA; postcode is four digits; suburb has no digits or commas; street is everything before the suburb, unit included. The stored line is composed from these as "<street>, <suburb> <STATE> <postcode>". Send this, or address.',
+        },
+        {
+          name: "address",
+          required: false,
+          description:
+            "The participant's address as one line, as written on the form. Only for a paper address you cannot split into address_parts: it is stored as written, and the person is asked for the parts the next time they give an address. Ignored when address_parts is sent. One of the two is required.",
+        },
         { name: "phone", required: true, description: "As written on the form." },
         {
           name: "signing_for",
@@ -886,10 +917,16 @@ export const AGENT_MANIFEST: {
           description: "How the guardian is related to the participant, e.g. Mother, Father.",
         },
         {
+          name: "guardian_address_parts",
+          required: false,
+          description:
+            "The guardian's address in parts, in the same shape as address_parts. Omit when it is the same as the participant's; the participant's is stored for them.",
+        },
+        {
           name: "guardian_address",
           required: false,
           description:
-            "The guardian's address. Omit when it is the same as the participant's — the participant's is stored for them.",
+            "The guardian's address as one line, only when it cannot be split into guardian_address_parts. Ignored when guardian_address_parts is sent.",
         },
         {
           name: "guardian_phone",
@@ -1427,6 +1464,40 @@ export const AGENT_MANIFEST: {
       summary:
         "Read the club-wide settings: email_reply_to (where a reply to any club email goes, or null when unset) and payment_details (the bank account members pay into, or null when not published). 503 settings_unreadable when they could not be read: that is not the same as nothing being set, so retry rather than treating it as empty.",
       params: [],
+    },
+    {
+      name: "get_site_banner",
+      method: "POST",
+      summary:
+        "Read the site banner, the one-line notice across the top of every public page: { banner: { enabled, message, link_label, link_href } }. Off (enabled: false) when nobody has set one; the message may still be there while it is off. 503 settings_unreadable when it could not be read, which is not the same as it being off.",
+      params: [],
+    },
+    {
+      name: "save_site_banner",
+      method: "POST",
+      summary:
+        "Change the site banner. Public and immediate: every visitor sees it at the top of every public page from their next page load until they close it, and a changed message is shown again even to people who closed the old one. Send only the fields you are changing; the rest keep their stored values. Undone by saving again (enabled: false turns it off). 400 invalid_params when the result breaks a rule below; 409 outside_link when the stored link goes to another site and the call does more than switch the banner off; 503 settings_unreadable when the current banner could not be read, so nothing is merged over a guess. Returns the banner as saved.",
+      params: [
+        { name: "enabled", required: false, description: "true shows the banner, false hides it." },
+        {
+          name: "message",
+          required: false,
+          description:
+            "One line, up to 200 characters; line breaks become spaces. Required (non-empty) while enabled is true.",
+        },
+        {
+          name: "link_label",
+          required: false,
+          description:
+            "The underlined link text after the message, up to 60 characters. Empty for no link. Needs link_href.",
+        },
+        {
+          name: "link_href",
+          required: false,
+          description:
+            "Where the link goes: a page on this site, like /register-interest or /faq#trial (a full https://utsjitsu.com.au/... address counts). Empty for no link. Needs link_label. An outside address is refused here (400 invalid_params) and can only be set on the manager's Site banner screen. While the stored link goes to another site, the only change allowed here is enabled: false, or replacing link_href with a page on this site (409 outside_link otherwise).",
+        },
+      ],
     },
     {
       name: "resend_email",

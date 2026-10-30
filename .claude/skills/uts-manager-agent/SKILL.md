@@ -13,6 +13,7 @@ description: >-
   swap them onto a different one, cancel or delete a membership, correct invoice
   details (price, payment reference, notes, status), keep the club's item price
   list and charge somebody for items, see where replies to club emails go,
+  turn the notice across the top of the public site on or off and reword it,
   resend an invoice, receipt or waiver email,
   migrate/bulk-file waivers
   the club holds on paper, reword the waiver or its tick-boxes and publish a new
@@ -688,6 +689,32 @@ emails point at the contact page, phone and WhatsApp instead.
 > wants one changed, tell them it is on the Club settings screen
 > (`/manager/settings`). Do not try to work around this.
 
+### `get_site_banner` / `save_site_banner` — the notice across the top of the site
+
+```bash
+scripts/agent.sh get_site_banner '{}'
+scripts/agent.sh save_site_banner '{"enabled":true,"message":"We are training at a temporary location, so free trials are paused for now.","link_label":"Register your interest","link_href":"/register-interest"}'
+scripts/agent.sh save_site_banner '{"enabled":false}'
+```
+
+`get_site_banner` returns `{ banner: { enabled, message, link_label, link_href } }`.
+A banner nobody has set reads as `enabled: false`. A `503 settings_unreadable`
+means the read failed, **not** that the banner is off.
+
+`save_site_banner` takes only the fields you are changing; the rest keep their
+stored values, so turning it off keeps the message for next time. The message
+is one line of up to 200 characters. The link is optional, but `link_label` and
+`link_href` go together, and `link_href` is a page on this site (`/classes`,
+`/faq#trial`). An outside `https://` address is refused here: if the manager
+wants one, tell them it is on the Site banner screen (`/manager/site-banner`).
+If the stored banner already links to another site, you can only switch it off
+(`409 outside_link` for anything else); send the manager to the same screen.
+
+> **It is public the moment it saves.** Every visitor sees the banner at the top
+> of every public page, and a changed message is shown again even to people who
+> closed the old one. Read the wording back to the manager and get a yes before
+> saving, and write it in the club's voice: plain, no em dashes.
+
 ### `resend_email` — send an email again
 
 ```bash
@@ -737,7 +764,8 @@ so spell them the same way each time or a second record is created.
 
 `params` mirror the web form exactly — see the live manifest for the full list,
 but the shape is: `first_name`, `middle_name` (optional), `last_name`,
-`preferred_name` (optional), `date_of_birth` (`YYYY-MM-DD`), `address`, `phone`,
+`preferred_name` (optional), `date_of_birth` (`YYYY-MM-DD`), the address (see
+below), `phone`,
 `signing_for` (optional, see above),
 `email` (required unless `signing_for` is `"dependant"`, where it is refused),
 `uts_student_number` (optional), `sms_whatsapp_consent` (optional,
@@ -748,8 +776,8 @@ when the form has no photo/video consent box — omit rather than guessing, sinc
 (required if the participant was under 18 on `signed_on`, else optional),
 `emergency_contact_phone`, the guardian of a minor when the paper names one
 apart from the emergency contact (`guardian_name`, `guardian_relationship`,
-`guardian_address`, `guardian_phone`, `guardian_email` — all optional; omit an
-address/mobile/email that is the participant's, and omit the lot for an older
+`guardian_address_parts`, `guardian_phone`, `guardian_email` — all optional;
+omit an address/mobile/email that is the participant's, and omit the lot for an older
 form with a single contact block, where that contact is taken as the signer),
 `medical_notes` (optional), `signed_on`
 (`YYYY-MM-DD` — the date on the paper, not today), `template_version` (optional
@@ -759,10 +787,24 @@ int, or omit/null for a form you can't place), `scan`: an array of
 joined into one PDF in array order (10 MB decoded total per call), and
 `confirm_duplicate` (optional, default false — see below).
 
+**The address goes in parts, as the online form now asks for it:**
+`address_parts: { "street", "suburb", "state", "postcode" }`. `state` is one of
+`ACT`, `NSW`, `NT`, `QLD`, `SA`, `TAS`, `VIC`, `WA`; `postcode` is four digits;
+`suburb` has no digits or commas; `street` is everything before the suburb,
+unit included. The line the waiver prints is made from them as
+`<street>, <suburb> <STATE> <postcode>`. Only when the paper's address really
+cannot be split (no suburb, no postcode), or is outside Australia (any
+format: there is no state list or postcode rule abroad), send it as one line
+in `address` instead: it is stored as written and the person is asked for
+the parts the next time they give an address. Do not guess a missing postcode
+to make it fit. A guardian who lives elsewhere takes `guardian_address_parts`
+in the same shape (`guardian_address` for one line).
+
 ```bash
 scripts/agent.sh file_waiver '{
   "first_name": "Ada", "last_name": "Lovelace",
-  "date_of_birth": "1990-12-10", "address": "1 Broadway, Ultimo NSW",
+  "date_of_birth": "1990-12-10",
+  "address_parts": {"street": "1 Broadway", "suburb": "Ultimo", "state": "NSW", "postcode": "2007"},
   "phone": "0400000000", "email": "ada@example.com",
   "emergency_contact_name": "Charles Babbage",
   "emergency_contact_phone": "0400000001",

@@ -186,8 +186,8 @@ export const markInterestRegistrationsSeen = createServerFn({ method: "POST" })
 // The one erasure the club can make without deciding anything first. A lead
 // signed nothing, owes nothing and has no record hanging off them, so there is
 // no evidence to weigh against destroying it. Everything else a person leaves
-// behind is either a signed waiver or the club's own history, and what happens
-// to those is an open question (docs/erasing-personal-data.md).
+// behind is either a signed waiver or the club's own history, and the club has
+// decided those are never erased (docs/erasing-personal-data.md).
 
 /**
  * Delete every interest-form registration filed under one email address.
