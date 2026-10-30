@@ -62,7 +62,7 @@ vi.mock("@/lib/waiver.functions", () => ({
 
 vi.mock("@/lib/calendar.functions", () => ({
   getMyCalendarFeedUrl: vi.fn().mockResolvedValue({
-    url: "https://jitsu.au/api/calendar/utsj_000000000000",
+    url: "https://utsjitsu.com.au/api/calendar/utsj_000000000000",
   }),
   replaceMyCalendarFeedUrl: vi.fn(),
 }));

@@ -565,8 +565,13 @@ also copied to `media_consent` above, on the same test that gives
 `medical_notes` a column — the club has to act on it week to week, and nobody
 opens forty PDFs before posting a photo. The PDF is still the record of what was
 agreed; the column is a derived copy. The displayed **pending / active /
-superseded** status is derived in the app (`deriveWaiverListStatuses`): per
-person, the latest approved waiver is active.
+superseded / replaced** status is derived in the app
+(`deriveWaiverListStatuses`): per person, the latest approved waiver is active,
+older approved ones are superseded, and an unapproved one they have since signed
+past (where that later signature was approved) is replaced rather than pending,
+because no decision on it is outstanding or possible. `isApprovedWaiverStatus`
+is what the two approval buttons read, since "not pending" stopped meaning
+"approved" once `replaced` existed.
 
 **How a submission arrived** is not a column. A waiver filed from a scanned
 paper form (`/manager/waivers/upload`) is an ordinary row in every respect

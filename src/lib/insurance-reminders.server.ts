@@ -27,7 +27,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { InsuranceReminderEmail } from "@/lib/email-templates/insurance-reminder";
 import { clubReplyTo, sendEmail } from "@/lib/send-email.server";
 import { SITE_NAME } from "@/lib/email-sender";
-import { SITE_ORIGIN } from "@/lib/seo";
+import { SITE_ORIGIN } from "@/lib/site-origin";
 import { loadHouseholdContacts } from "@/lib/household-email";
 import { contactUserIdFor } from "@/lib/household";
 import { writeNotifications } from "@/lib/notification-email.server";
