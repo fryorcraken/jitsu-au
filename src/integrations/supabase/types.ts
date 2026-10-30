@@ -1360,6 +1360,30 @@ export type Database = {
           },
         ]
       }
+      rate_limit_hits: {
+        Row: {
+          bucket: string
+          created_at: string
+          dedupe_key: string | null
+          id: number
+          subject: string
+        }
+        Insert: {
+          bucket: string
+          created_at?: string
+          dedupe_key?: string | null
+          id?: never
+          subject: string
+        }
+        Update: {
+          bucket?: string
+          created_at?: string
+          dedupe_key?: string | null
+          id?: never
+          subject?: string
+        }
+        Relationships: []
+      }
       session_checkins: {
         Row: {
           checked_in_at: string
@@ -1646,6 +1670,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_rate_limit: {
+        Args: {
+          _bucket: string
+          _day_max?: number
+          _dedupe_key?: string
+          _hour_max?: number
+          _subject: string
+        }
+        Returns: {
+          allowed: boolean
+          retry_after_seconds: number
+        }[]
+      }
       clear_email_confirmation: {
         Args: { _user_id: string }
         Returns: undefined
@@ -1662,6 +1699,10 @@ export type Database = {
         Returns: boolean
       }
       notification_digest_key: { Args: never; Returns: string }
+      release_rate_limit: {
+        Args: { _bucket: string; _dedupe_key: string }
+        Returns: undefined
+      }
       split_au_address: { Args: { line: string }; Returns: string[] }
       user_emails: {
         Args: { _user_ids: string[] }
