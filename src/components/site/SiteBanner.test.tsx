@@ -24,10 +24,23 @@ describe("SiteBannerBar", () => {
   it("underlines the link text once, and nothing else", () => {
     render(<SiteBannerBar banner={BANNER} pathname="/" onDismiss={() => {}} />);
     const link = screen.getByRole("link");
-    expect(link.className).not.toMatch(/(^|\s)(hover:)?underline(\s|$)/);
+    // Under any variant: hover:, focus-visible:, group-hover/banner:, md:hover:...
+    expect(link.className).not.toMatch(/(^|\s|:)underline(\s|$)/);
     const underlined = link.querySelectorAll(".underline");
     expect(underlined).toHaveLength(1);
     expect(underlined[0]).toHaveTextContent("Register your interest");
+  });
+
+  // The cue is the link's own: keyboard focus gets what hover gets.
+  it("cues the link on keyboard focus as well as hover", () => {
+    render(<SiteBannerBar banner={BANNER} pathname="/" onDismiss={() => {}} />);
+    const link = screen.getByRole("link");
+    expect(link.className).toMatch(/(^|\s)hover:bg-/);
+    expect(link.className).toMatch(/(^|\s)focus-visible:bg-/);
+    expect(link.className).toMatch(/(^|\s)focus-visible:ring-2(\s|$)/);
+    const label = link.querySelector(".underline")!;
+    expect(label.className).toContain("group-hover/banner:");
+    expect(label.className).toContain("group-focus-visible/banner:");
   });
 
   it("shows a notice with no link as plain text", () => {
