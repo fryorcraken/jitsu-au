@@ -1065,6 +1065,7 @@ RSVPs — and upvote a comment once (no downvote). Product spec:
 | `seo_title`        | `text`        | yes  | 1–100 chars. The page's `<title>` as written; NULL means `<title> \| UTS Jitsu Blog` (`blogPostSeo`).   |
 | `seo_description`  | `text`        | yes  | 1–300 chars. The meta/og description; NULL means the excerpt. Never derived on save, unlike `excerpt`.  |
 | `status`           | `text`        | no   | `draft\|published`. Default `draft`.                                                                    |
+| `kind`             | `text`        | no   | `article\|update`. Default `update`. Articles sit on top of `/blog`, updates below (`docs/blog.md` 13). |
 | `author_id`        | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The writing manager.                                    |
 | `published_at`     | `timestamptz` | yes  | Set the first time `status` moves to `published`; never changed again — including on a later unpublish. |
 | `created_at`       | `timestamptz` | no   | Default `now()`.                                                                                        |

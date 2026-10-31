@@ -23,17 +23,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { uploadBlogImage } from "@/lib/blog.functions";
 import { deriveExcerpt, extractYouTubeId, splitBlogContent } from "@/lib/blog-content";
 import { blogMarkdownComponents } from "@/lib/blog-markdown";
 import { BlogVideoBlock } from "@/components/site/BlogVideoBlock";
 import { defaultBlogSlug, slugify } from "@/lib/slug";
 import {
+  BLOG_POST_KIND_LABELS,
   BLOG_SEO_DESCRIPTION_MAX,
   BLOG_SEO_TITLE_MAX,
   blogImageMimeTypes,
   blogPostSchema,
   type BlogImageMimeType,
+  type BlogPostKind,
   type BlogPostStatus,
 } from "@/lib/validation";
 import { BLOG_SEO_DESCRIPTION_SHOWN, BLOG_SEO_TITLE_SHOWN, blogPostSeo } from "@/lib/seo";
@@ -77,6 +80,7 @@ type BlogDraftFields = {
   excerpt: string;
   body: string;
   status: string;
+  kind: string;
   coverPath: string;
   coverUrl: string;
   seoTitle: string;
@@ -89,6 +93,7 @@ const BLOG_DRAFT_SHAPE: BlogDraftFields = {
   excerpt: "",
   body: "",
   status: "draft",
+  kind: "update",
   coverPath: "",
   coverUrl: "",
   seoTitle: "",
@@ -147,6 +152,20 @@ function SeoLengthHint({
   );
 }
 
+/** The two kinds, in the order the editor offers them, and what each one does
+ * to where the post sits on the blog. Club update first: it is what most posts
+ * are, and the default. */
+const KIND_CHOICES: { value: BlogPostKind; hint: string }[] = [
+  {
+    value: "update",
+    hint: "News from the club: a session log, a grading, the week. Listed newest first, so it moves down as newer posts arrive.",
+  },
+  {
+    value: "article",
+    hint: "A piece worth reading for years. Kept at the top of the blog, above the club updates, whatever is posted after it.",
+  },
+];
+
 export type BlogPostEditorValue = {
   title: string;
   slug: string;
@@ -155,6 +174,7 @@ export type BlogPostEditorValue = {
   cover_image_path: string;
   cover_image_url: string | null;
   status: BlogPostStatus;
+  kind: BlogPostKind;
   /** Blank means the default, `blogPostSeo` in `src/lib/seo.ts`. */
   seo_title: string;
   seo_description: string;
@@ -198,6 +218,7 @@ export function BlogPostEditor({
   const [excerpt, setExcerpt] = useState(initial.excerpt);
   const [body, setBody] = useState(initial.body_md);
   const [status, setStatus] = useState<BlogPostStatus>(initial.status);
+  const [kind, setKind] = useState<BlogPostKind>(initial.kind);
   const [coverPath, setCoverPath] = useState(initial.cover_image_path);
   const [coverUrl, setCoverUrl] = useState(initial.cover_image_url);
   const [seoTitle, setSeoTitle] = useState(initial.seo_title);
@@ -230,6 +251,7 @@ export function BlogPostEditor({
     setExcerpt(initial.excerpt);
     setBody(initial.body_md);
     setStatus(initial.status);
+    setKind(initial.kind);
     setCoverPath(initial.cover_image_path);
     setCoverUrl(initial.cover_image_url);
     setSeoTitle(initial.seo_title);
@@ -242,6 +264,7 @@ export function BlogPostEditor({
     excerpt !== initial.excerpt ||
     body !== initial.body_md ||
     status !== initial.status ||
+    kind !== initial.kind ||
     coverPath !== initial.cover_image_path ||
     seoTitle !== initial.seo_title ||
     seoDescription !== initial.seo_description;
@@ -256,7 +279,7 @@ export function BlogPostEditor({
   // work it never saw.
   useEffect(() => {
     setSaveError(null);
-  }, [title, slug, excerpt, body, status, coverPath, seoTitle, seoDescription]);
+  }, [title, slug, excerpt, body, status, kind, coverPath, seoTitle, seoDescription]);
 
   // Covers a closed tab / refresh / typed-in address bar on a DESKTOP browser.
   // In-app navigation (clicking another sidebar link) is guarded separately by
@@ -286,12 +309,13 @@ export function BlogPostEditor({
       excerpt,
       body,
       status,
+      kind,
       coverPath,
       coverUrl: coverUrl ?? "",
       seoTitle,
       seoDescription,
     }),
-    [title, slug, excerpt, body, status, coverPath, coverUrl, seoTitle, seoDescription],
+    [title, slug, excerpt, body, status, kind, coverPath, coverUrl, seoTitle, seoDescription],
   );
   const draftBaseline = useMemo<BlogDraftFields>(
     () => ({
@@ -300,6 +324,7 @@ export function BlogPostEditor({
       excerpt: initial.excerpt,
       body: initial.body_md,
       status: initial.status,
+      kind: initial.kind,
       coverPath: initial.cover_image_path,
       coverUrl: initial.cover_image_url ?? "",
       seoTitle: initial.seo_title,
@@ -324,6 +349,7 @@ export function BlogPostEditor({
     setExcerpt(stored.excerpt);
     setBody(stored.body);
     setStatus(stored.status === "published" ? "published" : "draft");
+    setKind(stored.kind === "article" ? "article" : "update");
     setCoverPath(stored.coverPath);
     setCoverUrl(stored.coverUrl || null);
     setSeoTitle(stored.seoTitle);
@@ -395,6 +421,7 @@ export function BlogPostEditor({
       cover_image_path: coverPath,
       cover_image_url: coverUrl,
       status,
+      kind,
       seo_title: seoTitle.trim(),
       seo_description: seoDescription.trim(),
     };
@@ -457,6 +484,34 @@ export function BlogPostEditor({
           className="mt-1.5"
         />
       </div>
+      <fieldset>
+        <legend className="text-sm font-medium">Kind of post</legend>
+        <RadioGroup
+          value={kind}
+          onValueChange={(v) => setKind(v === "article" ? "article" : "update")}
+          aria-label="Kind of post"
+          className="mt-2 gap-2"
+        >
+          {KIND_CHOICES.map((choice) => (
+            <div key={choice.value} className="flex items-start gap-2">
+              <RadioGroupItem
+                value={choice.value}
+                id={`post-kind-${choice.value}`}
+                className="mt-0.5"
+                aria-describedby={`post-kind-${choice.value}-hint`}
+              />
+              <div className="text-sm">
+                <Label htmlFor={`post-kind-${choice.value}`} className="font-normal">
+                  {BLOG_POST_KIND_LABELS[choice.value]}
+                </Label>
+                <p id={`post-kind-${choice.value}-hint`} className="text-xs text-muted-foreground">
+                  {choice.hint}
+                </p>
+              </div>
+            </div>
+          ))}
+        </RadioGroup>
+      </fieldset>
       <div>
         <Label htmlFor="post-slug">URL slug</Label>
         <Input

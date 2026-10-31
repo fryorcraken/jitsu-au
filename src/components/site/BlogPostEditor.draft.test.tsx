@@ -31,6 +31,7 @@ const EMPTY: BlogPostEditorValue = {
   cover_image_path: "",
   cover_image_url: null,
   status: "draft",
+  kind: "update",
   seo_title: "",
   seo_description: "",
 };

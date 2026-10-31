@@ -9,7 +9,9 @@ the migrations, in the same change.
 
 A **post** (`blog_posts`) is written and published by a manager; only
 `published` posts are ever shown to the public, `draft` ones are visible only
-in the manager area. A **comment** (`blog_comments`) belongs to a post and to
+in the manager area. Every post is either an **article**, a timeless piece kept
+at the top of the blog, or a **club update**, news that dates and is listed
+newest first underneath (rule 13). A **comment** (`blog_comments`) belongs to a post and to
 the person who wrote it, and may be a reply to one other comment — nesting
 goes one level deep, no replies-to-replies. Anyone signed in may **upvote** a
 comment once (`blog_comment_upvotes`); there is no downvote. A manager may
@@ -98,11 +100,39 @@ severities of moderation, not the same action.
     read time, so changing it later re-labels their past comments too (it isn't
     frozen at post time, unlike a waiver's evidence fields).
 
+13. **A post is an article or a club update, and the blog is laid out by
+    it.** `blog_posts.kind` is `article` or `update`. A club update is news
+    that dates: a session log, a grading, the week. An article is a piece
+    meant to be read for years, on training or self-defence. Before articles
+    existed every post was news, and newest first was the right order; an
+    article in that list sinks under the session logs within weeks, which is
+    the whole reason for the split. So:
+    - `/blog` shows **every published article first**, newest first, in large
+      cards with a reading time, and they stay there whatever is posted after
+      them. Club updates follow as a dated feed, paged ten at a time. Only the
+      updates are paged; the articles appear once, at the top of page one,
+      and later pages point back to them.
+    - The post page says which it is above the title ("Blog / Article", "Blog /
+      Club update"). An article leads with its reading time and keeps its
+      date quietly after it; an update leads with its date.
+    - A new post is a **club update unless the manager picks Article**, since
+      that is what most posts are, and every post written before this is one.
+      A save that does not mention the kind keeps the stored one
+      (`kindUpdate`), so an editor tab opened before articles existed cannot
+      demote an article.
+    - Changing the kind of a published post moves it between the two sections
+      at once and announces nothing. Publishing announces the same way for
+      both kinds (rule 11).
+    - Reading time is the post's prose (the words the excerpt is taken from)
+      at 230 words a minute, rounded up, never under one minute
+      (`readingMinutes` in `src/lib/blog-content.ts`).
+
 ## Flows
 
 ### A visitor reads the blog
 
-`/blog` lists published posts, newest first, paginated. `/blog/:slug` renders
+`/blog` lists the published articles first, then the published club updates,
+newest first, paginated (rule 13). `/blog/:slug` renders
 one post; a slug with no published post behind it is a real 404 (the router's
 own not-found page), not a soft "not found" page — see the SEO note below.
 Comments render underneath: top-level comments each with their replies
@@ -134,7 +164,10 @@ host the manager is signed in on) ready to paste into a message or a social
 post. It sits with the title rather than with View/Delete because those are off
 the right edge of the table on a phone. A draft has no button: the public route
 serves published posts only, so a draft's URL is a 404 for everyone it is sent
-to. The composer is the same Markdown editor the knowledge base
+to. The composer opens with a **Kind of post** choice, Club update or
+Article, each with a line saying where it puts the post on the blog. The
+manager list shows each post's kind, with articles marked so they stand out.
+The composer is the same Markdown editor the knowledge base
 uses (`MarkdownEditor`, so the toolbar, the keyboard shortcuts and the
 wrap-the-selection behaviour described in `docs/knowledge-base.md` are the same
 on both screens), with an "Insert image" button
@@ -176,7 +209,8 @@ same ground, the way the waiver template editor does.
 
 The same work can be done by an AI assistant acting for a manager, through the
 manager agent API or the club's MCP server: list and read posts (drafts
-included), create or edit one, publish it, delete it, and upload pictures for
+included), create or edit one, make it an article or a club update, publish
+it, delete it, and upload pictures for
 it, from the file itself or from a link to it. It is not a second editor: every
 save goes through the same functions the composer's does, so the slug, the
 excerpt, the publish date and the announcement follow every rule above.

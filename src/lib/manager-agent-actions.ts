@@ -2060,6 +2060,7 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
           excerpt: input.excerpt,
           cover_image_path: input.cover_image_path,
           status: input.status ?? "draft",
+          kind: input.kind,
           seo_title: input.seo_title,
           seo_description: input.seo_description,
         },

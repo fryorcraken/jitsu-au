@@ -115,7 +115,7 @@ function id(n) {
   return `${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`;
 }
 
-const BLOG = { welcome: id(21), grading: id(22), draft: id(23) };
+const BLOG = { welcome: id(21), grading: id(22), draft: id(23), article: id(24) };
 const KB_ARTICLE = { welcome: id(41), etiquette: id(42) };
 const SERIES = id(51);
 const IMPORT_BATCH = id(71);
@@ -780,6 +780,36 @@ await insert("blog_posts", [
     ].join("\n"),
     status: "published",
     published_at: at(-30),
+    author_id: users.manager,
+  },
+  // An article: older than both updates on purpose, so the blog list proves
+  // an article stays on top however much newer club news there is.
+  {
+    id: BLOG.article,
+    slug: "why-we-train-against-resistance",
+    title: "Why we train against resistance",
+    kind: "article",
+    excerpt:
+      "A technique you have only practised on a partner who helps you is a guess. Here is how we find out which of ours work.",
+    body_md: [
+      "Most of what we teach is first learned slowly, with a partner who lets it",
+      "happen. That is the right way to learn a movement. It is not a way to find",
+      "out whether the movement works.",
+      "",
+      "## A partner who is trying to win",
+      "",
+      "Once a technique is learned, we test it against somebody with a goal of",
+      "their own. Both people can win, and both are trying to. If it only works",
+      "when the other person helps, we would rather find that out on the mat.",
+      "",
+      "## Pressure is not the same thing",
+      "",
+      "Being tired, being watched, or starting from a bad position all make it",
+      "harder to perform. We train under those conditions too, separately, so",
+      "each one gets the time it needs.",
+    ].join("\n"),
+    status: "published",
+    published_at: at(-60),
     author_id: users.manager,
   },
   {

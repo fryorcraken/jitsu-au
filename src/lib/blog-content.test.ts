@@ -3,6 +3,8 @@ import {
   deriveExcerpt,
   EXCERPT_MAX_LENGTH,
   extractYouTubeId,
+  readingMinutes,
+  READING_WORDS_PER_MINUTE,
   splitBlogContent,
 } from "./blog-content";
 
@@ -138,5 +140,38 @@ describe("deriveExcerpt", () => {
 
   it("stays inside the 500-character excerpt column limit", () => {
     expect(deriveExcerpt("word ".repeat(500)).length).toBeLessThanOrEqual(EXCERPT_MAX_LENGTH);
+  });
+});
+
+describe("readingMinutes", () => {
+  const words = (n: number) => Array.from({ length: n }, () => "word").join(" ");
+
+  it("rounds up to the next whole minute", () => {
+    expect(readingMinutes(words(READING_WORDS_PER_MINUTE))).toBe(1);
+    expect(readingMinutes(words(READING_WORDS_PER_MINUTE + 1))).toBe(2);
+    expect(readingMinutes(words(READING_WORDS_PER_MINUTE * 12))).toBe(12);
+  });
+
+  it("never says zero, even for a post that is only a video", () => {
+    expect(readingMinutes("[[video:https://youtu.be/abc123]]")).toBe(1);
+    expect(readingMinutes("")).toBe(1);
+  });
+
+  // The same prose the excerpt reads, so a code block or a heading does not
+  // pad an article's reading time.
+  it("counts prose only, not headings, code or video lines", () => {
+    const prose = words(READING_WORDS_PER_MINUTE);
+    const padded = [
+      `# ${words(50)}`,
+      "",
+      prose,
+      "",
+      "```",
+      words(500),
+      "```",
+      "",
+      "[[video:https://youtu.be/abc123]]",
+    ].join("\n");
+    expect(readingMinutes(padded)).toBe(1);
   });
 });

@@ -21,6 +21,7 @@ import { splitBlogContent } from "@/lib/blog-content";
 import { blogMarkdownComponents } from "@/lib/blog-markdown";
 import { useAuth } from "@/hooks/useAuth";
 import { blogPostSeo, buildPageMeta, canonicalUrl } from "@/lib/seo";
+import { BLOG_POST_KIND_LABELS } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
 type BlogPostRow = NonNullable<Awaited<ReturnType<typeof getBlogPostBySlug>>>;
@@ -315,12 +316,31 @@ function BlogPostPage() {
           <Link to="/blog" className="hover:underline">
             Blog
           </Link>
+          <span aria-hidden="true" className="mx-2 text-muted-foreground">
+            /
+          </span>
+          {BLOG_POST_KIND_LABELS[post.kind]}
         </p>
         <h1 className="mt-3 text-balance text-4xl font-bold md:text-5xl">{post.title}</h1>
-        {post.published_at && (
+        {post.kind === "article" ? (
+          // An article is read for what it says, not for when: the reading
+          // time leads, and the date is there for whoever wants it.
           <p className="mt-3 text-sm text-muted-foreground">
-            <time dateTime={post.published_at}>{formatDate(post.published_at)}</time>
+            {post.reading_minutes} min read
+            {post.published_at && (
+              <>
+                <span aria-hidden="true"> · </span>
+                <span className="sr-only">, </span>
+                Published <time dateTime={post.published_at}>{formatDate(post.published_at)}</time>
+              </>
+            )}
           </p>
+        ) : (
+          post.published_at && (
+            <p className="mt-3 text-sm font-medium text-foreground">
+              <time dateTime={post.published_at}>{formatDate(post.published_at)}</time>
+            </p>
+          )
         )}
         {post.cover_image_url && (
           <img

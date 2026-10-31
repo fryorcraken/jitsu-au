@@ -5,6 +5,7 @@ import {
   agentListCalendarEventsSchema,
   agentGetBlogPostSchema,
   agentSaveBlogPostSchema,
+  asBlogPostKind,
   agentUploadBlogImageSchema,
   agentStartBlogImageUploadSchema,
   CLUB_REPLY_TO_MAX,
@@ -208,6 +209,16 @@ describe("commentDisplayName", () => {
   });
 });
 
+describe("asBlogPostKind", () => {
+  it("reads only 'article' as an article, so nothing unknown jumps to the top of the blog", () => {
+    expect(asBlogPostKind("article")).toBe("article");
+    expect(asBlogPostKind("update")).toBe("update");
+    expect(asBlogPostKind("Article")).toBe("update");
+    expect(asBlogPostKind(null)).toBe("update");
+    expect(asBlogPostKind(undefined)).toBe("update");
+  });
+});
+
 describe("blogPostSchema", () => {
   it("accepts a minimal draft with no slug (server derives one)", () => {
     const parsed = blogPostSchema.parse({ title: "Hello world", body_md: "Body text." });
@@ -225,6 +236,17 @@ describe("blogPostSchema", () => {
     expect(
       blogPostSchema.parse({ title: "Hello", body_md: "Body", slug: "hello-world" }).slug,
     ).toBe("hello-world");
+  });
+
+  // Optional, not defaulted: an editor tab opened before articles existed
+  // saves without it, and a default here would turn an article back into an
+  // update on that save (kindUpdate keeps what is stored instead).
+  it("takes an article or a club update, and leaves an omitted kind unset", () => {
+    const base = { title: "Hello", body_md: "Body" };
+    expect(blogPostSchema.parse(base).kind).toBeUndefined();
+    expect(blogPostSchema.parse({ ...base, kind: "article" }).kind).toBe("article");
+    expect(blogPostSchema.parse({ ...base, kind: "update" }).kind).toBe("update");
+    expect(blogPostSchema.safeParse({ ...base, kind: "news" }).success).toBe(false);
   });
 
   it("takes an optional search title and description, blank meaning the default", () => {
@@ -3703,6 +3725,11 @@ describe("the blog through the manager agent API", () => {
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, excerpt: "" }).success).toBe(true);
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_title: "Grading" }).success).toBe(true);
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_description: "" }).success).toBe(true);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, kind: "article" }).success).toBe(true);
+  });
+
+  it("refuses a kind that is not article or update", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, kind: "timeless" }).success).toBe(false);
   });
 
   // get_blog_post reports a post on the defaults as null, so sending back what

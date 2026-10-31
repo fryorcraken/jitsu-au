@@ -193,8 +193,11 @@ breaks on a phone is a broken screen.
 
 A dynamic route (`$userId`) needs an id in the seed's manifest, and one that has
 none fails the run rather than leaving a gap nobody notices.
-`/update-password`, `/email-settings/$token` and `/blog/$slug` are deliberately
-not walked: each needs a token only its own email carries.
+`/update-password` and `/email-settings/$token` are deliberately not walked:
+each needs a token only its own email carries. `/blog/$slug` is not walked
+either, because a slug is content rather than a route parameter the seed can
+name for every page; `public/blog.spec.ts` opens one seeded article and one
+seeded club update instead, which is where the gallery's post pages come from.
 
 **One parameter name can mean two different people.** `$userId` is somebody a
 MANAGER is looking at on `/manager/users/$userId`, and one of the MEMBER's own

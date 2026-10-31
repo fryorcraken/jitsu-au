@@ -8,6 +8,7 @@ import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
 import { BlogPostEditor, type BlogPostEditorValue } from "@/components/site/BlogPostEditor";
 import { getBlogPostForEdit, updateBlogPost } from "@/lib/blog.functions";
+import { asBlogPostKind } from "@/lib/validation";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 import { discardUnsavedChanges, useConfirm } from "@/hooks/use-confirm";
 
@@ -76,6 +77,7 @@ function EditBlogPostPage() {
           body_md: value.body_md,
           cover_image_path: value.cover_image_path,
           status: value.status,
+          kind: value.kind,
           seo_title: value.seo_title,
           seo_description: value.seo_description,
         },
@@ -97,6 +99,7 @@ function EditBlogPostPage() {
               cover_image_path: value.cover_image_path || null,
               cover_image_url: value.cover_image_url,
               status: value.status,
+              kind: value.kind,
               seo_title: value.seo_title || null,
               seo_description: value.seo_description || null,
             }
@@ -128,6 +131,7 @@ function EditBlogPostPage() {
         cover_image_path: post.cover_image_path ?? "",
         cover_image_url: post.cover_image_url,
         status: post.status === "published" ? "published" : "draft",
+        kind: asBlogPostKind(post.kind),
         seo_title: post.seo_title ?? "",
         seo_description: post.seo_description ?? "",
       },
