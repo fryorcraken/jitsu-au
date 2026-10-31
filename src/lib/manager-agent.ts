@@ -13,6 +13,7 @@ import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import { versionLabel } from "@/lib/document-versions";
 import { canonicalUrl } from "@/lib/seo";
 import { SITE_ORIGIN } from "@/lib/site-origin";
+import { WEEKDAY_LABELS, clubLocalDateTime } from "@/lib/calendar";
 
 /** The columns `list_kb_articles` projects from. */
 export type AgentKbArticle = {
@@ -286,6 +287,62 @@ export function mergeAgentBlogPostEdit(
   };
 }
 
+/**
+ * One date on the calendar, as the manager calendar's own read returns it
+ * (`listManagerEventRows`, and the dates `createCalendarEntryRow` adds, which
+ * carry no tally).
+ */
+export type AgentCalendarEvent = {
+  id: string;
+  series_id: string | null;
+  title: string;
+  description: string | null;
+  instructor_name: string | null;
+  location: string | null;
+  starts_at: string;
+  ends_at: string;
+  status: string;
+  visibility: string;
+  invite_only: boolean;
+  rsvps?: { going: number; maybe: number; declined: number };
+};
+
+/**
+ * One date as `list_calendar_events` and `create_calendar_entry` report it: the
+ * screen's row, plus what an agent would otherwise work out for itself and get
+ * wrong.
+ *
+ * - `starts_local` / `ends_local` are club time, in the "YYYY-MM-DDTHH:MM" shape
+ *   `create_calendar_entry` takes back. The manager thinks in Sydney time, the
+ *   stored instants are UTC, and twice a year the offset between them moves.
+ * - `weekday` is the club-time day the date starts on. "Cancel Thursday's
+ *   class" is how a manager asks, and a language model asked which weekday a
+ *   date falls on will sometimes answer wrong with complete confidence.
+ * - `repeats` says whether `series_id` is set, which decides whether a "this and
+ *   every later date" scope applies and whether the date can be deleted.
+ */
+export function projectAgentCalendarEvent(e: AgentCalendarEvent) {
+  const startsLocal = clubLocalDateTime(new Date(e.starts_at));
+  return {
+    id: e.id,
+    series_id: e.series_id,
+    repeats: e.series_id !== null,
+    title: e.title,
+    starts_at: e.starts_at,
+    ends_at: e.ends_at,
+    starts_local: startsLocal,
+    ends_local: clubLocalDateTime(new Date(e.ends_at)),
+    weekday: WEEKDAY_LABELS[new Date(`${startsLocal.slice(0, 10)}T00:00:00Z`).getUTCDay()],
+    status: e.status,
+    visibility: e.visibility,
+    invite_only: e.invite_only,
+    instructor_name: e.instructor_name,
+    location: e.location,
+    description: e.description,
+    ...(e.rsvps && { rsvps: e.rsvps }),
+  };
+}
+
 /** One action's shape, returned verbatim by the GET manifest endpoint. */
 export type AgentActionSpec = {
   name: string;
@@ -309,7 +366,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "32",
+  version: "33",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -323,11 +380,23 @@ export const AGENT_MANIFEST: {
   // new response field — which is what these notes name.
   changes: [
     {
-      version: "32",
+      version: "33",
       // Purely additive: three new actions.
       breaking: false,
       notes: [
         "New actions for the contact inbox (/manager/contact-messages): list_contact_messages reads it, mark_contact_messages_seen marks it seen up to the list's newest_at, and delete_contact_message deletes one message for good. Reading never marks anything seen; the seen marker is shared by every manager, so it only moves when mark_contact_messages_seen is called.",
+      ],
+    },
+    {
+      version: "32",
+      // New actions, and nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "The club calendar, the agent's equivalent of the manager's Calendar screen, through the same functions that screen calls. New read actions: list_calendar_events (every date from 30 days ago to 180 days ahead, with its id, series_id and repeats, UTC starts_at/ends_at, club-time starts_local/ends_local and weekday, status, visibility, invite_only and an rsvps tally) and list_calendar_rsvps (who replied to one date).",
+        "New change actions: create_calendar_entry (a one-off, or a weekly entry), edit_calendar_entry (details only, for one date or that date and every later one), cancel_calendar_entry (cancel or restore, the date is kept), stop_calendar_repeat (take a weekly entry's dates still to come off the calendar) and delete_calendar_entry (a one-off made by mistake). Each date's id is what they take, except stop_calendar_repeat, which takes series_id. A calendar change is public at once, on the site and in every subscriber's calendar app, and emails nobody.",
+        "create_calendar_entry takes a one-off's times as club time with no offset (2026-11-05T18:00), as the screen reads its pickers, or as an ISO time with an offset. A location left out is the club's gym, as the screen's form pre-fills. Adding the same entry again is 409 already_on_calendar rather than a second copy, so a create you never heard back from can be sent again.",
+        "Refusals: 404 not_found (no such date or repeat), 422 not_repeating (scope series on a one-off), 422 no_dates (a weekly entry that would put no date on the calendar), 409 repeating_date (deleting a date still to come of a weekly entry still repeating), 409 already_on_calendar. Details, where there are any, are in error.details.",
+        "list_calendar_events takes no params, and refuses any (400 invalid_params) rather than return the whole list as if it had been filtered.",
       ],
     },
     {
@@ -1675,6 +1744,176 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "The post it is for, which only decides the folder it is filed in. Omit for a post not saved yet.",
+        },
+      ],
+    },
+    {
+      name: "list_calendar_events",
+      method: "POST",
+      summary:
+        "Every date on the club calendar from 30 days ago to 180 days ahead, oldest first: the list on the manager's Calendar screen, from the same read. One-offs and every date a weekly entry has generated, cancelled ones included. Each date has id (what the other calendar actions take), series_id and repeats (set when it is one week of a weekly entry; series_id is what stop_calendar_repeat takes), title, starts_at and ends_at (UTC), starts_local and ends_local (the same times in club time, Australia/Sydney, as YYYY-MM-DDTHH:MM, the shape create_calendar_entry takes), weekday (the club-time day it starts on), status (scheduled | cancelled), visibility (public | members, where members means paid members and managers only), invite_only (a badge: it hides the date from nobody), instructor_name, location, description, and rsvps { going, maybe, declined }. A weekly entry keeps between six and twelve weeks of dates listed (it is topped up once its furthest date is within six weeks), so a week more than six weeks out may not be listed yet: it is not missing, it cannot be edited or cancelled until it appears, and it is no reason to add a one-off for it. Who replied: list_calendar_rsvps. time_zone names the club's zone.",
+      params: [],
+    },
+    {
+      name: "list_calendar_rsvps",
+      method: "POST",
+      summary:
+        "Who has replied to one date, newest reply first, as the manager's Calendar screen lists them: user_id, name, email, response (going | maybe | declined) and updated_at. Replies are made by people signed in to the site, so each email is that person's own. 404 not_found when there is no such date, so an empty list always means nobody has replied.",
+      params: [
+        {
+          name: "event_id",
+          required: true,
+          description: "The date's id, from list_calendar_events.",
+        },
+      ],
+    },
+    {
+      name: "create_calendar_entry",
+      method: "POST",
+      summary:
+        "Put something on the calendar: the Add form on the manager's Calendar screen. It is on the calendar page (or only for paid members, with visibility members) and in every subscriber's calendar app straight away. Nobody is emailed. A one-off takes repeat {type: \"never\", starts_at, ends_at}; a weekly entry takes repeat {type: \"weekly\", weekday, start_time, duration_minutes, starts_on, ends_on} and its dates are generated about twelve weeks ahead, with more appearing as they get close, skipping any time where a scheduled date with the same title and visibility already is (a one-off for the same class, say). Returns repeats, event_id (the one-off's date; null for a weekly entry), series_id (the weekly entry; null for a one-off), generated (how many dates went on; 0 only for a weekly entry that starts more than about twelve weeks away, whose dates appear as it gets close) and dates, each as list_calendar_events reports it without rsvps: read the weekday and starts_local of the first back to the manager. Sending the same entry again is refused rather than doubled, so a create you never heard back from can be sent again: 409 already_on_calendar when the same title already starts at that time, as a one-off or one week of a repeat (a cancelled date there counts only if it also ends at the same time, so cancelling a date and adding a longer one-off in its place works), or already repeats on that weekday at that time on any of the same dates (next semester's run of a class is not a duplicate of this one). error.details names the match: event_id, series_id and status for a one-off, series_id for a weekly entry. 422 no_dates for a weekly entry that would put no date on the calendar at all: its last date has passed, or no date from starts_on to ends_on falls on that weekday. A cancelled match says so: restore it with cancel_calendar_entry rather than adding it again, or give a genuinely different entry a different title.",
+      params: [
+        {
+          name: "title",
+          required: true,
+          description:
+            'Up to 120 characters, and the only detail the calendar needs: "Beginner Gi", "Grading", "End of semester social".',
+        },
+        {
+          name: "repeat",
+          required: true,
+          description:
+            'An object. A one-off: {"type":"never","starts_at":"2026-11-05T18:00","ends_at":"2026-11-05T19:30"}. A time with no offset is club time (Australia/Sydney), read the way the screen reads its pickers, and is the one to send: an ISO time with an offset or Z is accepted too, but Sydney moves between +10:00 and +11:00 in April and October. It must end at or after it starts. Weekly: {"type":"weekly","weekday":1,"start_time":"18:00","duration_minutes":90,"starts_on":"2026-11-02","ends_on":"2026-12-14"}, where weekday is 0 Sunday, 1 Monday, 2 Tuesday, 3 Wednesday, 4 Thursday, 5 Friday or 6 Saturday; start_time is club time, 24-hour HH:MM; duration_minutes is 1 to 600; starts_on is the first date it may run and ends_on the last (YYYY-MM-DD; omit ends_on, or send null, to keep it repeating). A weekly entry\'s day, time and length cannot be changed later: stop it and add it again.',
+        },
+        {
+          name: "instructor_name",
+          required: false,
+          description: "Up to 80 characters. Blank is normal for socials and gradings.",
+        },
+        {
+          name: "location",
+          required: false,
+          description:
+            "Up to 120 characters. Leave it out for the club's gym (ActivateFit Gym, UTS Building 4, 745 Harris Street, Ultimo NSW 2007), which the screen's form fills in; send an empty string or null for no location at all.",
+        },
+        {
+          name: "description",
+          required: false,
+          description: "Free text, up to 4000 characters.",
+        },
+        {
+          name: "visibility",
+          required: false,
+          description:
+            "public (the default): everybody, on the public calendar page. members: paid members and managers only, on the site and in calendar links. Enforced, not a label.",
+        },
+        {
+          name: "invite_only",
+          required: false,
+          description:
+            'true puts an "invite only" badge on each date, on the calendar page and in calendar apps. It is a label and hides nothing: everybody who can see the date (see visibility) still sees it and can reply. Default false. To limit who sees an entry, use visibility members.',
+        },
+      ],
+    },
+    {
+      name: "edit_calendar_entry",
+      method: "POST",
+      summary:
+        "Change an entry's details: Edit on the manager's Calendar screen. id is always a date from list_calendar_events. scope event changes that date only. scope series, only on a date of a weekly entry, changes that date and every later one, and the weekly rule, so dates still to be generated carry the change too; dates before the one you name are never rewritten, because they record what happened. Only the fields you send change. An empty string (or null) clears description, instructor_name or location; title cannot be cleared. A date's day, time and length cannot be changed: cancel it and add a one-off, or for a weekly entry stop it and add it again. Visible at once on the site and in subscribers' calendar apps; nobody is emailed. Returns updated, the number of dates changed. 404 not_found when there is no such date; 422 not_repeating for scope series on a one-off; 400 invalid_params when no field to change was sent.",
+      params: [
+        {
+          name: "scope",
+          required: true,
+          description:
+            "event (this date only) | series (this date and every later one of its weekly entry).",
+        },
+        {
+          name: "id",
+          required: true,
+          description:
+            "The date's id, from list_calendar_events. With scope series, the first date to change.",
+        },
+        {
+          name: "title",
+          required: false,
+          description: "Up to 120 characters.",
+        },
+        {
+          name: "instructor_name",
+          required: false,
+          description: "Up to 80 characters. Empty string or null to clear.",
+        },
+        {
+          name: "location",
+          required: false,
+          description: "Up to 120 characters. Empty string or null to clear.",
+        },
+        {
+          name: "description",
+          required: false,
+          description: "Up to 4000 characters. Empty string or null to clear.",
+        },
+        {
+          name: "visibility",
+          required: false,
+          description: "public | members, as for create_calendar_entry.",
+        },
+        {
+          name: "invite_only",
+          required: false,
+          description: "true | false, as for create_calendar_entry.",
+        },
+      ],
+    },
+    {
+      name: "cancel_calendar_entry",
+      method: "POST",
+      summary:
+        "Cancel a date, or restore one with cancelled: false: Cancel and Restore on the manager's Calendar screen. A cancelled date stays on the calendar, struck through and marked Cancelled, its replies are kept, and subscribed calendar apps show it as cancelled. Nobody is emailed, and a cancelled date cannot be replied to or checked in to. scope event is that date only; scope series, only on a date of a weekly entry, is that date and every later one already on the calendar. Weeks the entry generates later are not cancelled, so to end a weekly entry for good use stop_calendar_repeat. Returns updated, the number of dates changed. 404 not_found when there is no such date; 422 not_repeating for scope series on a one-off.",
+      params: [
+        {
+          name: "id",
+          required: true,
+          description:
+            "The date's id, from list_calendar_events. With scope series, the first date to change.",
+        },
+        {
+          name: "cancelled",
+          required: true,
+          description: "true to cancel, false to restore.",
+        },
+        {
+          name: "scope",
+          required: false,
+          description:
+            "event (the default, this date only) | series (this date and every later one already on the calendar).",
+        },
+      ],
+    },
+    {
+      name: "stop_calendar_repeat",
+      method: "POST",
+      summary:
+        "Stop a weekly entry repeating: Stop repeating on the manager's Calendar screen. Every date still to start is taken off the calendar and no more are made. Dates that have started stay, because they happened. Anybody already checked in to a date that comes off has that check-in removed with it. There is no undo: to have it again, add it again with create_calendar_entry. Nobody is emailed. Safe to send again: a repeat already stopped is left as it is, apart from clearing any date a first call missed, and comes back already_stopped: true. Returns removed (how many dates came off) and already_stopped. 404 not_found when there is no such weekly entry.",
+      params: [
+        {
+          name: "series_id",
+          required: true,
+          description:
+            "The weekly entry's series_id, from any of its dates in list_calendar_events.",
+        },
+      ],
+    },
+    {
+      name: "delete_calendar_entry",
+      method: "POST",
+      summary:
+        "Delete a one-off date outright, for a mistake: it goes from the calendar as though it was never there, with every reply and every check-in to it, and there is no undo. Returns checkins_removed, how many check-ins went with it. To call something off, cancel_calendar_entry is almost always what is wanted, since it keeps the record. 409 repeating_date for a date still to come of a weekly entry still repeating, which would only come back (series_id in error.details; cancel the date, or stop_calendar_repeat); 404 not_found when there is no such date.",
+      params: [
+        {
+          name: "id",
+          required: true,
+          description: "The date's id, from list_calendar_events.",
         },
       ],
     },

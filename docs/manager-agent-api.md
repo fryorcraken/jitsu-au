@@ -363,9 +363,12 @@ locked | already_verified` (the record has moved on, checked again at the send);
   `session_checkins.membership_id` is `ON DELETE SET NULL` — without it the
   delete would succeed and silently turn a class somebody attended into an
   uncovered one. Clearing it means moving those check-ins to another membership,
-  which is a **manager-screen action with no agent equivalent**: this API has no
-  check-in actions at all, and adding the first one is a wider surface decision
-  than the change that introduced this made on its own.
+  which is a **manager-screen action with no agent equivalent**: this API cannot
+  make, move or cover a check-in, and adding the first such action is a wider
+  surface decision than the change that introduced this made on its own. (It
+  does remove check-ins in one place, on purpose: a deleted calendar date, or
+  one a stopped repeat removes, takes its check-ins with it, by the club's
+  rule that a class's check-ins go when the class does.)
 - `file_waiver` — file a scanned paper waiver (migration / bulk filing from
   paper records). Same params as the manager's paper-upload form
   (`paperWaiverUploadSchema`); dispatches to `filePaperWaiver` in
@@ -574,9 +577,130 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   - **`delete_blog_post` has no confirm flag**, like `delete_invoice`: it is the
     caller's job to ask the manager first. It removes the post's comments with
     it (`ON DELETE CASCADE`), and writes an audit line to the server log.
+- `list_calendar_events` / `list_calendar_rsvps` / `create_calendar_entry` /
+  `edit_calendar_entry` / `cancel_calendar_entry` / `stop_calendar_repeat` /
+  `delete_calendar_entry` (`"32"`) — the club calendar, the agent's equivalent
+  of `/manager/calendar`. Every read and write goes through the plain functions
+  in `src/lib/calendar.functions.ts` that the screen's server functions also
+  call (`listManagerEventRows`, `listEventRsvpRows`, `createCalendarEntryRow`,
+  `updateCalendarEntryRow`, `cancelEventRows`, `stopRepeatingSeries`,
+  `deleteEventRow`), so an entry an agent adds, edits, cancels or deletes is
+  written exactly as a manager's own and refused for the same reasons in the
+  same words. Product rules: `docs/calendar.md`. Every `id` is a **date** (one
+  row of `list_calendar_events`), and "this date and every later one" is
+  `scope: "series"` on the date to start from, the question the screen asks;
+  the one exception is `stop_calendar_repeat`, which takes the weekly entry's
+  `series_id`. A weekly entry's dates are rows that `topUpHorizon` generates,
+  keeping between six and twelve weeks of them on the calendar (it tops up to
+  84 days once the furthest is within 42), so a week further out may not be
+  listed yet. It is not missing, it has no `id` to edit or cancel until it
+  appears, and it is no reason to add a one-off, which is what an agent that
+  cannot find a week would otherwise reach for. Refusals are
+  `CalendarEntryError`'s `reason` as the error code: `404 not_found` (no such
+  date or repeat), `422 not_repeating` (`scope: "series"` on a one-off),
+  `422 no_dates` (a weekly entry that would put no date on the calendar),
+  `409 repeating_date` (deleting a date still to come of a repeat still running, `series_id` in
+  `error.details`) and `409 already_on_calendar`. Anything
+  else is `500 db_error`, which is why the shared schema refuses a weekly
+  entry's `starts_on` or `ends_on` that is not a real date (`2026-11-31`, "That
+  is not a real date.") as `400 invalid_params`: let through, it reached the
+  database and came back as a `500`, which reads as worth retrying. What is the
+  agent's alone, and why:
+  - **A one-off's time may come with no offset, and is then club time.**
+    `"2026-11-05T18:00"` is read as Sydney wall-clock time through
+    `clubLocalToIso` in `src/lib/calendar.ts`, the function the screen's pickers
+    go through, and it is the shape to send. An offset or `Z` is accepted too,
+    but an agent left to work out whether Sydney is on +10:00 or +11:00 that
+    week puts a class an hour out every April and October. Only a real calendar
+    date is converted; anything else is passed through for the screen's schema
+    to refuse, so `2026-02-31T18:00` is a `400` rather than a class in March.
+    Every date read back carries `starts_local` / `ends_local` in the same shape
+    and `weekday`, the club-time day it starts on (`projectAgentCalendarEvent`),
+    because a manager asks for "Thursday's class" and a model asked which
+    weekday a date falls on will sometimes answer wrong with complete
+    confidence.
+  - **A `location` left out is the gym** (`DEFAULT_EVENT_LOCATION`), because
+    the screen's Add form pre-fills it and a manager who never touches the
+    field gets the gym. An explicit `""` is no location, as clearing the field
+    is.
+  - **`edit_calendar_entry` with nothing to change is `400 invalid_params`.**
+    The shared function answers an empty change with success, which the screen
+    cannot reach (its form sends every field). From an agent it is a misspelt or
+    misplaced field, and success would tell the manager it was done. The same
+    worry is why every calendar schema is `.strict()`: a misspelt `visibility`
+    would otherwise be stripped, default to `public`, and put a members-only
+    entry in front of everybody. It is also why `list_calendar_events`, which
+    takes nothing, refuses any param (`agentListCalendarEventsSchema`,
+    `400 invalid_params`): a `from` / `to` an agent hoped would narrow the list
+    would otherwise come back as the whole list, read as filtered.
+  - **`create_calendar_entry` returns `event_id` and `series_id`**, one of them
+    null, where the screen's function returns one `id` that is the date for a
+    one-off and the weekly rule for a repeat. Every other calendar action tells
+    those two apart, so naming them stops a caller handing a series id to
+    `edit_calendar_entry`. It also returns `dates`, each as
+    `list_calendar_events` reports it without the tally, so the agent can read
+    the weekday and local start of the first one back to the manager.
+  - **`409 already_on_calendar` is what makes a create safe to retry.** There is
+    no `client_submission_id`, because that would need a column, so the entry is
+    its own key, as the address is for `save_blog_post`. A one-off is refused
+    when a date with the same title already starts at that time, a one-off or
+    a week of a repeat. A scheduled match always refuses; a cancelled one only
+    if it also ends at the same instant, because "cancel this date and add a
+    longer one-off in its place" is how one class is made longer, and that
+    one-off starts where the cancelled date did. A cancelled match that does
+    refuse says to restore it instead. A weekly entry is refused when an active
+    one has the same title, weekday and time and the two runs share a date
+    (`weeklyRunsShareADate` in `src/lib/calendar.ts`). That compares the dates
+    each run actually holds, not the dates typed in: a run ending on the Friday
+    a semester ends does not clash with the next one starting that Friday, as
+    they share no Monday, and a run whose last date has passed is over even
+    though it counts as active until somebody stops it. So next semester's run
+    of a class is not a duplicate of this one. `error.details` names the match:
+    `{ event_id, series_id, status }` for a one-off, `{ series_id }` for a
+    weekly entry. It is check-then-insert, so two truly simultaneous creates
+    can still both land.
+  - **`stop_calendar_repeat` and `delete_calendar_entry` write an audit line**
+    to the server log (`[agent.stop_calendar_repeat]`,
+    `[agent.delete_calendar_entry]`) naming the actor, because both take dates
+    off the calendar with no undo. Neither has a confirm flag, like
+    `delete_invoice`: asking the manager first is the caller's job.
+  - **Nobody is emailed by any calendar action.** A change reaches people
+    through the calendar page and their subscribed calendar apps, straight
+    away, which is the reason to confirm it with the manager before sending.
+
+  Five guards live in the shared functions rather than the handlers, so the
+  screen has them too: a date or repeat that is gone is `not_found` rather than
+  a success that changed nothing (`list_calendar_rsvps` checks the date first,
+  so an empty list always means nobody has replied); deleting a date still to
+  come of a repeat still running is refused, not just left off the screen's
+  buttons, because the next top-up would put it back and the answer is to
+  cancel it or stop the entry; deleting a date, or stopping a repeat, takes the check-ins on those
+  dates with them as clean-up (the foreign key cascades;
+  `delete_calendar_entry` reports how many as `checkins_removed`);
+  `stop_calendar_repeat` is safe to send again (`already_stopped`); a weekly entry that would put no date on the calendar
+  (its last date has passed, or no date from `starts_on` to `ends_on` falls on
+  that weekday) is `no_dates`, checked by `firstDateToCome` before anything is
+  written, rather than saved and reported as added with nothing to show for
+  it; and the duplicate refusal above. "Still to come" and the date a stopped
+  repeat is recorded as ending on are the club's today (`clubLocalDate`), not
+  the UTC date, which until mid-morning in Sydney is still yesterday. A repeat
+  also never generates a date over a scheduled date with the same title and
+  visibility at the same moment (a one-off for the same class), and a date of a
+  repeat can be deleted once it could not come back (it has passed, or the
+  repeat is stopped).
+
+  **`invite_only` is a badge and hides nothing** (`docs/calendar.md`, "Two
+  settings that are easy to confuse"). It puts "invite only" on the date, on
+  the calendar page and in calendar apps, and everybody the date's
+  `visibility` admits still sees it and can reply. `visibility: "members"`
+  (paid members and managers) is the one way to limit who sees an entry, so
+  that, never `invite_only`, is the answer to a manager who wants a class kept
+  off the public calendar. `list_calendar_events` reports each date's own
+  `invite_only`, and an edit changes it like any other detail, on one date or
+  that date and every later one.
 
 - `list_contact_messages` / `mark_contact_messages_seen` /
-  `delete_contact_message` (`"32"`) — the contact inbox, the agent's equivalent
+  `delete_contact_message` (`"33"`) — the contact inbox, the agent's equivalent
   of `/manager/contact-messages`. The read is `loadContactMessages`, the
   acknowledgement `acknowledgeContactMessages` and the delete
   `deleteContactMessageRow`, the same calls the screen makes. One difference,
@@ -705,7 +829,7 @@ have no action:
 | `setClubUserEmail` (change a login email)           | Moves the person's identity, drops their verified badge and emails the new address. Needs a product decision.                                                                                                                 |
 | `setClubUserKitSizes`                               | Reversible and sends nothing, so safe to expose. Not built because no agent workflow has asked for it yet; add it when one does.                                                                                              |
 | `getWaiverPdfUrl`                                   | A read, but of a signed legal document with health answers in it, handed out as a bearer link. `has_pdf` says whether there is one. Expose only for a caller that needs the document itself.                                  |
-| `attachCheckInCoverage` / `transferCheckInCoverage` | This API has no check-in actions at all, on purpose (see `delete_invoice` above).                                                                                                                                             |
+| `attachCheckInCoverage` / `transferCheckInCoverage` | This API cannot make, move or cover a check-in, on purpose (see `delete_invoice` above).                                                                                                                                      |
 | `setMembershipStatus` to `active` (reopen)          | Recomputes dates and credits; `edit_invoice` refuses `active` for that reason.                                                                                                                                                |
 
 ### The four sync points
@@ -727,7 +851,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"32"`.
+test so the bump is a deliberate edit, and the current value is `"33"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

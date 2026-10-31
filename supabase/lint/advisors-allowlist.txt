@@ -37,4 +37,6 @@ authenticated_security_definer_function_executable_public_has_active_paid_member
 # template for any future RLS-only helper: if nothing calls it by RPC, put it in
 # `private` and fix the finding instead of acknowledging it. A helper earns a
 # line here only when the app genuinely calls it over PostgREST — which is what
-# separates the two entries above from the three that left.
+# separates the two entries above from the three that left. (The first two no
+# longer exist at all: 20261031000000 dropped them when invite only became a
+# badge rather than access.)

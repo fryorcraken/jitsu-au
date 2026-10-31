@@ -67,6 +67,8 @@
                 "get_site_banner",
                 "list_blog_posts",
                 "get_blog_post",
+                "list_calendar_events",
+                "list_calendar_rsvps",
                 "list_contact_messages"
               ],
               "description": "The read-only action to run."
@@ -126,6 +128,11 @@
                 "delete_blog_post",
                 "upload_blog_image",
                 "start_blog_image_upload",
+                "create_calendar_entry",
+                "edit_calendar_entry",
+                "cancel_calendar_entry",
+                "stop_calendar_repeat",
+                "delete_calendar_entry",
                 "mark_contact_messages_seen",
                 "delete_contact_message"
               ],

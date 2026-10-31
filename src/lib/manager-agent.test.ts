@@ -18,6 +18,7 @@ import {
   safeEqual,
   mergeAgentBlogPostEdit,
   projectAgentBlogPost,
+  projectAgentCalendarEvent,
 } from "./manager-agent";
 import {
   createInvoiceSchema,
@@ -500,7 +501,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("32");
+    expect(AGENT_MANIFEST.version).toBe("33");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -549,6 +550,39 @@ describe("AGENT_MANIFEST", () => {
     // The merge is the thing a caller would otherwise get wrong: turning the
     // banner off must not look like it needs the message sent again.
     expect(notes).toMatch(/keeps its stored value/);
+  });
+
+  it("announces the calendar actions", () => {
+    const entry = AGENT_MANIFEST.changes.find((c) => c.version === "32")!;
+    expect(entry.breaking).toBe(false);
+    const notes = entry.notes.join(" ");
+    for (const action of [
+      "list_calendar_events",
+      "list_calendar_rsvps",
+      "create_calendar_entry",
+      "edit_calendar_entry",
+      "cancel_calendar_entry",
+      "stop_calendar_repeat",
+      "delete_calendar_entry",
+    ]) {
+      expect(notes).toContain(action);
+    }
+    // The refusal that makes a create safe to resend, which a caller holding a
+    // cached manifest has to know about to rely on it.
+    expect(notes).toMatch(/already_on_calendar/);
+    // And the one that turns a weekly entry with no dates to come from a quiet
+    // "added" into an error.
+    expect(notes).toMatch(/no_dates/);
+  });
+
+  // Dates are topped up once the furthest is within six weeks, so anything
+  // past six weeks out may not be listed yet. Promising twelve would send an
+  // agent to add a one-off for a week it thinks is missing.
+  it("tells an agent how far ahead the calendar list can be relied on", () => {
+    const spec = AGENT_MANIFEST.actions.find((a) => a.name === "list_calendar_events")!;
+    expect(spec.summary).toMatch(/six weeks/);
+    expect(spec.summary).not.toMatch(/about twelve weeks/);
+    expect(spec.params).toEqual([]);
   });
 
   it("announces the name parts get_user's profile now carries", () => {
@@ -998,5 +1032,102 @@ describe("projectAgentBlogPost", () => {
     const projected = projectAgentBlogPost({ ...post, status: "draft" });
     expect(projected.url).toBeNull();
     expect(projected.edit_url).toBe(`https://utsjitsu.com.au/manager/blog/${post.id}`);
+  });
+});
+
+describe("projectAgentCalendarEvent", () => {
+  // A 07:30 Sydney class on Thursday 5 November 2026 (AEDT, +11) starts at
+  // 20:30 UTC on Wednesday the 4th: the case where an agent doing its own sums
+  // tells a manager the wrong day.
+  const morning = {
+    id: "0b6f1d2e-3c4a-4b5c-8d6e-7f8091a2b3c4",
+    series_id: null,
+    title: "Early Gi",
+    description: null,
+    instructor_name: null,
+    location: "Alumni Green",
+    starts_at: "2026-11-04T20:30:00.000Z",
+    ends_at: "2026-11-04T21:30:00.000Z",
+    status: "scheduled",
+    visibility: "public",
+    invite_only: false,
+  };
+
+  // Invite only is a badge on the date (docs/calendar.md). It hides nothing, so
+  // there is no "can anybody see this" answer to work out from the weekly entry,
+  // and what is reported is what the date carries, the flag an edit writes.
+  it("reports the date's own invite only flag, passed through", () => {
+    expect(projectAgentCalendarEvent({ ...morning, invite_only: true }).invite_only).toBe(true);
+    expect(projectAgentCalendarEvent({ ...morning, invite_only: false }).invite_only).toBe(false);
+
+    // A row that also says its weekly entry is invite only still reports the
+    // date's own flag rather than the entry's.
+    const ofInviteOnlyEntry = { ...morning, series_id: "series-1", series_invite_only: true };
+    const projected = projectAgentCalendarEvent(ofInviteOnlyEntry);
+    expect(projected.invite_only).toBe(false);
+    expect(projected).not.toHaveProperty("series_invite_only");
+  });
+
+  it("reports the club's wall clock and weekday, not UTC's", () => {
+    expect(projectAgentCalendarEvent(morning)).toMatchObject({
+      starts_at: morning.starts_at,
+      ends_at: morning.ends_at,
+      starts_local: "2026-11-05T07:30",
+      ends_local: "2026-11-05T08:30",
+      weekday: "Thursday",
+    });
+  });
+
+  it("reads the offset of the season the date is in", () => {
+    // The same 07:30 class in winter (AEST, +10).
+    const winter = projectAgentCalendarEvent({
+      ...morning,
+      starts_at: "2026-06-03T21:30:00.000Z",
+      ends_at: "2026-06-03T22:30:00.000Z",
+    });
+    expect(winter).toMatchObject({
+      starts_local: "2026-06-04T07:30",
+      ends_local: "2026-06-04T08:30",
+      weekday: "Thursday",
+    });
+  });
+
+  // starts_local is the shape create_calendar_entry takes, so a time read back
+  // can be sent back unchanged.
+  it("gives starts_local in the shape create_calendar_entry takes", () => {
+    expect(projectAgentCalendarEvent(morning).starts_local).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/,
+    );
+  });
+
+  it("says a date repeats exactly when it belongs to a series", () => {
+    expect(projectAgentCalendarEvent(morning).repeats).toBe(false);
+    const weekly = projectAgentCalendarEvent({
+      ...morning,
+      series_id: "9c8b7a6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d",
+    });
+    expect(weekly.repeats).toBe(true);
+    expect(weekly.series_id).toBe("9c8b7a6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d");
+  });
+
+  // The dates create_calendar_entry returns carry no tally, and a zero tally
+  // there would claim nobody replied to a date nobody could have seen yet.
+  it("carries rsvps only when the date has a tally", () => {
+    expect(projectAgentCalendarEvent(morning)).not.toHaveProperty("rsvps");
+    const rsvps = { going: 3, maybe: 1, declined: 0 };
+    expect(projectAgentCalendarEvent({ ...morning, rsvps }).rsvps).toEqual(rsvps);
+  });
+
+  it("passes the screen's details through", () => {
+    expect(projectAgentCalendarEvent(morning)).toMatchObject({
+      id: morning.id,
+      title: "Early Gi",
+      status: "scheduled",
+      visibility: "public",
+      invite_only: false,
+      instructor_name: null,
+      location: "Alumni Green",
+      description: null,
+    });
   });
 });
