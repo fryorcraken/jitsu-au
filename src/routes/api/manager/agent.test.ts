@@ -2877,12 +2877,11 @@ describe("manager agent route: the calendar", () => {
     });
 
     // Each refusal tells the agent its next move: 404 is "list again", 409 with
-    // a series_id is "stop the repeat or cancel the date", 409 with a count is
-    // "cancel it instead". Collapsed into one status, an agent cannot choose.
+    // a series_id is "stop the repeat or cancel the date". Collapsed into one
+    // status, an agent cannot choose.
     it.each([
       ["a date that is not there", MISSING, 404, "not_found", undefined],
       ["one date of a weekly entry", WEEKLY_DATE, 409, "repeating_date", { series_id: SERIES }],
-      ["a one-off people were checked in to", ONE_OFF, 409, "checked_in", { checked_in: 2 }],
     ])("refuses %s, deleting nothing", async (_what, id, status, code, details) => {
       const fake = fakeCalendar(seed());
       currentAdmin = fake.db;
@@ -2903,14 +2902,34 @@ describe("manager agent route: the calendar", () => {
       currentAdmin = fake.db;
       const res = await post({ action: "delete_calendar_entry", params: { id: QUIET_ONE_OFF } });
       expect(res.status).toBe(200);
-      expect((await res.json()).result).toEqual({ deleted: true, id: QUIET_ONE_OFF });
+      expect((await res.json()).result).toEqual({
+        deleted: true,
+        id: QUIET_ONE_OFF,
+        checkins_removed: 0,
+      });
       expect(fake.writes).toEqual([
         { op: "delete", table: "calendar_events", values: [QUIET_ONE_OFF] },
       ]);
       expect(audit).toHaveBeenCalledWith(
         "[agent.delete_calendar_entry] audit",
-        JSON.stringify({ eventId: QUIET_ONE_OFF, actor: TOKEN_OWNER }),
+        JSON.stringify({ eventId: QUIET_ONE_OFF, checkinsRemoved: 0, actor: TOKEN_OWNER }),
       );
+    });
+
+    // Once the class is gone its check-ins go too, as clean-up, and the agent
+    // is told how many so it can tell the manager.
+    it("deletes a one-off people were checked in to, and says how many check-ins went", async () => {
+      vi.spyOn(console, "info").mockImplementation(() => {});
+      const fake = fakeCalendar(seed());
+      currentAdmin = fake.db;
+      const res = await post({ action: "delete_calendar_entry", params: { id: ONE_OFF } });
+      expect(res.status).toBe(200);
+      expect((await res.json()).result).toEqual({
+        deleted: true,
+        id: ONE_OFF,
+        checkins_removed: 2,
+      });
+      expect(fake.writes).toEqual([{ op: "delete", table: "calendar_events", values: [ONE_OFF] }]);
     });
   });
 

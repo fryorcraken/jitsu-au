@@ -2373,7 +2373,6 @@ const CALENDAR_REFUSAL_STATUS: Record<CalendarRefusal, number> = {
   not_found: 404,
   not_repeating: 422,
   repeating_date: 409,
-  checked_in: 409,
   already_on_calendar: 409,
   no_dates: 422,
 };
@@ -2488,7 +2487,6 @@ async function handleStopCalendarRepeat(params: unknown, actingAs: string) {
     series_id: input.series_id,
     already_stopped: result.already_stopped,
     removed: result.removed,
-    kept_checked_in: result.kept_checked_in,
   };
 }
 
@@ -2496,12 +2494,16 @@ async function handleStopCalendarRepeat(params: unknown, actingAs: string) {
 async function handleDeleteCalendarEntry(params: unknown, actingAs: string) {
   const input = deleteEventSchema.parse(params ?? {});
   const db = await adminClient();
-  await onCalendar(() => deleteEventRow(db, input));
+  const result = await onCalendar(() => deleteEventRow(db, input));
   console.info(
     "[agent.delete_calendar_entry] audit",
-    JSON.stringify({ eventId: input.id, actor: actingAs }),
+    JSON.stringify({
+      eventId: input.id,
+      checkinsRemoved: result.checkins_removed,
+      actor: actingAs,
+    }),
   );
-  return { deleted: true, id: input.id };
+  return { deleted: true, id: input.id, checkins_removed: result.checkins_removed };
 }
 
 /**

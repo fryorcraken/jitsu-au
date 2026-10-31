@@ -137,21 +137,9 @@ appears, and it is no reason to add a one-off for it.
    it clears from subscribed calendars, and RSVPs are kept. Reversible with
    "Restore".
 5. **Stop repeating** — ends future dates and deactivates the rule. Past dates are
-   untouched, because they happened. So is a date still to start that somebody is
-   already checked in to: the check-in screen opens on the class that is on now
-   or next, so people are checked in to the evening class before it starts, and
-   their check-ins go with a deleted date with no credit given back. A class
-   people are checked in to is happening, so it keeps its place. The confirm
-   says so before the click ("except one people are already checked in to"),
-   and when a class was kept, the message afterwards says why it is still
-   listed and to cancel it if it is not going ahead. Without that, the class
-   still sitting on the calendar makes pressing Stop again look like the fix.
-   The repeat is recorded as ending on today's date at the club, or on that
-   kept class's date if it is later, so the rule never says it ended before a
-   class still on the calendar. Adding the class again straight after (to
-   change its length, say) does not put a second copy over the kept one: a
-   repeat never generates a date where a scheduled date with the same title
-   already is.
+   untouched, because they happened. Anybody already checked in to one of the
+   future dates it removes is removed with it: once the class is gone, its
+   check-ins go too, as clean-up. The confirm says so before the click.
 6. **See who's coming** — a going/maybe tally per date, expandable to the list of
    names and emails.
 7. **Check people in** — who actually turned up, on the `/manager/check-in`
@@ -189,9 +177,9 @@ Deleting an entry outright exists for mistakes only, and only for one-off
 entries: an upcoming date of a repeat, deleted, would just be regenerated at the
 next top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
 The server refuses to delete a date of a repeat as well, so leaving the button
-off the screen is not the only thing holding that rule. It also refuses a date
-anybody was checked in to, for the same reason "Stop repeating" keeps one: the
-check-ins would go with it and their credits would not come back.
+off the screen is not the only thing holding that rule. A deleted date takes
+its check-ins with it as clean-up (the confirm says so), the same as "Stop
+repeating" does.
 
 An action on a date that is no longer there (another manager deleted it, or a
 stopped repeat took it) says so: "That date is no longer on the calendar.
@@ -247,8 +235,8 @@ contract, and the few things that are the agent's alone, are in
    re-checks the role and writes through the service-role client. The manager
    agent API's calendar actions call the same code after checking the same role.
 2. **Cancel, don't delete.** Cancelling keeps the row so subscribers and RSVPs
-   survive. Deletion is for mistakes only, and only of a one-off date nobody
-   was checked in to.
+   survive. Deletion is for mistakes only, and only of a one-off date; its
+   check-ins go with it.
 3. **One RSVP per person per date**, owned by that person.
 4. **No public calendar feed, and one live link per person.** Only per-person
    links, so a subscriber can never silently miss a members-only entry. A link

@@ -302,20 +302,14 @@ function ManagerCalendarPage() {
     const ok = await confirm({
       title: `Stop "${ev.title}" repeating?`,
       description:
-        "Every future date comes off the calendar, except one people are already checked in to. Dates that have already happened stay on the record, with their check-ins.",
+        "Every future date comes off the calendar, along with anyone already checked in to one. Dates that have already happened stay on the record, with their check-ins.",
       confirmLabel: "Stop repeating",
     });
     if (!ok) return;
     setBusy(true);
     try {
-      const res = await endRepeat({ data: { series_id: ev.series_id } });
-      // A class people are already checked in to stays, so say why it is still
-      // listed, or pressing Stop again looks like the fix.
-      toast.success(
-        res.kept_checked_in.length
-          ? "It stops repeating. The next class stays on the calendar because people are already checked in to it. Cancel it if it is not going ahead."
-          : "It stops repeating. Past dates are untouched.",
-      );
+      await endRepeat({ data: { series_id: ev.series_id } });
+      toast.success("It stops repeating. Past dates are untouched.");
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not stop it repeating");
@@ -328,7 +322,7 @@ function ManagerCalendarPage() {
     const ok = await confirm({
       title: `Delete "${ev.title}"?`,
       description:
-        "This takes it off the calendar completely, as though it had never been on it. There is no way to get it back.",
+        "This takes it off the calendar completely, as though it had never been on it, along with anyone checked in to it. There is no way to get it back.",
       footnote: "To call the class off and keep the record of it, cancel it instead.",
       confirmLabel: "Delete",
       destructive: true,

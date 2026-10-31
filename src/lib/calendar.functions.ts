@@ -88,18 +88,12 @@ async function requireManager(context: { supabase: CalendarClient; userId: strin
  * - `not_repeating`: asked for "this and every future date" on a one-off.
  * - `repeating_date`: asked to delete one date of a repeat, which the next
  *   top-up would only put back.
- * - `checked_in`: asked to delete a class people were checked in to.
  * - `already_on_calendar`: asked to add something that is already there.
  * - `no_dates`: asked to add a weekly entry that would never put a date on the
  *   calendar (its last date has passed, or no date in it is on that weekday).
  */
 export type CalendarRefusal =
-  | "not_found"
-  | "not_repeating"
-  | "repeating_date"
-  | "checked_in"
-  | "already_on_calendar"
-  | "no_dates";
+  "not_found" | "not_repeating" | "repeating_date" | "already_on_calendar" | "no_dates";
 
 export class CalendarEntryError extends Error {
   reason: CalendarRefusal;
@@ -540,11 +534,8 @@ export const listEventRsvps = createServerFn({ method: "POST" })
  * Returns the dates it added.
  *
  * "Already exist" includes a scheduled date with the same title at the same
- * moment from anywhere else: a one-off, or the date a stopped repeat kept
- * because people were checked in to it. Re-adding a class straight after
- * stopping it (to change its length, say) would otherwise put a second copy of
- * tonight's on the calendar, and the new one is the one replies and check-ins
- * would land on.
+ * moment from anywhere else, such as a one-off for the same class, so a repeat
+ * never puts a second copy of a class on top of one already there.
  */
 async function materializeSeries(
   admin: CalendarClient,
@@ -908,28 +899,19 @@ export const updateCalendarEntry = createServerFn({ method: "POST" })
   });
 
 /**
- * Stop a repeating entry. Future dates are removed and the rule is deactivated;
- * past dates stay, because they happened.
- *
- * A date still to start that somebody is already checked in to stays too. The
- * check-in screen opens on the class that is on now or NEXT, so people are
- * checked in to the evening class before it starts, and their check-ins cascade
- * with the date with no credit given back (the reason `deleteEventRow` refuses).
- * Such a class is happening, so it keeps its place on the calendar.
+ * Stop a repeating entry. Every date still to start is deleted and the rule is
+ * deactivated; past dates stay, because they happened. Check-ins on a deleted
+ * date go with it (the foreign key cascades), as for `deleteEventRow`.
  *
  * Safe to repeat: the rule is switched off first, and a second call on a repeat
  * already stopped clears any future dates a first call left behind without
  * moving the date it stopped on.
- *
- * The date it stopped on (`ends_on`) is the club's today, or the last date it
- * kept if that is later, so the rule never says it ended before a class that is
- * still on the calendar.
  */
 export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepeatingInput) {
   const now = new Date().toISOString();
   const { data: series, error: sReadErr } = await admin
     .from("calendar_series")
-    .select("starts_on, ends_on, is_active")
+    .select("starts_on, is_active")
     .eq("id", data.series_id)
     .maybeSingle();
   if (sReadErr) throw new Error(sReadErr.message);
@@ -939,61 +921,33 @@ export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepea
 
   // Off first, so the horizon top-up stops adding dates before the ones it
   // added are cleared away.
-  let endsOn = series.ends_on;
   if (series.is_active) {
     // `ends_on` has a CHECK against `starts_on`, so an entry stopped before its
     // first date ends on that date rather than today. is_active = false is what
     // actually stops it; the date is only for the record.
     const today = clubToday();
-    endsOn = series.starts_on > today ? series.starts_on : today;
     const { error: sErr } = await admin
       .from("calendar_series")
-      .update({ is_active: false, ends_on: endsOn, updated_at: now })
+      .update({
+        is_active: false,
+        ends_on: series.starts_on > today ? series.starts_on : today,
+        updated_at: now,
+      })
       .eq("id", data.series_id);
     if (sErr) throw new Error(sErr.message);
   }
 
-  const { data: future, error: fErr } = await admin
+  const { data: removed, error: dErr } = await admin
     .from("calendar_events")
-    .select("id, starts_at")
+    .delete()
     .eq("series_id", data.series_id)
-    .gte("starts_at", now);
-  if (fErr) throw new Error(fErr.message);
-  const checkedIn = new Set<string>();
-  const removable: string[] = [];
-  // In slices: a year of weekly dates is a long `.in()` list.
-  for (const ids of chunks((future ?? []).map((e) => e.id))) {
-    const { data: rows, error: cErr } = await admin
-      .from("session_checkins")
-      .select("event_id")
-      .in("event_id", ids);
-    if (cErr) throw new Error(cErr.message);
-    for (const r of rows ?? []) checkedIn.add(r.event_id);
-    removable.push(...ids.filter((id) => !checkedIn.has(id)));
-  }
-  for (const ids of chunks(removable)) {
-    const { error: dErr } = await admin.from("calendar_events").delete().in("id", ids);
-    if (dErr) throw new Error(dErr.message);
-  }
-  // A kept date that falls after the date it stopped on moves that date out to
-  // it, in club time, so the rule and the calendar agree on its last class.
-  const lastKept = (future ?? [])
-    .filter((e) => checkedIn.has(e.id))
-    .map((e) => clubLocalDate(new Date(e.starts_at)))
-    .sort()
-    .at(-1);
-  if (lastKept && (!endsOn || lastKept > endsOn)) {
-    const { error: eErr } = await admin
-      .from("calendar_series")
-      .update({ ends_on: lastKept, updated_at: now })
-      .eq("id", data.series_id);
-    if (eErr) throw new Error(eErr.message);
-  }
+    .gte("starts_at", now)
+    .select("id");
+  if (dErr) throw new Error(dErr.message);
   return {
     ok: true as const,
     already_stopped: !series.is_active,
-    removed: removable.length,
-    kept_checked_in: [...checkedIn],
+    removed: removed?.length ?? 0,
   };
 }
 
@@ -1059,7 +1013,9 @@ export const cancelEvent = createServerFn({ method: "POST" })
   });
 
 /**
- * Delete one date outright, for a mistake made before anybody turned up.
+ * Delete one date outright. Its check-ins go with it, as clean-up: the foreign
+ * key cascades, so nothing is left pointing at a class that no longer exists.
+ * `checkins_removed` says how many, so the caller can tell the manager.
  *
  * Only a one-off. A date a repeat generated would only be put back by the next
  * horizon top-up, so the honest moves there are cancelling it or stopping the
@@ -1082,27 +1038,15 @@ export async function deleteEventRow(admin: CalendarClient, data: DeleteEventInp
     );
   }
 
-  // Check-ins cascade with the event, and their credits do NOT come back:
-  // deleting a class five people were checked in to would silently burn five
-  // sessions with no record that it happened. Delete is for a mistake made
-  // before anyone turned up; once they have, cancelling is the honest move
-  // (it keeps the row, the attendance and the RSVPs).
   const { count, error: cErr } = await admin
     .from("session_checkins")
     .select("id", { count: "exact", head: true })
     .eq("event_id", data.id);
   if (cErr) throw new Error(cErr.message);
-  if ((count ?? 0) > 0) {
-    throw new CalendarEntryError(
-      "checked_in",
-      `${count} ${count === 1 ? "person has" : "people have"} been checked in to this class, so deleting it would take their sessions with it. Cancel it instead.`,
-      { checked_in: count },
-    );
-  }
 
   const { error } = await admin.from("calendar_events").delete().eq("id", data.id);
   if (error) throw new Error(error.message);
-  return { ok: true as const, id: data.id };
+  return { ok: true as const, id: data.id, checkins_removed: count ?? 0 };
 }
 
 export const deleteEvent = createServerFn({ method: "POST" })

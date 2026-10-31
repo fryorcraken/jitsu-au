@@ -10,8 +10,7 @@
 // the API turns into a status code), so a missing date is never reported as a
 // one-off, nor as a quiet success that changed nothing. A retried create does
 // not put the same class on the calendar twice. And stopping a repeat switches
-// it off before it clears a single date, and never clears one somebody is
-// already checked in to.
+// it off before it clears a single date.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CalendarEntryError,
@@ -171,8 +170,9 @@ describe("deleteEventRow", () => {
     expect(writes(calls)).toHaveLength(0);
   });
 
-  // Check-ins cascade with the date and their credits do not come back.
-  it("refuses a class people were checked in to, and says how many", async () => {
+  // Once the class is gone its check-ins go too, as clean-up (the foreign key
+  // cascades), and the count tells the manager how many went with it.
+  it("deletes a class people were checked in to, and says how many check-ins went", async () => {
     const { admin, calls } = fakeClient((op) => {
       if (op.table === "calendar_events" && op.verb === "select")
         return ok({ id: "evt-1", series_id: null });
@@ -180,11 +180,11 @@ describe("deleteEventRow", () => {
       return ok(null);
     });
 
-    const e = await refusal(deleteEventRow(admin, { id: "evt-1" }));
-    expect(e.reason).toBe("checked_in");
-    expect(e.details).toEqual({ checked_in: 3 });
-    expect(e.message).toMatch(/3 people have been checked in/);
-    expect(writes(calls)).toHaveLength(0);
+    const result = await deleteEventRow(admin, { id: "evt-1" });
+    expect(result).toEqual({ ok: true, id: "evt-1", checkins_removed: 3 });
+    const deletes = ofTable(calls, "calendar_events", "delete");
+    expect(deletes).toHaveLength(1);
+    expect(filterValue(deletes[0], "id")).toBe("evt-1");
 
     const tally = ofTable(calls, "session_checkins", "select")[0];
     expect(tally).toMatchObject({ count: "exact", head: true });
@@ -199,7 +199,11 @@ describe("deleteEventRow", () => {
       return ok(null);
     });
 
-    expect(await deleteEventRow(admin, { id: "evt-1" })).toEqual({ ok: true, id: "evt-1" });
+    expect(await deleteEventRow(admin, { id: "evt-1" })).toEqual({
+      ok: true,
+      id: "evt-1",
+      checkins_removed: 0,
+    });
     const deletes = ofTable(calls, "calendar_events", "delete");
     expect(deletes).toHaveLength(1);
     expect(filterValue(deletes[0], "id")).toBe("evt-1");
@@ -408,31 +412,15 @@ describe("updateCalendarEntryRow", () => {
 });
 
 describe("stopRepeatingSeries", () => {
-  /** The repeat, its future dates, and which of those people are checked in to. */
-  function club(opts: { series: unknown; future: string[]; checkedIn?: string[] }) {
+  /** The repeat, and the future dates a delete of them would hand back. */
+  function club(opts: { series: unknown; future: string[] }) {
     return fakeClient((op) => {
       if (op.table === "calendar_series" && op.verb === "select") return ok(opts.series);
-      // Each future date a week after the last, from tonight on.
-      if (op.table === "calendar_events" && op.verb === "select")
-        return ok(
-          opts.future.map((id, i) => ({
-            id,
-            starts_at: new Date(Date.parse(NOW) + (i + 1) * 7 * 86_400_000).toISOString(),
-          })),
-        );
-      if (op.table === "session_checkins") {
-        const asked = (filterValue(op, "event_id", "in") as string[]) ?? [];
-        return ok(
-          asked.filter((id) => opts.checkedIn?.includes(id)).map((id) => ({ event_id: id })),
-        );
-      }
+      if (op.table === "calendar_events" && op.verb === "delete")
+        return ok(opts.future.map((id) => ({ id })));
       return ok(null);
     });
   }
-  const deletedIds = (calls: Op[]) =>
-    ofTable(calls, "calendar_events", "delete").flatMap(
-      (d) => (filterValue(d, "id", "in") as string[]) ?? [],
-    );
 
   it("refuses a repeat that does not exist, and writes nothing", async () => {
     const { admin, calls } = club({ series: null, future: ["evt-1"] });
@@ -451,21 +439,31 @@ describe("stopRepeatingSeries", () => {
     });
 
     const result = await stopRepeatingSeries(admin, { series_id: "series-1" });
-    expect(result).toEqual({ ok: true, already_stopped: false, removed: 2, kept_checked_in: [] });
+    expect(result).toEqual({ ok: true, already_stopped: false, removed: 2 });
 
     const off = calls.findIndex((c) => c.table === "calendar_series" && c.verb === "update");
-    const firstDelete = calls.findIndex(
-      (c) => c.table === "calendar_events" && c.verb === "delete",
-    );
+    const del = calls.findIndex((c) => c.table === "calendar_events" && c.verb === "delete");
     expect(off).toBeGreaterThanOrEqual(0);
-    expect(firstDelete).toBeGreaterThan(off);
+    expect(del).toBeGreaterThan(off);
     expect(calls[off].patch).toMatchObject({ is_active: false, ends_on: TODAY });
     expect(filterValue(calls[off], "id")).toBe("series-1");
 
     // Only dates still to start go; past ones happened.
-    const future = ofTable(calls, "calendar_events", "select")[0];
-    expect(filterValue(future, "series_id")).toBe("series-1");
-    expect(filterValue(future, "starts_at", "gte")).toBe(NOW);
+    expect(filterValue(calls[del], "series_id")).toBe("series-1");
+    expect(filterValue(calls[del], "starts_at", "gte")).toBe(NOW);
+  });
+
+  // Once a class is gone its check-ins go too, as clean-up, so nothing reads
+  // them first to spare a date.
+  it("removes every future date, checked in to or not, without reading check-ins", async () => {
+    const { admin, calls } = club({
+      series: { starts_on: "2026-09-02", is_active: true },
+      future: ["evt-1", "evt-2", "evt-3"],
+    });
+
+    const result = await stopRepeatingSeries(admin, { series_id: "series-1" });
+    expect(result).toMatchObject({ removed: 3 });
+    expect(ofTable(calls, "session_checkins", "select")).toHaveLength(0);
   });
 
   // `ends_on` has a CHECK against `starts_on`.
@@ -481,36 +479,6 @@ describe("stopRepeatingSeries", () => {
     });
   });
 
-  it("keeps a future date somebody is already checked in to, and says which", async () => {
-    const { admin, calls } = club({
-      series: { starts_on: "2026-09-02", is_active: true },
-      future: ["evt-1", "evt-2", "evt-3"],
-      checkedIn: ["evt-2"],
-    });
-
-    const result = await stopRepeatingSeries(admin, { series_id: "series-1" });
-    expect(result).toMatchObject({ removed: 2, kept_checked_in: ["evt-2"] });
-    expect(deletedIds(calls)).toEqual(["evt-1", "evt-3"]);
-  });
-
-  // Stopped "today", but with a class still on the calendar two weeks out,
-  // the rule would say it ended before its own last date.
-  it("moves the date it stopped on out to the last date it kept, in club time", async () => {
-    const { admin, calls } = club({
-      series: { starts_on: "2026-09-02", ends_on: null, is_active: true },
-      future: ["evt-1", "evt-2"],
-      checkedIn: ["evt-2"],
-    });
-
-    await stopRepeatingSeries(admin, { series_id: "series-1" });
-    const updates = ofTable(calls, "calendar_series", "update").map((u) => u.patch);
-    // NOW plus two weeks is 2026-11-16 at 11am in Sydney.
-    expect(updates).toEqual([
-      expect.objectContaining({ is_active: false, ends_on: TODAY }),
-      expect.objectContaining({ ends_on: "2026-11-16" }),
-    ]);
-  });
-
   it("clears dates left behind on a repeat already stopped, without rewriting the repeat", async () => {
     const { admin, calls } = club({
       series: { starts_on: "2026-09-02", is_active: false },
@@ -521,29 +489,7 @@ describe("stopRepeatingSeries", () => {
     expect(result).toMatchObject({ already_stopped: true, removed: 1 });
     // The date it was first stopped on stays the date on record.
     expect(ofTable(calls, "calendar_series", "update")).toHaveLength(0);
-    expect(deletedIds(calls)).toEqual(["evt-9"]);
-  });
-
-  // `.in()` is a query-string filter, and a long repeat has a lot of dates.
-  it("reads check-ins and deletes in batches of at most 100", async () => {
-    const future = Array.from({ length: 150 }, (_, i) => `evt-${i}`);
-    const { admin, calls } = club({
-      series: { starts_on: "2026-09-02", is_active: true },
-      future,
-      checkedIn: ["evt-120"],
-    });
-
-    const result = await stopRepeatingSeries(admin, { series_id: "series-1" });
-    expect(result).toMatchObject({ removed: 149, kept_checked_in: ["evt-120"] });
-
-    const reads = ofTable(calls, "session_checkins", "select");
-    expect(reads.map((r) => (filterValue(r, "event_id", "in") as string[]).length)).toEqual([
-      100, 50,
-    ]);
-    const deletes = ofTable(calls, "calendar_events", "delete");
-    expect(deletes.every((d) => (filterValue(d, "id", "in") as string[]).length <= 100)).toBe(true);
-    expect(deletedIds(calls)).toHaveLength(149);
-    expect(deletedIds(calls)).not.toContain("evt-120");
+    expect(ofTable(calls, "calendar_events", "delete")).toHaveLength(1);
   });
 });
 
@@ -808,8 +754,8 @@ describe("createCalendarEntryRow", () => {
     expect(calls).toHaveLength(0);
   });
 
-  // Stopped at 5pm to change its length, with people already checked in to
-  // tonight's class, and added again at once: tonight's kept date is the class.
+  // A one-off for the same class already sits on that Wednesday: the repeat
+  // leaves it be rather than put a second copy on top of it.
   it("does not put a second copy over a scheduled date of the same class at the same time", async () => {
     let inserted: Record<string, unknown>[] = [];
     const { admin, calls } = fakeClient((op) => {
@@ -817,7 +763,7 @@ describe("createCalendarEntryRow", () => {
       if (op.table === "calendar_series" && op.verb === "insert")
         return ok({ id: "series-new", is_active: true, ...(op.patch as object) });
       if (op.table === "calendar_events" && op.verb === "select")
-        // Only the same-title lookup finds it: it belongs to the stopped repeat.
+        // Only the same-title lookup finds it: it is not one of this repeat's dates.
         return ok(filterValue(op, "title") ? [{ starts_at: "2026-11-04T07:00:00+00:00" }] : []);
       if (op.table === "calendar_events" && op.verb === "insert") {
         inserted = op.patch as Record<string, unknown>[];

@@ -597,8 +597,7 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   date or repeat), `422 not_repeating` (`scope: "series"` on a one-off),
   `422 no_dates` (a weekly entry that would put no date on the calendar),
   `409 repeating_date` (deleting one date of a weekly entry, `series_id` in
-  `error.details`), `409 checked_in` (deleting a class people were checked in
-  to, the count in `error.details`) and `409 already_on_calendar`. Anything
+  `error.details`) and `409 already_on_calendar`. Anything
   else is `500 db_error`, which is why the shared schema refuses a weekly
   entry's `starts_on` or `ends_on` that is not a real date (`2026-11-31`, "That
   is not a real date.") as `400 invalid_params`: let through, it reached the
@@ -672,9 +671,10 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   so an empty list always means nobody has replied); deleting one date of a
   weekly entry is refused, not just left off the screen's buttons, because it
   cannot be deleted on its own and the answer is to cancel it or stop the
-  entry; `stop_calendar_repeat` keeps a date still to start that somebody is
-  already checked in to (`kept_checked_in`), and is safe to send again
-  (`already_stopped`); a weekly entry that would put no date on the calendar
+  entry; deleting a date, or stopping a repeat, takes the check-ins on those
+  dates with them as clean-up (the foreign key cascades;
+  `delete_calendar_entry` reports how many as `checkins_removed`);
+  `stop_calendar_repeat` is safe to send again (`already_stopped`); a weekly entry that would put no date on the calendar
   (its last date has passed, or no date from `starts_on` to `ends_on` falls on
   that weekday) is `no_dates`, checked by `firstDateToCome` before anything is
   written, rather than saved and reported as added with nothing to show for

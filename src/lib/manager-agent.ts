@@ -387,7 +387,7 @@ export const AGENT_MANIFEST: {
         "The club calendar, the agent's equivalent of the manager's Calendar screen, through the same functions that screen calls. New read actions: list_calendar_events (every date from 30 days ago to 180 days ahead, with its id, series_id and repeats, UTC starts_at/ends_at, club-time starts_local/ends_local and weekday, status, visibility, invite_only and an rsvps tally) and list_calendar_rsvps (who replied to one date).",
         "New change actions: create_calendar_entry (a one-off, or a weekly entry), edit_calendar_entry (details only, for one date or that date and every later one), cancel_calendar_entry (cancel or restore, the date is kept), stop_calendar_repeat (take a weekly entry's dates still to come off the calendar) and delete_calendar_entry (a one-off made by mistake). Each date's id is what they take, except stop_calendar_repeat, which takes series_id. A calendar change is public at once, on the site and in every subscriber's calendar app, and emails nobody.",
         "create_calendar_entry takes a one-off's times as club time with no offset (2026-11-05T18:00), as the screen reads its pickers, or as an ISO time with an offset. A location left out is the club's gym, as the screen's form pre-fills. Adding the same entry again is 409 already_on_calendar rather than a second copy, so a create you never heard back from can be sent again.",
-        "Refusals: 404 not_found (no such date or repeat), 422 not_repeating (scope series on a one-off), 422 no_dates (a weekly entry that would put no date on the calendar), 409 repeating_date (deleting one date of a weekly entry), 409 checked_in (deleting a class people were checked in to), 409 already_on_calendar. Details, where there are any, are in error.details.",
+        "Refusals: 404 not_found (no such date or repeat), 422 not_repeating (scope series on a one-off), 422 no_dates (a weekly entry that would put no date on the calendar), 409 repeating_date (deleting one date of a weekly entry), 409 already_on_calendar. Details, where there are any, are in error.details.",
         "list_calendar_events takes no params, and refuses any (400 invalid_params) rather than return the whole list as if it had been filtered.",
       ],
     },
@@ -1886,7 +1886,7 @@ export const AGENT_MANIFEST: {
       name: "stop_calendar_repeat",
       method: "POST",
       summary:
-        "Stop a weekly entry repeating: Stop repeating on the manager's Calendar screen. Every date still to start is taken off the calendar and no more are made. Dates that have started stay, because they happened, and so does a date still to start that somebody is already checked in to (its id is in kept_checked_in). There is no undo: to have it again, add it again with create_calendar_entry. Nobody is emailed. Safe to send again: a repeat already stopped is left as it is, apart from clearing any date a first call missed, and comes back already_stopped: true. Returns removed (how many dates came off), kept_checked_in and already_stopped. 404 not_found when there is no such weekly entry.",
+        "Stop a weekly entry repeating: Stop repeating on the manager's Calendar screen. Every date still to start is taken off the calendar and no more are made. Dates that have started stay, because they happened. Anybody already checked in to a date that comes off has that check-in removed with it. There is no undo: to have it again, add it again with create_calendar_entry. Nobody is emailed. Safe to send again: a repeat already stopped is left as it is, apart from clearing any date a first call missed, and comes back already_stopped: true. Returns removed (how many dates came off) and already_stopped. 404 not_found when there is no such weekly entry.",
       params: [
         {
           name: "series_id",
@@ -1900,7 +1900,7 @@ export const AGENT_MANIFEST: {
       name: "delete_calendar_entry",
       method: "POST",
       summary:
-        "Delete a one-off date outright, for a mistake: it goes from the calendar as though it was never there, with every reply to it, and there is no undo. To call something off, cancel_calendar_entry is almost always what is wanted, since it keeps the record. 409 repeating_date for a date of a weekly entry, which cannot be deleted on its own (series_id in error.details; cancel the date, or stop_calendar_repeat); 409 checked_in when people were checked in to it (checked_in, the number, in error.details), since deleting it would take their sessions with it; 404 not_found when there is no such date.",
+        "Delete a one-off date outright, for a mistake: it goes from the calendar as though it was never there, with every reply and every check-in to it, and there is no undo. Returns checkins_removed, how many check-ins went with it. To call something off, cancel_calendar_entry is almost always what is wanted, since it keeps the record. 409 repeating_date for a date of a weekly entry, which cannot be deleted on its own (series_id in error.details; cancel the date, or stop_calendar_repeat); 404 not_found when there is no such date.",
       params: [
         {
           name: "id",

@@ -1613,13 +1613,10 @@ scripts/agent.sh stop_calendar_repeat '{"series_id":"<series_id from any of its 
 date's `id`, and sending one is `404 not_found`.
 
 Every date still to start comes off the calendar, with its replies, and no more
-are made. Dates that have started stay, because they happened. So does a date
-still to start that somebody is already checked in to: the check-in screen opens
-on the next class, so tonight's can have people in it before it begins. The
-result is `{ series_id, already_stopped, removed, kept_checked_in }`: `removed`
-is how many dates came off, and `kept_checked_in` lists the ids of any date kept
-for that reason. Tell the manager about those, since they are still on the
-calendar.
+are made. Dates that have started stay, because they happened. Anybody already
+checked in to a date that comes off has that check-in removed with it. The
+result is `{ series_id, already_stopped, removed }`: `removed` is how many
+dates came off.
 
 > **There is no undo.** To have the class back, add it again with
 > `create_calendar_entry`. Confirm which class with the manager first, and
@@ -1639,15 +1636,13 @@ scripts/agent.sh delete_calendar_entry '{"id":"<date id>"}'
 ```
 
 `params`: `id` (**required**, a date). Removes a one-off as though it was never
-there, with every reply to it. There is no undo and no confirm flag, so asking
-the manager first is your job. The result is `{ deleted: true, id }`.
+there, with every reply and every check-in to it. There is no undo and no
+confirm flag, so asking the manager first is your job, and say if people are
+already checked in. The result is `{ deleted: true, id, checkins_removed }`.
 
 - **`409 repeating_date`**: the date is one week of a weekly entry
   (`error.details.series_id`). It cannot be deleted on its own, past or still
   to come. Cancel the date, or `stop_calendar_repeat` to end the class.
-- **`409 checked_in`**: people were checked in to it
-  (`error.details.checked_in` is how many), and deleting it would take their
-  sessions with it, with no credit given back. Cancel it instead.
 - **`404 not_found`**: there is no such date. It was already deleted, or a
   stopped repeat took it.
 
