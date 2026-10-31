@@ -109,7 +109,8 @@ severities of moderation, not the same action.
     the whole reason for the split. So:
     - `/blog` shows **every published article first**, newest first, in large
       cards with a reading time, and they stay there whatever is posted after
-      them. Club updates follow as a dated feed, paged ten at a time. Only the
+      them. Club updates follow under "Club news" as a dated feed, paged ten at a
+      time. Only the
       updates are paged; the articles appear once, at the top of page one,
       and later pages point back to them.
     - The post page says which it is above the title ("Blog / Article", "Blog /

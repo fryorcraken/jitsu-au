@@ -11,13 +11,13 @@ import { expectPageRendered } from "../support/page";
 const ARTICLE = "Why we train against resistance";
 const UPDATE = "Welcome to semester two";
 
-test("the blog keeps articles on top of the latest club updates", async ({ page }) => {
-  await step(page, "the blog: articles on top, club updates below", async () => {
+test("the blog keeps articles on top of the club news", async ({ page }) => {
+  await step(page, "the blog: articles on top, club news below", async () => {
     await page.goto("/blog");
     await expectPageRendered(page);
 
     const articles = page.getByRole("region", { name: "Articles" });
-    const updates = page.getByRole("region", { name: "Latest club updates" });
+    const updates = page.getByRole("region", { name: "Club news" });
 
     await expect(articles.getByRole("link", { name: ARTICLE })).toBeVisible();
     await expect(articles).toContainText("min read");
@@ -50,7 +50,7 @@ test("the blog keeps articles on top of the latest club updates", async ({ page 
   await step(page, "a club update: labelled, with its date", async () => {
     await page.goto("/blog");
     await page
-      .getByRole("region", { name: "Latest club updates" })
+      .getByRole("region", { name: "Club news" })
       .getByRole("link", { name: UPDATE })
       .click();
 
