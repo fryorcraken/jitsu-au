@@ -14,7 +14,11 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { MESSAGE_ALREADY_GONE, deleteContactMessageRow } from "./contact-messages.functions";
+import {
+  MESSAGE_ALREADY_GONE,
+  deleteContactMessageRow,
+  loadContactMessages,
+} from "./contact-messages.functions";
 
 type QueryResult = { data: unknown; error: { message: string } | null };
 
@@ -84,5 +88,103 @@ describe("deleteContactMessageRow", () => {
     const { admin } = fakeAdmin({ data: null, error: { message: "permission denied" } });
 
     await expect(deleteContactMessageRow(admin, ID)).rejects.toThrow("permission denied");
+  });
+});
+
+// The inbox read, which the screen and the manager agent API both report from.
+//
+// Two things are worth pinning. The truncation rule: `newestAt` is the watermark
+// a caller hands back to acknowledge the list, so a list that stops short of the
+// marker must offer none, or acknowledging it marks unrendered messages read.
+// And that reading writes nothing: a manager's agent reading the inbox is not a
+// manager having seen it, so acknowledging is only ever a separate, explicit call.
+describe("loadContactMessages", () => {
+  const OLDER = { id: "m-1", created_at: "2026-10-01T00:00:00+00:00" };
+  const NEWER = { id: "m-2", created_at: "2026-10-03T00:00:00+00:00" };
+  const row = (r: { id: string; created_at: string }) => ({
+    ...r,
+    name: "Sample Person",
+    email: "sample@example.com",
+    subject: null,
+    message: "Hello",
+  });
+
+  function fakeInbox(opts: { rows: ReturnType<typeof row>[]; total: number; seen: string | null }) {
+    const writes: string[] = [];
+    let limit: number | null = null;
+    const admin = {
+      from(table: string) {
+        if (table === "club_settings") {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({ data: opts.seen ? { value: opts.seen } : null, error: null }),
+              }),
+            }),
+            upsert: () => {
+              writes.push(table);
+              return Promise.resolve({ data: null, error: null });
+            },
+          };
+        }
+        if (table === "contact_messages") {
+          return {
+            select: () => ({
+              order: () => ({
+                limit: (n: number) => {
+                  limit = n;
+                  return Promise.resolve({
+                    data: opts.rows.slice(0, n),
+                    error: null,
+                    count: opts.total,
+                  });
+                },
+              }),
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+    return {
+      admin: admin as unknown as SupabaseClient<Database>,
+      writes,
+      limit: () => limit,
+    };
+  }
+
+  it("reports which messages are unread against the marker, and the boundary to acknowledge", async () => {
+    const inbox = fakeInbox({
+      rows: [row(NEWER), row(OLDER)],
+      total: 2,
+      seen: "2026-10-02T00:00:00Z",
+    });
+
+    const result = await loadContactMessages(inbox.admin, 200);
+
+    expect(inbox.limit()).toBe(200);
+    expect(result.total).toBe(2);
+    expect(result.truncated).toBe(false);
+    expect(result.seenAt).toBe("2026-10-02T00:00:00Z");
+    expect(result.newestAt).toBe(NEWER.created_at);
+    expect(result.unreadIds).toEqual(["m-2"]);
+  });
+
+  it("offers no boundary when the list stops short of the whole inbox", async () => {
+    const inbox = fakeInbox({ rows: [row(NEWER), row(OLDER)], total: 2, seen: null });
+
+    const result = await loadContactMessages(inbox.admin, 1);
+
+    expect(result.truncated).toBe(true);
+    expect(result.newestAt).toBeNull();
+  });
+
+  it("never moves the seen marker", async () => {
+    const inbox = fakeInbox({ rows: [row(NEWER)], total: 1, seen: null });
+
+    await loadContactMessages(inbox.admin, 200);
+
+    expect(inbox.writes).toEqual([]);
   });
 });

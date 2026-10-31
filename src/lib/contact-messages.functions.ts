@@ -51,37 +51,43 @@ async function adminClient(): Promise<AdminClient> {
  * that has no way to scroll back to them. That is the same silent loss the
  * feature exists to prevent, so a truncated page acknowledges nothing and says
  * so instead.
+ *
+ * A plain function taking the client, so the manager agent API reports the
+ * inbox from the same read as the screen (docs/manager-agent-api.md). It only
+ * reads: acknowledging is `markContactMessagesSeen`, always a separate call.
  */
+export async function loadContactMessages(admin: AdminClient, limit: number) {
+  const [seen, { data: rows, error, count }] = await Promise.all([
+    readSeenMarker(admin, CONTACT_SEEN_KEY),
+    admin
+      .from("contact_messages")
+      .select("id, name, email, subject, message, created_at", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  ]);
+  if (error) throw new Error(error.message);
+
+  const messages = (rows ?? []) as ContactMessage[];
+  const total = count ?? messages.length;
+  const truncated = total > messages.length;
+
+  return {
+    messages,
+    total,
+    truncated,
+    seenAt: seen.marker,
+    // Ordered newest-first, so the first row is the boundary that was seen.
+    newestAt: truncated ? null : (messages[0]?.created_at ?? null),
+    unreadIds: unreadSince(messages, seen.marker).map((m) => m.id),
+  };
+}
+
 export const listContactMessages = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => listContactMessagesSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
-    const admin = await adminClient();
-
-    const [seen, { data: rows, error, count }] = await Promise.all([
-      readSeenMarker(admin, CONTACT_SEEN_KEY),
-      admin
-        .from("contact_messages")
-        .select("id, name, email, subject, message, created_at", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .limit(data.limit),
-    ]);
-    if (error) throw new Error(error.message);
-
-    const messages = (rows ?? []) as ContactMessage[];
-    const total = count ?? messages.length;
-    const truncated = total > messages.length;
-
-    return {
-      messages,
-      total,
-      truncated,
-      seenAt: seen.marker,
-      // Ordered newest-first, so the first row is the boundary that was seen.
-      newestAt: truncated ? null : (messages[0]?.created_at ?? null),
-      unreadIds: unreadSince(messages, seen.marker).map((m) => m.id),
-    };
+    return loadContactMessages(await adminClient(), data.limit);
   });
 
 /**
