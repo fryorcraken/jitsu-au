@@ -153,10 +153,14 @@ under the field and updates it as the body is typed, so what gets stored is
 what the manager was shown. Both the resolved slug and the resolved excerpt
 come back from the save and become the form's new baseline. Under the status
 picker, a "Search engines and link previews" box holds the optional search
-title and description (rule 9), each with a count against what a search result
-usually shows (about 60 and 155 characters) that turns amber past it, and a
-preview of the result built by the same function the public page uses. The
-placeholders show the defaults a blank field falls back to.
+title and description (rule 9), and a preview of the result built by the same
+function the public page uses. Each field's placeholder is the default it falls
+back to when blank (the title with the blog's name, the excerpt). Each has a
+count against what a search result usually shows (about 60 and 155
+characters), which warns past it, and warns that the text cannot be saved past
+the most it can hold (100 and 300). Neither is enforced while typing: the
+fields have no length cap, so a pasted paragraph is never silently cut short,
+and the warning is announced to screen readers when it appears.
 `published_at` is stamped the first time a post goes live and **never changes
 again** — not on a later edit, and not on an unpublish/republish round trip —
 so a post's publish date and its position in the public list (sorted by

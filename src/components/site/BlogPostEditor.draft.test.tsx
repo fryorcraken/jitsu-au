@@ -61,8 +61,10 @@ describe("BlogPostEditor draft recovery", () => {
 
     render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
 
-    const banner = await screen.findByRole("status");
-    expect(banner).toHaveTextContent(/unsaved post on this device/i);
+    // The search fields' live regions are statuses too, so find the banner by
+    // what it says.
+    const banner = await screen.findByText(/unsaved post on this device/i);
+    expect(banner.closest('[role="status"]')).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: /bring it back/i }));
 
@@ -343,5 +345,41 @@ describe("BlogPostEditor search preview", () => {
     expect(field).toHaveAccessibleDescription(/0 of about 60 characters/);
     await user.type(field, "x".repeat(61));
     expect(field).toHaveAccessibleDescription(/61 characters\. .*may be cut off/);
+    // Announced, not only shown: the count changes silently on every keystroke,
+    // but the warning sits in a live region of its own.
+    expect(
+      screen.getAllByRole("status").some((s) => /may be cut off/.test(s.textContent ?? "")),
+    ).toBe(true);
+  });
+
+  // A length cap on the input would silently drop the end of a pasted
+  // paragraph. The text stays, and the field says it cannot be saved yet.
+  it("keeps a pasted description that is too long, and says so", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    const field = screen.getByLabelText("Search description");
+    await user.click(field);
+    await user.paste("x".repeat(320));
+
+    expect(field).toHaveValue("x".repeat(320));
+    expect(field).toHaveAccessibleDescription(/20 over the 300 that can be saved/);
+  });
+
+  it("shows the defaults a blank field falls back to as its placeholder", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText(/Excerpt/), "Everyone passed.");
+
+    expect(screen.getByLabelText("Search title")).toHaveAttribute(
+      "placeholder",
+      "Grading day | UTS Jitsu Blog",
+    );
+    expect(screen.getByLabelText("Search description")).toHaveAttribute(
+      "placeholder",
+      "Everyone passed.",
+    );
   });
 });

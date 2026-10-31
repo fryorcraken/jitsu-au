@@ -96,24 +96,53 @@ const BLOG_DRAFT_SHAPE: BlogDraftFields = {
 };
 
 /**
- * A search field's length against what a search result usually shows. Advice,
- * not a limit: going over is allowed (the input's own `maxLength` is the
- * ceiling), it just means the end may be cut off in a result.
+ * A search field's length against what a search result usually shows, and
+ * against the most it can hold.
+ *
+ * Neither is enforced as you type. Past `shown` is allowed and only means the
+ * end may be cut off in a result. Past `max` cannot be saved, but the field has
+ * no `maxLength` on purpose: that would silently cut a pasted paragraph short,
+ * and the person would never see what was dropped. They see this instead, with
+ * all of their text still there to trim.
+ *
+ * The count is not announced (it would be read out on every keystroke), but
+ * the warning is: it sits in a live region that only changes when a threshold
+ * is crossed.
  */
-function SeoLengthHint({ id, length, shown }: { id: string; length: number; shown: number }) {
+function SeoLengthHint({
+  id,
+  length,
+  shown,
+  max,
+}: {
+  id: string;
+  length: number;
+  shown: number;
+  max: number;
+}) {
+  const warning =
+    length > max
+      ? `That is ${length - max} over the ${max} that can be saved, so shorten it before saving.`
+      : length > shown
+        ? `Search results usually show about ${shown}, so the end may be cut off.`
+        : "";
   return (
     <p
       id={id}
       className={cn(
         "mt-1 text-xs",
-        // Theme tokens, so the contrast test covers both: the warning is the
-        // line on this form that most needs to be readable.
-        length > shown ? "font-medium text-foreground" : "text-muted-foreground",
+        // Theme tokens, so the contrast test covers both.
+        length > max
+          ? "font-medium text-destructive"
+          : length > shown
+            ? "font-medium text-foreground"
+            : "text-muted-foreground",
       )}
     >
       {length > shown
-        ? `${length} characters. Search results usually show about ${shown}, so the end may be cut off.`
+        ? `${length} characters. `
         : `${length} of about ${shown} characters a search result usually shows.`}
+      <span role="status">{warning}</span>
     </p>
   );
 }
@@ -401,13 +430,20 @@ export function BlogPostEditor({
   // What a search result will show, through the same function the public page
   // uses. The excerpt a blank one falls back to is the one the server will
   // store, so a blank excerpt is previewed as the derived one.
-  const searchInputs = {
-    title: title.trim() || "Your post title",
-    excerpt: excerpt.trim() || derivedExcerpt || null,
-    seo_title: seoTitle,
-    seo_description: seoDescription,
-  };
-  const searchResult = blogPostSeo(searchInputs);
+  // The result as served, and the defaults the two fields fall back to (their
+  // placeholders), all from the function the public page uses.
+  const search = useMemo(() => {
+    const inputs = {
+      title: title.trim() || "Your post title",
+      excerpt: excerpt.trim() || derivedExcerpt || null,
+      seo_title: seoTitle,
+      seo_description: seoDescription,
+    };
+    return {
+      result: blogPostSeo(inputs),
+      defaults: blogPostSeo({ ...inputs, seo_title: null, seo_description: null }),
+    };
+  }, [title, excerpt, derivedExcerpt, seoTitle, seoDescription]);
 
   const formFields = (
     <div className="space-y-4">
@@ -583,8 +619,7 @@ export function BlogPostEditor({
             id="post-seo-title"
             value={seoTitle}
             onChange={(e) => setSeoTitle(e.target.value)}
-            maxLength={BLOG_SEO_TITLE_MAX}
-            placeholder={blogPostSeo({ ...searchInputs, seo_title: null }).title}
+            placeholder={search.defaults.title}
             aria-describedby="post-seo-title-count"
             className="mt-1.5"
           />
@@ -592,6 +627,7 @@ export function BlogPostEditor({
             id="post-seo-title-count"
             length={seoTitle.trim().length}
             shown={BLOG_SEO_TITLE_SHOWN}
+            max={BLOG_SEO_TITLE_MAX}
           />
         </div>
         <div>
@@ -601,8 +637,7 @@ export function BlogPostEditor({
             value={seoDescription}
             onChange={(e) => setSeoDescription(e.target.value)}
             rows={3}
-            maxLength={BLOG_SEO_DESCRIPTION_MAX}
-            placeholder="Leave blank to use the excerpt"
+            placeholder={search.defaults.description}
             aria-describedby="post-seo-description-count"
             className="mt-1.5"
           />
@@ -610,6 +645,7 @@ export function BlogPostEditor({
             id="post-seo-description-count"
             length={seoDescription.trim().length}
             shown={BLOG_SEO_DESCRIPTION_SHOWN}
+            max={BLOG_SEO_DESCRIPTION_MAX}
           />
         </div>
         <div aria-label="How the post may look in search results" role="group">
@@ -620,8 +656,10 @@ export function BlogPostEditor({
             <p className="truncate text-xs text-muted-foreground">
               {SITE_HOST}/blog/{previewSlug}
             </p>
-            <p className="line-clamp-1 text-base font-medium text-primary">{searchResult.title}</p>
-            <p className="line-clamp-2 text-sm text-muted-foreground">{searchResult.description}</p>
+            <p className="line-clamp-1 text-base font-medium text-primary">{search.result.title}</p>
+            <p className="line-clamp-2 text-sm text-muted-foreground">
+              {search.result.description}
+            </p>
           </div>
         </div>
       </fieldset>
