@@ -330,7 +330,12 @@ function ManagerCalendarPage() {
     if (!ok) return;
     setBusy(true);
     try {
-      await removeEvent({ data: { id: ev.id } });
+      const res = await removeEvent({ data: { id: ev.id } });
+      toast.success(
+        res.checkins_removed
+          ? `Deleted, with ${res.checkins_removed} check-in${res.checkins_removed === 1 ? "" : "s"}.`
+          : "Deleted.",
+      );
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete the entry");

@@ -2866,8 +2866,16 @@ describe("manager agent route: the calendar", () => {
       calendar_events: [
         event(ONE_OFF),
         event(QUIET_ONE_OFF, { title: "Social" }),
-        event(WEEKLY_DATE, { series_id: SERIES, title: "Evening class" }),
+        // Far enough ahead to stay a date still to come, of a repeat still
+        // running, which is the one kind of weekly date that cannot be deleted.
+        event(WEEKLY_DATE, {
+          series_id: SERIES,
+          title: "Evening class",
+          starts_at: "2099-12-03T07:00:00.000Z",
+          ends_at: "2099-12-03T08:30:00.000Z",
+        }),
       ],
+      calendar_series: [{ id: SERIES, is_active: true }],
       session_checkins: [
         { id: "c1", event_id: ONE_OFF },
         { id: "c2", event_id: ONE_OFF },

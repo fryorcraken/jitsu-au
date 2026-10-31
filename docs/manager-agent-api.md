@@ -363,9 +363,12 @@ locked | already_verified` (the record has moved on, checked again at the send);
   `session_checkins.membership_id` is `ON DELETE SET NULL` — without it the
   delete would succeed and silently turn a class somebody attended into an
   uncovered one. Clearing it means moving those check-ins to another membership,
-  which is a **manager-screen action with no agent equivalent**: this API has no
-  check-in actions at all, and adding the first one is a wider surface decision
-  than the change that introduced this made on its own.
+  which is a **manager-screen action with no agent equivalent**: this API cannot
+  make, move or cover a check-in, and adding the first such action is a wider
+  surface decision than the change that introduced this made on its own. (It
+  does remove check-ins in one place, on purpose: a deleted calendar date, or
+  one a stopped repeat removes, takes its check-ins with it, by the club's
+  rule that a class's check-ins go when the class does.)
 - `file_waiver` — file a scanned paper waiver (migration / bulk filing from
   paper records). Same params as the manager's paper-upload form
   (`paperWaiverUploadSchema`); dispatches to `filePaperWaiver` in
@@ -596,7 +599,7 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   `CalendarEntryError`'s `reason` as the error code: `404 not_found` (no such
   date or repeat), `422 not_repeating` (`scope: "series"` on a one-off),
   `422 no_dates` (a weekly entry that would put no date on the calendar),
-  `409 repeating_date` (deleting one date of a weekly entry, `series_id` in
+  `409 repeating_date` (deleting a date still to come of a repeat still running, `series_id` in
   `error.details`) and `409 already_on_calendar`. Anything
   else is `500 db_error`, which is why the shared schema refuses a weekly
   entry's `starts_on` or `ends_on` that is not a real date (`2026-11-31`, "That
@@ -668,10 +671,10 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   Five guards live in the shared functions rather than the handlers, so the
   screen has them too: a date or repeat that is gone is `not_found` rather than
   a success that changed nothing (`list_calendar_rsvps` checks the date first,
-  so an empty list always means nobody has replied); deleting one date of a
-  weekly entry is refused, not just left off the screen's buttons, because it
-  cannot be deleted on its own and the answer is to cancel it or stop the
-  entry; deleting a date, or stopping a repeat, takes the check-ins on those
+  so an empty list always means nobody has replied); deleting a date still to
+  come of a repeat still running is refused, not just left off the screen's
+  buttons, because the next top-up would put it back and the answer is to
+  cancel it or stop the entry; deleting a date, or stopping a repeat, takes the check-ins on those
   dates with them as clean-up (the foreign key cascades;
   `delete_calendar_entry` reports how many as `checkins_removed`);
   `stop_calendar_repeat` is safe to send again (`already_stopped`); a weekly entry that would put no date on the calendar
@@ -681,9 +684,10 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   it; and the duplicate refusal above. "Still to come" and the date a stopped
   repeat is recorded as ending on are the club's today (`clubLocalDate`), not
   the UTC date, which until mid-morning in Sydney is still yesterday. A repeat
-  also never generates a date over a scheduled date with the same title at the
-  same moment, so re-adding a class straight after stopping it does not double
-  tonight's class that the stop kept.
+  also never generates a date over a scheduled date with the same title and
+  visibility at the same moment (a one-off for the same class), and a date of a
+  repeat can be deleted once it could not come back (it has passed, or the
+  repeat is stopped).
 
   **`invite_only` is a badge and hides nothing** (`docs/calendar.md`, "Two
   settings that are easy to confuse"). It puts "invite only" on the date, on
@@ -789,7 +793,7 @@ have no action:
 | `setClubUserEmail` (change a login email)           | Moves the person's identity, drops their verified badge and emails the new address. Needs a product decision.                                                                                                                 |
 | `setClubUserKitSizes`                               | Reversible and sends nothing, so safe to expose. Not built because no agent workflow has asked for it yet; add it when one does.                                                                                              |
 | `getWaiverPdfUrl`                                   | A read, but of a signed legal document with health answers in it, handed out as a bearer link. `has_pdf` says whether there is one. Expose only for a caller that needs the document itself.                                  |
-| `attachCheckInCoverage` / `transferCheckInCoverage` | This API has no check-in actions at all, on purpose (see `delete_invoice` above).                                                                                                                                             |
+| `attachCheckInCoverage` / `transferCheckInCoverage` | This API cannot make, move or cover a check-in, on purpose (see `delete_invoice` above).                                                                                                                                      |
 | `setMembershipStatus` to `active` (reopen)          | Recomputes dates and credits; `edit_invoice` refuses `active` for that reason.                                                                                                                                                |
 
 ### The four sync points

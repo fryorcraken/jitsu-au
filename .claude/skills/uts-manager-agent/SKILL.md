@@ -490,7 +490,7 @@ closes the membership and keeps the record (`edit_invoice` with
 >   money moved. Cancel it instead.
 > - **`attended`** — a class was checked in against it. **You cannot clear this
 >   one.** It is cleared by moving those check-ins to another membership, which
->   is a manager-screen action; this API has no check-in actions. Tell the
+>   is a manager-screen action; this API cannot move a check-in. Tell the
 >   manager what is blocking it and leave it to them.
 >
 > Being **active is not a blocker**. Every membership is authorised from the
@@ -1430,7 +1430,9 @@ replied.
 
 A reply is not attendance. Who actually turned up is a check-in, made on the
 manager's check-in screen and read per person through `get_user`'s `checkins`;
-this API has no check-in actions.
+this API cannot make or change one. Deleting a date, or stopping a repeat,
+does remove the check-ins on the dates that go, as clean-up: say so to the
+manager before either.
 
 ### `create_calendar_entry` — add a class or event
 
@@ -1487,9 +1489,8 @@ scripts/agent.sh create_calendar_entry '{
   held somewhere else. `null` clears `description` and `instructor_name` here
   too, as it does on `edit_calendar_entry`.
 - **A weekly entry skips any week where a scheduled date with the same title
-  is already at that time**, such as tonight's class a `stop_calendar_repeat`
-  kept because people were checked in. So stopping a class and adding it again
-  (to change its length) does not put two of tonight's class on the calendar.
+  and visibility is already at that time**, such as a one-off for the same
+  class, so it never puts a second copy of a class on top of one.
 - **`visibility: "members"` means paid members only**, not everyone with an
   account: an active, priced membership that is not a trial (held by the person
   or by a child on their account), plus managers. Somebody on the free trial or
@@ -1640,9 +1641,10 @@ there, with every reply and every check-in to it. There is no undo and no
 confirm flag, so asking the manager first is your job, and say if people are
 already checked in. The result is `{ deleted: true, id, checkins_removed }`.
 
-- **`409 repeating_date`**: the date is one week of a weekly entry
-  (`error.details.series_id`). It cannot be deleted on its own, past or still
-  to come. Cancel the date, or `stop_calendar_repeat` to end the class.
+- **`409 repeating_date`**: the date is still to come in a weekly entry that
+  is still repeating (`error.details.series_id`), so it would only come back.
+  Cancel the date, or `stop_calendar_repeat` to end the class. A past date of a
+  weekly entry, or any date of a stopped one, can be deleted.
 - **`404 not_found`**: there is no such date. It was already deleted, or a
   stopped repeat took it.
 

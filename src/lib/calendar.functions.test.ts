@@ -157,17 +157,35 @@ describe("deleteEventRow", () => {
   });
 
   // The next horizon top-up would only put a deleted weekly date back.
-  it("refuses one date of a weekly entry, and names the repeat to stop instead", async () => {
-    const { admin, calls } = fakeClient((op) => {
+  /** One date of a weekly entry, starting at `startsAt`, and whether the entry still runs. */
+  function weeklyDate(startsAt: string, isActive: boolean) {
+    return fakeClient((op) => {
       if (op.table === "calendar_events" && op.verb === "select")
-        return ok({ id: "evt-1", series_id: "series-1" });
+        return ok({ id: "evt-1", series_id: "series-1", starts_at: startsAt });
+      if (op.table === "calendar_series") return ok({ is_active: isActive });
       return { data: null, error: null, count: 0 };
     });
+  }
+
+  // The next horizon top-up would only put it back.
+  it("refuses a date still to come of a repeat still running, and names the repeat to stop instead", async () => {
+    const { admin, calls } = weeklyDate(NEXT_CLASS, true);
 
     const e = await refusal(deleteEventRow(admin, { id: "evt-1" }));
     expect(e.reason).toBe("repeating_date");
     expect(e.details).toEqual({ series_id: "series-1" });
     expect(writes(calls)).toHaveLength(0);
+  });
+
+  // Nothing would generate these again, so nothing stops them going.
+  it.each([
+    ["a past date of a repeat still running", LAST_CLASS, true],
+    ["a date still to come of a stopped repeat", NEXT_CLASS, false],
+  ])("deletes %s", async (_what, startsAt, isActive) => {
+    const { admin, calls } = weeklyDate(startsAt, isActive);
+
+    await deleteEventRow(admin, { id: "evt-1" });
+    expect(ofTable(calls, "calendar_events", "delete")).toHaveLength(1);
   });
 
   // Once the class is gone its check-ins go too, as clean-up (the foreign key
@@ -467,6 +485,21 @@ describe("stopRepeatingSeries", () => {
   });
 
   // `ends_on` has a CHECK against `starts_on`.
+  // Still flagged active, but its own end date passed a month ago: that is
+  // when it ended, and stopping it today must not move that later.
+  it("keeps an end date that has already passed", async () => {
+    const { admin, calls } = club({
+      series: { starts_on: "2026-07-15", ends_on: "2026-09-30", is_active: true },
+      future: [],
+    });
+
+    await stopRepeatingSeries(admin, { series_id: "series-1" });
+    expect(ofTable(calls, "calendar_series", "update")[0].patch).toMatchObject({
+      is_active: false,
+      ends_on: "2026-09-30",
+    });
+  });
+
   it("ends a repeat stopped before its first date on that first date", async () => {
     const { admin, calls } = club({
       series: { starts_on: "2026-12-02", is_active: true },
@@ -784,6 +817,8 @@ describe("createCalendarEntryRow", () => {
     )!;
     expect(filterValue(sameClass, "title")).toBe("Wednesday class");
     expect(filterValue(sameClass, "status", "neq")).toBe("cancelled");
+    // A members-only one-off does not stand in for a public class.
+    expect(filterValue(sameClass, "visibility")).toBe("public");
   });
 
   it("adds a fresh one-off as the acting manager, and hands back the date it added", async () => {
@@ -856,6 +891,47 @@ describe("createCalendarEntryRow", () => {
     expect(ofTable(calls, "calendar_series", "insert")[0].patch).toMatchObject({
       created_by: MANAGER,
     });
+  });
+
+  // A calendar read's horizon top-up saw the new series first and added its
+  // dates, so this insert hits the unique index. The dates are there: that is
+  // an added entry, not an error the manager would retry into a duplicate.
+  it("answers with the dates another writer added first, rather than failing", async () => {
+    let inserts = 0;
+    const { admin } = fakeClient((op) => {
+      if (op.table === "calendar_series" && op.verb === "select") return ok([]);
+      if (op.table === "calendar_series" && op.verb === "insert")
+        return ok({ id: "series-new", is_active: true, ...(op.patch as object) });
+      if (op.table === "calendar_events" && op.verb === "insert") {
+        inserts += 1;
+        return { data: null, error: { message: "duplicate key value", code: "23505" } };
+      }
+      // The read-back after the race: the date the other writer added.
+      if (op.table === "calendar_events" && op.verb === "select" && op.columns?.includes("title"))
+        return ok([
+          {
+            id: "evt-theirs",
+            series_id: "series-new",
+            title: "Wednesday class",
+            description: null,
+            instructor_name: null,
+            location: null,
+            starts_at: NEXT_CLASS,
+            ends_at: NEXT_CLASS_END,
+            status: "scheduled",
+            visibility: "public",
+            invite_only: false,
+          },
+        ]);
+      if (op.table === "calendar_events" && op.verb === "select") return ok([]);
+      return ok(null);
+    });
+
+    const result = await createCalendarEntryRow(admin, weekly, MANAGER);
+    expect(result).toMatchObject({ ok: true, id: "series-new", repeats: true, generated: 1 });
+    expect(result.dates.map((d) => d.id)).toEqual(["evt-theirs"]);
+    // Tried once more for anything still missing, then read back.
+    expect(inserts).toBe(2);
   });
 });
 

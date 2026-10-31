@@ -3769,8 +3769,12 @@ export const createCalendarEntrySchema = z
   });
 export type CreateCalendarEntryInput = z.infer<typeof createCalendarEntrySchema>;
 
-/** Club wall-clock time with no offset: "YYYY-MM-DDTHH:MM", seconds optional. */
-const CLUB_LOCAL_DATE_TIME = /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+/**
+ * Club wall-clock time with no offset: "YYYY-MM-DDTHH:MM", or with ":00" on the
+ * end. Any other seconds are not converted, so the schema refuses them rather
+ * than a class quietly starting 30 seconds from where the caller said.
+ */
+const CLUB_LOCAL_DATE_TIME = /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d(:00)?$/;
 
 /**
  * An agent's `create_calendar_entry` params, given the two things the screen's

@@ -2547,7 +2547,16 @@ describe("agentCreateCalendarEntrySchema", () => {
     });
   });
 
-  it("accepts seconds on a time with no offset", () => {
+  // Converted, they would be dropped, and the class would start 30 seconds
+  // from where the caller said. Refused instead.
+  it("refuses seconds other than :00 on a time with no offset", () => {
+    expect(
+      agentCreateCalendarEntrySchema.safeParse(oneOff("2026-11-05T18:00:30", "2026-11-05T19:30"))
+        .success,
+    ).toBe(false);
+  });
+
+  it("accepts :00 seconds on a time with no offset", () => {
     const result = agentCreateCalendarEntrySchema.safeParse(
       oneOff("2026-11-05T18:00:00", "2026-11-05T19:30:00"),
     );

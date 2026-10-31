@@ -176,8 +176,10 @@ it would say it was added and never appear.
 Deleting an entry outright exists for mistakes only, and only for one-off
 entries: an upcoming date of a repeat, deleted, would just be regenerated at the
 next top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
-The server refuses to delete a date of a repeat as well, so leaving the button
-off the screen is not the only thing holding that rule. A deleted date takes
+The server refuses to delete a date still to come of a repeat still running as
+well, so leaving the button off the screen is not the only thing holding that
+rule; a past date of a repeat, or any date of a stopped one, cannot come back
+and can be deleted. A deleted date takes
 its check-ins with it as clean-up (the confirm says so), the same as "Stop
 repeating" does.
 
