@@ -93,11 +93,9 @@ const BLOG_DRAFT_SHAPE: BlogDraftFields = {
   excerpt: "",
   body: "",
   status: "draft",
-  // Blank, not "update": a draft written by a build from before articles
-  // existed has no kind, and reading that as "update" would turn an article
-  // back into a club update the moment the draft was restored. Blank means
-  // "this draft does not say", and restoring it keeps the post's own kind.
-  kind: "",
+  // Replaced per post with the post's own kind (`draftShape` below), so a
+  // draft written before kinds existed reads as having the kind the post has.
+  kind: "update",
   coverPath: "",
   coverUrl: "",
   seoTitle: "",
@@ -336,13 +334,22 @@ export function BlogPostEditor({
     }),
     [initial],
   );
+  // A draft kept by the build before kinds existed has no kind. Filling it in
+  // as the post's own kind, rather than one fixed value, does two things: a
+  // restored draft never moves an article down among the club updates, and a
+  // draft that otherwise matches what is saved is still recognised as stale
+  // and dropped rather than offered back.
+  const draftShape = useMemo<BlogDraftFields>(
+    () => ({ ...BLOG_DRAFT_SHAPE, kind: initial.kind }),
+    [initial.kind],
+  );
   const draft = useEditorDraft<BlogDraftFields>({
     kind: "blog-post",
     scope: postId ?? "new",
     owner: user?.id ?? null,
     value: draftFields,
     baseline: draftBaseline,
-    shape: BLOG_DRAFT_SHAPE,
+    shape: draftShape,
   });
 
   function restoreDraft() {

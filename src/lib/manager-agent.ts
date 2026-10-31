@@ -8,8 +8,13 @@
 // Keep AGENT_MANIFEST, managerAgentActions (validation.ts), the route dispatch,
 // and the skill (.claude/skills/uts-manager-agent/) in lockstep. See docs/manager-agent-api.md.
 import { formatCents, isPaperWaiver, sameInstant } from "@/lib/validation";
-import type { AgentSaveBlogPostInput, BlogPostInput, EditInvoiceInput } from "@/lib/validation";
-import { asBlogPostKind } from "@/lib/validation";
+import {
+  asBlogPostKind,
+  type AgentSaveBlogPostInput,
+  type BlogPostInput,
+  type BlogPostKind,
+  type EditInvoiceInput,
+} from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import { versionLabel } from "@/lib/document-versions";
 import { canonicalUrl } from "@/lib/seo";
@@ -281,7 +286,7 @@ export type AgentBlogPostStored = {
 export function mergeAgentBlogPostEdit(
   stored: AgentBlogPostStored,
   input: AgentSaveBlogPostInput,
-): BlogPostInput & { id: string } {
+): BlogPostInput & { id: string; kind: BlogPostKind } {
   return {
     id: stored.id,
     title: input.title ?? stored.title,

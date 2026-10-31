@@ -3,7 +3,7 @@ import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { formatDate } from "@/lib/dates";
-import { blogListSearchSchema } from "@/lib/validation";
+import { BLOG_POST_KIND_LABELS, blogListSearchSchema } from "@/lib/validation";
 import { listPublishedBlogPosts } from "@/lib/blog.functions";
 import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { cn } from "@/lib/utils";
@@ -62,7 +62,7 @@ function ArticleCard({ article }: { article: Article }) {
       <div className="flex flex-1 flex-col p-6">
         <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
           <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
-          Article
+          {BLOG_POST_KIND_LABELS.article}
           <span aria-hidden="true">·</span>
           <span className="normal-case tracking-normal text-muted-foreground">
             {article.reading_minutes} min read
@@ -194,7 +194,7 @@ function BlogIndex() {
               <h2 id="blog-updates" className="text-2xl font-bold">
                 {page > 1 ? `Club updates, page ${page}` : "Latest club updates"}
               </h2>
-              {page > 1 && (
+              {page > 1 && (result?.articleCount ?? 0) > 0 && (
                 <p className="mt-1 text-sm text-muted-foreground">
                   The articles are on the{" "}
                   <Link

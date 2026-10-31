@@ -182,8 +182,9 @@ export function kindUpdate(data: { kind?: BlogPostKind }): { kind?: BlogPostKind
  * posts: every published article comes back on the first page, newest first,
  * with its reading time. Updates are paged exactly as every post was before
  * articles existed, and `total` counts updates only, so the page count is
- * about the list it pages. Later pages carry no articles; the page shows them
- * once, at the top of page one.
+ * about the list it pages. Later pages carry no articles, only how many there
+ * are (`articleCount`), so they can point back to page one when there is
+ * something there to point at.
  */
 export const listPublishedBlogPosts = createServerFn({ method: "GET" })
   .validator((d: unknown) => listBlogPostsSchema.parse(d))
@@ -199,14 +200,18 @@ export const listPublishedBlogPosts = createServerFn({ method: "GET" })
         .eq("kind", "update")
         .order("published_at", { ascending: false })
         .range(from, to),
-      data.page === 1
-        ? supabase
-            .from("blog_posts")
-            .select("id, slug, title, excerpt, body_md, cover_image_path, published_at")
-            .eq("status", "published")
-            .eq("kind", "article")
-            .order("published_at", { ascending: false })
-        : Promise.resolve({ data: [], error: null }),
+      // On later pages only the count is wanted: `head` asks for it without
+      // the rows, so no article body leaves the database for a page that
+      // does not show them.
+      supabase
+        .from("blog_posts")
+        .select("id, slug, title, excerpt, body_md, cover_image_path, published_at", {
+          count: "exact",
+          head: data.page !== 1,
+        })
+        .eq("status", "published")
+        .eq("kind", "article")
+        .order("published_at", { ascending: false }),
     ]);
     if (updates.error) throw new Error(updates.error.message);
     if (articles.error) throw new Error(articles.error.message);
@@ -219,6 +224,7 @@ export const listPublishedBlogPosts = createServerFn({ method: "GET" })
       cover_image_url: coverImageUrl(supabase, r.cover_image_path),
     }));
     return {
+      articleCount: articles.count ?? 0,
       articles: (articles.data ?? []).map((r) => ({
         id: r.id,
         slug: r.slug,

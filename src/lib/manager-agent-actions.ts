@@ -54,8 +54,8 @@ import {
   eventRsvpsSchema,
   stopRepeatingSchema,
   updateCalendarEntrySchema,
+  type BlogPostKind,
 } from "@/lib/validation";
-import { asBlogPostKind, type BlogPostKind } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
   AGENT_MANIFEST,
@@ -2053,7 +2053,7 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
     if (input.id) {
       const stored = await loadBlogPostRow(db, { id: input.id });
       const merged = mergeAgentBlogPostEdit(stored, input);
-      kind = merged.kind ?? asBlogPostKind(stored.kind);
+      kind = merged.kind;
       saved = await updateBlogPostRow(db, merged, actingAs, stored);
       created = false;
     } else {

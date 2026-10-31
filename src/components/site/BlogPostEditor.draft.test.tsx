@@ -36,6 +36,23 @@ const EMPTY: BlogPostEditorValue = {
   seo_description: "",
 };
 
+/** Rewrite every stored draft as the build before kinds would have written it. */
+function stripStoredKind() {
+  const stripKind = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(stripKind);
+    if (!node || typeof node !== "object") return node;
+    const entries = Object.entries(node).filter(
+      ([key]) => !(key === "kind" && "title" in node && "body" in node),
+    );
+    return Object.fromEntries(entries.map(([key, value]) => [key, stripKind(value)]));
+  };
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const key = window.localStorage.key(i)!;
+    const stored = JSON.parse(window.localStorage.getItem(key)!);
+    window.localStorage.setItem(key, JSON.stringify(stripKind(stored)));
+  }
+}
+
 function hidePage() {
   // What a phone sends when the app goes to the background. jsdom reports
   // "visible" by default and has no way to change it, so stub the getter.
@@ -118,20 +135,7 @@ describe("BlogPostEditor draft recovery", () => {
     hidePage();
     first.unmount();
 
-    // Rewrite the stored draft as the older build would have written it.
-    const stripKind = (node: unknown): unknown => {
-      if (Array.isArray(node)) return node.map(stripKind);
-      if (!node || typeof node !== "object") return node;
-      const entries = Object.entries(node).filter(
-        ([key]) => !(key === "kind" && "title" in node && "body" in node),
-      );
-      return Object.fromEntries(entries.map(([key, value]) => [key, stripKind(value)]));
-    };
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i)!;
-      const stored = JSON.parse(window.localStorage.getItem(key)!);
-      window.localStorage.setItem(key, JSON.stringify(stripKind(stored)));
-    }
+    stripStoredKind();
     expect(JSON.stringify({ ...window.localStorage })).not.toMatch(/"kind":"update"/);
 
     render(
@@ -145,6 +149,31 @@ describe("BlogPostEditor draft recovery", () => {
 
     expect(screen.getByLabelText("Title")).toHaveValue("Grading day");
     expect(screen.getByRole("radio", { name: "Article" })).toBeChecked();
+  });
+
+  // The same old draft, when what it holds has since been saved (from another
+  // device, say): it matches the post once its missing kind is read as the
+  // post's own, so it is dropped as stale rather than offered back.
+  it("drops a draft that predates kinds once it matches what is saved", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    hidePage();
+    first.unmount();
+    stripStoredKind();
+
+    render(
+      <BlogPostEditor
+        initial={{ ...EMPTY, title: "Grading day", kind: "article" }}
+        saving={false}
+        onSave={async () => true}
+      />,
+    );
+
+    await waitFor(() => expect(window.localStorage.length).toBe(0));
+    expect(screen.queryByRole("button", { name: /bring it back/i })).not.toBeInTheDocument();
   });
 
   it("never restores on its own — the offer has to be accepted", async () => {
