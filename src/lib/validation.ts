@@ -22,7 +22,14 @@ import { householdTargetUserId } from "./household";
 // must cover that evening's class, not cut off at UTC midnight), so this
 // module needs the same zoned-time helpers the calendar uses. `calendar.ts` is
 // the same kind of module as this one (pure, no server imports).
-import { CLUB_TIME_ZONE, clubLocalDate, tzOffsetMinutes, zonedWallTimeToUtc } from "./calendar";
+import {
+  CLUB_TIME_ZONE,
+  DEFAULT_EVENT_LOCATION,
+  clubLocalDate,
+  clubLocalToIso,
+  tzOffsetMinutes,
+  zonedWallTimeToUtc,
+} from "./calendar";
 import { formatDate, formatDateOnly } from "./dates";
 
 // ---- Pure helpers ----
@@ -3149,6 +3156,13 @@ export const managerAgentActions = [
   "delete_blog_post",
   "upload_blog_image",
   "start_blog_image_upload",
+  "list_calendar_events",
+  "list_calendar_rsvps",
+  "create_calendar_entry",
+  "edit_calendar_entry",
+  "cancel_calendar_entry",
+  "stop_calendar_repeat",
+  "delete_calendar_entry",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -3657,7 +3671,12 @@ export const rsvpResponses = ["going", "maybe", "declined"] as const;
 export type RsvpResponse = (typeof rsvpResponses)[number];
 
 const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a 24-hour HH:MM time.");
-const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date.");
+// A real date, not just the shape of one: "2026-11-31" would otherwise reach
+// the database and come back as a failure that reads as worth retrying.
+const dateOnly = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date.")
+  .refine((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d) || isCalendarDate(d), "That is not a real date.");
 const isoDateTime = z.string().datetime({ offset: true });
 
 /**
@@ -3686,24 +3705,28 @@ const calendarEntryDetails = {
 };
 
 /** A one-off entry: an absolute start and end. */
-export const calendarRepeatNeverSchema = z.object({
-  type: z.literal("never"),
-  starts_at: isoDateTime,
-  ends_at: isoDateTime,
-});
+export const calendarRepeatNeverSchema = z
+  .object({
+    type: z.literal("never"),
+    starts_at: isoDateTime,
+    ends_at: isoDateTime,
+  })
+  .strict();
 
 /**
  * A weekly entry: a club-local time of day on a weekday, from a first date,
  * either open-ended (`ends_on` omitted/null) or until a set date.
  */
-export const calendarRepeatWeeklySchema = z.object({
-  type: z.literal("weekly"),
-  weekday: z.number().int().min(0).max(6),
-  start_time: timeOfDay,
-  duration_minutes: z.number().int().positive().max(600),
-  starts_on: dateOnly,
-  ends_on: dateOnly.nullish(),
-});
+export const calendarRepeatWeeklySchema = z
+  .object({
+    type: z.literal("weekly"),
+    weekday: z.number().int().min(0).max(6),
+    start_time: timeOfDay,
+    duration_minutes: z.number().int().positive().max(600),
+    starts_on: dateOnly,
+    ends_on: dateOnly.nullish(),
+  })
+  .strict();
 
 /**
  * Manager: put something on the calendar. There is ONE kind of thing — an entry
@@ -3713,12 +3736,18 @@ export const calendarRepeatWeeklySchema = z.object({
  *
  * The date ordering rules live in a superRefine rather than on each member,
  * because a discriminated union's options must be plain objects.
+ *
+ * Every calendar schema is `.strict()`, because the manager agent API parses
+ * with them too: a misspelt `visibility` would otherwise be stripped and
+ * default to public, and a members-only entry would go on the calendar for
+ * everybody to see. The screen sends exactly these keys, so it never notices.
  */
 export const createCalendarEntrySchema = z
   .object({
     ...calendarEntryDetails,
     repeat: z.discriminatedUnion("type", [calendarRepeatNeverSchema, calendarRepeatWeeklySchema]),
   })
+  .strict()
   .superRefine((v, ctx) => {
     if (v.repeat.type === "never") {
       if (new Date(v.repeat.ends_at) < new Date(v.repeat.starts_at)) {
@@ -3739,6 +3768,65 @@ export const createCalendarEntrySchema = z
     }
   });
 export type CreateCalendarEntryInput = z.infer<typeof createCalendarEntrySchema>;
+
+/**
+ * Club wall-clock time with no offset: "YYYY-MM-DDTHH:MM", or with ":00" on the
+ * end. Any other seconds are not converted, so the schema refuses them rather
+ * than a class quietly starting 30 seconds from where the caller said.
+ */
+const CLUB_LOCAL_DATE_TIME = /^(\d{4}-\d{2}-\d{2})T([01]\d|2[0-3]):[0-5]\d(:00)?$/;
+
+/**
+ * An agent's `create_calendar_entry` params, given the two things the screen's
+ * Add form does before it posts (`agentCreateCalendarEntrySchema`):
+ *
+ * - A one-off's time with no offset is club time and is converted. Anything
+ *   else is passed through for `createCalendarEntrySchema` to judge, so an
+ *   impossible date ("2026-02-31T18:00") is refused there rather than rolled
+ *   over into March.
+ * - An omitted `location` is the club's gym, which the form pre-fills. An empty
+ *   one (or null) is still no location, as clearing the field on the form is.
+ */
+function agentCalendarEntryInput(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const input = { ...(raw as Record<string, unknown>) };
+  // null means "none", as it does on edit_calendar_entry, which is how an agent
+  // will have learnt to clear one. The screen's schema takes text only.
+  for (const key of ["description", "instructor_name", "location"]) {
+    if (input[key] === null) input[key] = "";
+  }
+  const withLocation = "location" in input ? input : { ...input, location: DEFAULT_EVENT_LOCATION };
+  const repeat = input.repeat;
+  if (!repeat || typeof repeat !== "object") return withLocation;
+  const r = repeat as Record<string, unknown>;
+  if (r.type !== "never") return withLocation;
+  const toInstant = (v: unknown) => {
+    if (typeof v !== "string") return v;
+    const m = CLUB_LOCAL_DATE_TIME.exec(v);
+    return m && isCalendarDate(m[1]) ? clubLocalToIso(v) : v;
+  };
+  return {
+    ...withLocation,
+    repeat: { ...r, starts_at: toInstant(r.starts_at), ends_at: toInstant(r.ends_at) },
+  };
+}
+
+/** `list_calendar_events` takes no params, and refuses any rather than ignore them. */
+export const agentListCalendarEventsSchema = z.object({}).strict();
+
+/**
+ * The manager agent's `create_calendar_entry`: the screen's own schema, after
+ * the two things its Add form does for a manager (`agentCalendarEntryInput`).
+ * A one-off's times may come the way a manager types them, as club wall-clock
+ * time with no offset ("2026-11-05T18:00"), read as Sydney time exactly as the
+ * screen reads its pickers: an agent left to work out whether Sydney is on
+ * +10:00 or +11:00 that week is an agent that puts a class an hour out every
+ * April and October. And an entry sent with no location is at the gym.
+ */
+export const agentCreateCalendarEntrySchema = z.preprocess(
+  agentCalendarEntryInput,
+  createCalendarEntrySchema,
+);
 
 /**
  * Manager: edit an entry's details. `scope` answers the question the UI asks
@@ -3763,7 +3851,7 @@ export const updateCalendarEntrySchema = z
 export type UpdateCalendarEntryInput = z.infer<typeof updateCalendarEntrySchema>;
 
 /** Manager: stop a repeating entry. Future dates go; history is untouched. */
-export const stopRepeatingSchema = z.object({ series_id: z.string().uuid() });
+export const stopRepeatingSchema = z.object({ series_id: z.string().uuid() }).strict();
 export type StopRepeatingInput = z.infer<typeof stopRepeatingSchema>;
 
 /**
@@ -3771,19 +3859,21 @@ export type StopRepeatingInput = z.infer<typeof stopRepeatingSchema>;
  * cancellation rather than the entry silently disappearing. `scope` asks the
  * same question as editing: just this date, or this and every future one?
  */
-export const cancelEventSchema = z.object({
-  scope: z.enum(["event", "series"]).default("event"),
-  id: z.string().uuid(),
-  cancelled: z.boolean(),
-});
+export const cancelEventSchema = z
+  .object({
+    scope: z.enum(["event", "series"]).default("event"),
+    id: z.string().uuid(),
+    cancelled: z.boolean(),
+  })
+  .strict();
 export type CancelEventInput = z.infer<typeof cancelEventSchema>;
 
 /** Manager: delete an event outright (use cancel to keep the record). */
-export const deleteEventSchema = z.object({ id: z.string().uuid() });
+export const deleteEventSchema = z.object({ id: z.string().uuid() }).strict();
 export type DeleteEventInput = z.infer<typeof deleteEventSchema>;
 
 /** Manager: list who responded to one event. */
-export const eventRsvpsSchema = z.object({ event_id: z.string().uuid() });
+export const eventRsvpsSchema = z.object({ event_id: z.string().uuid() }).strict();
 export type EventRsvpsInput = z.infer<typeof eventRsvpsSchema>;
 
 /** Member: set (upsert) an RSVP to an event. */
@@ -4165,11 +4255,22 @@ const blogSlug = z
   .max(200)
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Use lowercase letters, digits and hyphens only.");
 
+/** The longest a post's own search-engine title may be. Search engines show
+ * about 60 characters (`BLOG_SEO_TITLE_SHOWN`); this is the ceiling, matching
+ * the column's CHECK. */
+export const BLOG_SEO_TITLE_MAX = 100;
+/** The longest a post's own search-engine description may be, matching the
+ * column's CHECK. Search engines show about 155 (`BLOG_SEO_DESCRIPTION_SHOWN`). */
+export const BLOG_SEO_DESCRIPTION_MAX = 300;
+
 /**
  * Manager: create or edit a post. `slug` is optional — when blank, the server
  * derives one from the title prefixed with today's date, `YYYY-MM-DD-...`
  * (`defaultBlogSlug` in `src/lib/slug.ts`) and resolves any collision by
  * appending `-2`, `-3`, etc.
+ *
+ * `seo_title` and `seo_description` are optional too, and a blank one is
+ * stored as NULL and means the default (`blogPostSeo` in `src/lib/seo.ts`).
  */
 export const blogPostSchema = z.object({
   id: z.string().uuid().optional(),
@@ -4179,6 +4280,21 @@ export const blogPostSchema = z.object({
   body_md: z.string().trim().min(1).max(50000),
   cover_image_path: z.string().trim().max(500).optional().or(z.literal("")),
   status: z.enum(blogPostStatuses).default("draft"),
+  seo_title: z
+    .string()
+    .trim()
+    .max(BLOG_SEO_TITLE_MAX, `Keep the search title to ${BLOG_SEO_TITLE_MAX} characters or fewer.`)
+    .optional()
+    .or(z.literal("")),
+  seo_description: z
+    .string()
+    .trim()
+    .max(
+      BLOG_SEO_DESCRIPTION_MAX,
+      `Keep the search description to ${BLOG_SEO_DESCRIPTION_MAX} characters or fewer.`,
+    )
+    .optional()
+    .or(z.literal("")),
 });
 export type BlogPostInput = z.infer<typeof blogPostSchema>;
 
@@ -4275,7 +4391,9 @@ export type AgentGetBlogPostInput = z.infer<typeof agentGetBlogPostSchema>;
  *   says otherwise.
  * - `slug` cannot be blanked on a change: the composer re-derives a blank one,
  *   which would move a live post to a new address and break every link to it.
- * - `excerpt: ""` and `cover_image_path: ""` clear those, as on the form.
+ * - `excerpt: ""`, `cover_image_path: ""`, `seo_title: ""` and
+ *   `seo_description: ""` clear those, as on the form. The two search fields
+ *   also take null for that, since that is how they are read back.
  * - `cover_image_path` is a storage path from `upload_blog_image`, not an
  *   address. An address stored there would render as a broken image.
  */
@@ -4293,6 +4411,14 @@ export const agentSaveBlogPostSchema = z
       "Pass the `path` that upload_blog_image returned, not the image's web address.",
     ),
     status: z.enum(blogPostStatuses).optional(),
+    // `get_blog_post` reports a post on the defaults as null, so null is
+    // accepted here and means the same as "": back to the default. Without
+    // this, sending back what was read is a 400.
+    seo_title: z.preprocess((v) => (v === null ? "" : v), blogPostSchema.shape.seo_title),
+    seo_description: z.preprocess(
+      (v) => (v === null ? "" : v),
+      blogPostSchema.shape.seo_description,
+    ),
   })
   .strict()
   .superRefine((value, ctx) => {

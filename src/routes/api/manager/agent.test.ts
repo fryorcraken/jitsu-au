@@ -6,6 +6,7 @@
 // true of createServerFn handlers.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashToken } from "@/lib/manager-api-tokens";
+import { WEEKDAY_LABELS } from "@/lib/calendar";
 import { AGENT_MANIFEST } from "@/lib/manager-agent";
 
 type Result<T> = { data: T | null; error: { message: string } | null };
@@ -2684,4 +2685,465 @@ describe("save_membership_plan with announce", () => {
     // A plan this call created has to be retried by id, or it is created again.
     expect(body.error.message).toMatch(/error\.details\.id/);
   });
+});
+
+// ---- The calendar ----
+//
+// The shared functions' own rules (what counts as already on the calendar,
+// which dates a weekly run holds, what a delete refuses) are pinned in
+// calendar.functions.test.ts. What the route owns, and what is pinned here, is
+// what an agent meets on the way in and on the way out: the club-time reading
+// and the gym default it applies before the screen's own schema, the params it
+// refuses rather than ignores, and the status and envelope each refusal becomes,
+// details included, because those are what an agent branches on.
+describe("manager agent route: the calendar", () => {
+  const ONE_OFF = "a1111111-1111-4111-8111-111111111111";
+  const QUIET_ONE_OFF = "a2222222-2222-4222-8222-222222222222";
+  const WEEKLY_DATE = "a3333333-3333-4333-8333-333333333333";
+  const SERIES = "a4444444-4444-4444-8444-444444444444";
+  const MISSING = "a5555555-5555-4555-8555-555555555555";
+  const DB_TEXT = 'relation "public.calendar_events" does not exist';
+
+  type Row = Record<string, unknown>;
+  type Write = { op: "insert" | "delete"; table: string; values: unknown };
+
+  /** A one-off date in Sydney daylight time: Thursday 3 December, 6pm to 7:30pm. */
+  const event = (id: string, over: Row = {}): Row => ({
+    id,
+    series_id: null,
+    title: "Grading",
+    description: null,
+    instructor_name: null,
+    location: null,
+    starts_at: "2026-12-03T07:00:00.000Z",
+    ends_at: "2026-12-03T08:30:00.000Z",
+    status: "scheduled",
+    visibility: "public",
+    invite_only: false,
+    ...over,
+  });
+
+  /** The way a manager says it, in club time, with no location. */
+  const ONE_OFF_PARAMS = {
+    title: "Grading",
+    repeat: { type: "never", starts_at: "2026-12-03T18:00", ends_at: "2026-12-03T19:30" },
+  };
+
+  /**
+   * In-memory calendar tables. It evaluates `eq`, `in`, `gte`, `lte`, `not ...
+   * is null` and the `count` + `head` select, so a refusal comes from the row
+   * the request names: a fake that answered every read with the same row would
+   * pass the weekly-date case with the one-off's id, and count another date's
+   * check-ins against this one. Order and limit are no-ops. Every table reached
+   * goes into `touched` and every insert and delete into `writes`, so a refusal
+   * can be shown to have read, or written, nothing. A new row's id is
+   * `<table>#<n>`, so a test can tell a weekly entry's id from its dates'.
+   */
+  function fakeCalendar(
+    seed: Record<string, Row[]> = {},
+    opts: { fail?: Record<string, string> } = {},
+  ) {
+    const tables: Record<string, Row[]> = {};
+    for (const [t, rows] of Object.entries(seed)) tables[t] = rows.map((r) => ({ ...r }));
+    const touched: string[] = [];
+    const writes: Write[] = [];
+    const made = new Map<string, number>();
+    return {
+      tables,
+      touched,
+      writes,
+      db: {
+        from: (table: string) => {
+          touched.push(table);
+          const filters: ((r: Row) => boolean)[] = [];
+          let head = false;
+          let deleting = false;
+          let inserted: Row[] | null = null;
+          const result = () => {
+            const fail = opts.fail?.[table];
+            if (fail) return { data: null, count: null, error: { message: fail } };
+            if (inserted) return { data: inserted, count: inserted.length, error: null };
+            const rows = (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
+            if (deleting) {
+              writes.push({ op: "delete", table, values: rows.map((r) => r.id) });
+              tables[table] = (tables[table] ?? []).filter((r) => !rows.includes(r));
+              return { data: null, count: null, error: null };
+            }
+            return { data: head ? null : rows, count: rows.length, error: null };
+          };
+          const one = () => {
+            const r = result();
+            return Promise.resolve({ data: r.data?.[0] ?? null, error: r.error });
+          };
+          const b = {
+            select: (_cols?: string, o?: { head?: boolean }) => {
+              if (o?.head) head = true;
+              return b;
+            },
+            insert: (values: Row | Row[]) => {
+              writes.push({ op: "insert", table, values });
+              // What the database fills in: an id, and for a date, that it is on.
+              inserted = (Array.isArray(values) ? values : [values]).map((v) => {
+                const n = (made.get(table) ?? 0) + 1;
+                made.set(table, n);
+                return {
+                  id: `${table}#${n}`,
+                  ...(table === "calendar_events" && { series_id: null, status: "scheduled" }),
+                  ...v,
+                };
+              });
+              (tables[table] ??= []).push(...inserted);
+              return b;
+            },
+            delete: () => {
+              deleting = true;
+              return b;
+            },
+            eq: (col: string, val: unknown) => {
+              filters.push((r) => r[col] === val);
+              return b;
+            },
+            neq: (col: string, val: unknown) => {
+              filters.push((r) => r[col] !== val);
+              return b;
+            },
+            in: (col: string, vals: unknown[]) => {
+              filters.push((r) => vals.includes(r[col]));
+              return b;
+            },
+            gte: (col: string, val: string) => {
+              filters.push((r) => String(r[col]) >= val);
+              return b;
+            },
+            lte: (col: string, val: string) => {
+              filters.push((r) => String(r[col]) <= val);
+              return b;
+            },
+            not: (col: string) => {
+              filters.push((r) => r[col] != null);
+              return b;
+            },
+            order: () => b,
+            limit: () => b,
+            maybeSingle: one,
+            single: one,
+            then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+              Promise.resolve().then(result).then(resolve, reject),
+          };
+          return b;
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // The shared function answers an edit with nothing in it as a success that
+  // changed nothing, which the screen can never send. From an agent it is a
+  // field left out or misplaced, and a 200 would read as "done".
+  it("refuses an edit that names no field as 400, before touching the calendar", async () => {
+    const fake = fakeCalendar({ calendar_events: [event(ONE_OFF)] });
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "edit_calendar_entry",
+      params: { scope: "event", id: ONE_OFF },
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("invalid_params");
+    expect(body.error.message).toMatch(/Nothing to change/);
+    expect(fake.touched).toEqual([]);
+  });
+
+  describe("delete_calendar_entry", () => {
+    const seed = () => ({
+      calendar_events: [
+        event(ONE_OFF),
+        event(QUIET_ONE_OFF, { title: "Social" }),
+        // Far enough ahead to stay a date still to come, of a repeat still
+        // running, which is the one kind of weekly date that cannot be deleted.
+        event(WEEKLY_DATE, {
+          series_id: SERIES,
+          title: "Evening class",
+          starts_at: "2099-12-03T07:00:00.000Z",
+          ends_at: "2099-12-03T08:30:00.000Z",
+        }),
+      ],
+      calendar_series: [{ id: SERIES, is_active: true }],
+      session_checkins: [
+        { id: "c1", event_id: ONE_OFF },
+        { id: "c2", event_id: ONE_OFF },
+        // Another date's check-in, which must not count against either one-off.
+        { id: "c3", event_id: WEEKLY_DATE },
+      ],
+    });
+
+    // Each refusal tells the agent its next move: 404 is "list again", 409 with
+    // a series_id is "stop the repeat or cancel the date". Collapsed into one
+    // status, an agent cannot choose.
+    it.each([
+      ["a date that is not there", MISSING, 404, "not_found", undefined],
+      ["one date of a weekly entry", WEEKLY_DATE, 409, "repeating_date", { series_id: SERIES }],
+    ])("refuses %s, deleting nothing", async (_what, id, status, code, details) => {
+      const fake = fakeCalendar(seed());
+      currentAdmin = fake.db;
+      const res = await post({ action: "delete_calendar_entry", params: { id } });
+      expect(res.status).toBe(status);
+      const body = await res.json();
+      expect(body.error.code).toBe(code);
+      expect(body.error.details).toEqual(details);
+      expect(fake.writes).toEqual([]);
+      expect(fake.tables.calendar_events).toHaveLength(3);
+    });
+
+    // The control for the refusals above: the fake can delete, so "deleted
+    // nothing" there is a finding rather than something it could not do.
+    it("deletes a one-off nobody was checked in to, logged under the token's owner", async () => {
+      const audit = vi.spyOn(console, "info").mockImplementation(() => {});
+      const fake = fakeCalendar(seed());
+      currentAdmin = fake.db;
+      const res = await post({ action: "delete_calendar_entry", params: { id: QUIET_ONE_OFF } });
+      expect(res.status).toBe(200);
+      expect((await res.json()).result).toEqual({
+        deleted: true,
+        id: QUIET_ONE_OFF,
+        checkins_removed: 0,
+      });
+      expect(fake.writes).toEqual([
+        { op: "delete", table: "calendar_events", values: [QUIET_ONE_OFF] },
+      ]);
+      expect(audit).toHaveBeenCalledWith(
+        "[agent.delete_calendar_entry] audit",
+        JSON.stringify({ eventId: QUIET_ONE_OFF, checkinsRemoved: 0, actor: TOKEN_OWNER }),
+      );
+    });
+
+    // Once the class is gone its check-ins go too, as clean-up, and the agent
+    // is told how many so it can tell the manager.
+    it("deletes a one-off people were checked in to, and says how many check-ins went", async () => {
+      vi.spyOn(console, "info").mockImplementation(() => {});
+      const fake = fakeCalendar(seed());
+      currentAdmin = fake.db;
+      const res = await post({ action: "delete_calendar_entry", params: { id: ONE_OFF } });
+      expect(res.status).toBe(200);
+      expect((await res.json()).result).toEqual({
+        deleted: true,
+        id: ONE_OFF,
+        checkins_removed: 2,
+      });
+      expect(fake.writes).toEqual([{ op: "delete", table: "calendar_events", values: [ONE_OFF] }]);
+    });
+  });
+
+  describe("create_calendar_entry", () => {
+    // Sydney is on daylight time (+11:00) in December. An agent left to work
+    // the offset out for itself would be right for half the year and an hour
+    // out for the other half.
+    it("reads a one-off's times as club time, and puts it at the gym unless told otherwise", async () => {
+      const { DEFAULT_EVENT_LOCATION } = await import("@/lib/calendar");
+      // A different class at the same moment is not the same entry, so it must
+      // not stop this one going on.
+      const fake = fakeCalendar({
+        calendar_events: [event(WEEKLY_DATE, { series_id: SERIES, title: "Evening class" })],
+      });
+      currentAdmin = fake.db;
+      const res = await post({ action: "create_calendar_entry", params: ONE_OFF_PARAMS });
+      expect(res.status).toBe(200);
+      expect(fake.writes).toEqual([
+        {
+          op: "insert",
+          table: "calendar_events",
+          values: {
+            title: "Grading",
+            description: null,
+            instructor_name: null,
+            location: DEFAULT_EVENT_LOCATION,
+            visibility: "public",
+            invite_only: false,
+            created_by: TOKEN_OWNER,
+            starts_at: "2026-12-03T07:00:00.000Z",
+            ends_at: "2026-12-03T08:30:00.000Z",
+          },
+        },
+      ]);
+      expect((await res.json()).result).toEqual({
+        repeats: false,
+        event_id: "calendar_events#1",
+        series_id: null,
+        generated: 1,
+        dates: [
+          expect.objectContaining({
+            id: "calendar_events#1",
+            repeats: false,
+            starts_at: "2026-12-03T07:00:00.000Z",
+            starts_local: "2026-12-03T18:00",
+            ends_local: "2026-12-03T19:30",
+            weekday: WEEKDAY_LABELS[4],
+            location: DEFAULT_EVENT_LOCATION,
+          }),
+        ],
+      });
+    });
+
+    // A retry of a create that never heard back is the usual way this happens.
+    // The details name the date already there, so the agent can report it
+    // rather than add a second one under a new title.
+    it("refuses a one-off already on the calendar as 409, naming the date, adding nothing", async () => {
+      const fake = fakeCalendar({ calendar_events: [event(ONE_OFF)] });
+      currentAdmin = fake.db;
+      const res = await post({ action: "create_calendar_entry", params: ONE_OFF_PARAMS });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.error.code).toBe("already_on_calendar");
+      expect(body.error.details).toEqual({
+        event_id: ONE_OFF,
+        series_id: null,
+        status: "scheduled",
+      });
+      expect(fake.writes).toEqual([]);
+    });
+
+    describe("a weekly entry", () => {
+      // Friday 30 October in Sydney: the last Thursday of a term ending on the
+      // 29th was yesterday. Dates are only generated from today on, so "today"
+      // decides whether this entry would ever show up.
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-10-30T01:00:00Z"));
+      });
+
+      const weekly = (ends_on: string) => ({
+        title: "Evening class",
+        repeat: {
+          type: "weekly",
+          weekday: 4,
+          start_time: "18:00",
+          duration_minutes: 90,
+          starts_on: "2026-07-23",
+          ends_on,
+        },
+      });
+
+      // Saved, it would be reported as added and never appear.
+      it("refuses one whose last date has passed as 422 no_dates, before reading anything", async () => {
+        const fake = fakeCalendar();
+        currentAdmin = fake.db;
+        const res = await post({ action: "create_calendar_entry", params: weekly("2026-10-29") });
+        expect(res.status).toBe(422);
+        expect((await res.json()).error.code).toBe("no_dates");
+        expect(fake.touched).toEqual([]);
+      });
+
+      // The control: a week later and one Thursday is still to come. It also
+      // pins the naming the route owns: a weekly entry's id is a series_id,
+      // never an event_id, so it cannot be handed to a per-date action.
+      it("adds one with a date still to come, reported by its series_id", async () => {
+        const fake = fakeCalendar();
+        currentAdmin = fake.db;
+        const res = await post({ action: "create_calendar_entry", params: weekly("2026-11-05") });
+        expect(res.status).toBe(200);
+        expect((await res.json()).result).toEqual({
+          repeats: true,
+          event_id: null,
+          series_id: "calendar_series#1",
+          generated: 1,
+          dates: [
+            expect.objectContaining({
+              id: "calendar_events#1",
+              series_id: "calendar_series#1",
+              repeats: true,
+              starts_local: "2026-11-05T18:00",
+              weekday: WEEKDAY_LABELS[4],
+            }),
+          ],
+        });
+      });
+    });
+  });
+
+  describe("list_calendar_events", () => {
+    // Invite only is a badge on a date and hides nothing (docs/calendar.md), so
+    // what an agent is told is the date's own flag, the one edit_calendar_entry
+    // writes and the calendar shows.
+    it("reports each date's own invite only badge, whatever its weekly entry says", async () => {
+      const BADGED = "a6666666-6666-4666-8666-666666666666";
+      const fake = fakeCalendar({
+        // Not active, so the horizon top-up has nothing to add.
+        calendar_series: [{ id: SERIES, invite_only: true, is_active: false }],
+        calendar_events: [
+          event(WEEKLY_DATE, { series_id: SERIES, title: "Evening class" }),
+          event(BADGED, { series_id: SERIES, title: "Evening class", invite_only: true }),
+          event(ONE_OFF),
+        ],
+        event_rsvps: [],
+      });
+      currentAdmin = fake.db;
+      const res = await post({ action: "list_calendar_events", params: {} });
+      expect(res.status).toBe(200);
+      const { events } = (await res.json()).result as { events: Row[] };
+      expect(Object.fromEntries(events.map((e) => [e.id, e.invite_only]))).toEqual({
+        [WEEKLY_DATE]: false,
+        [BADGED]: true,
+        [ONE_OFF]: false,
+      });
+      for (const e of events) expect(e).not.toHaveProperty("series_invite_only");
+    });
+  });
+
+  // Every calendar schema is strict because the screen's would otherwise drop a
+  // misspelt field and answer 200 for a change it never made (a misspelt
+  // `visibility` puts an entry meant for members up for everybody to see, a
+  // misspelt `invite_only` leaves its badge off); and list_calendar_events
+  // takes nothing, so a `from` an agent hoped would narrow the list must not
+  // come back as the whole list, read as filtered.
+  it.each([
+    [
+      "a misspelt field on create_calendar_entry",
+      "create_calendar_entry",
+      { ...ONE_OFF_PARAMS, invite_ony: true },
+      "invite_ony",
+    ],
+    ["any param on list_calendar_events", "list_calendar_events", { from: "2026-11-01" }, "from"],
+  ])(
+    "refuses %s as 400 invalid_params, naming it, before reading anything",
+    async (_what, action, params, key) => {
+      const fake = fakeCalendar({ calendar_events: [event(ONE_OFF)] });
+      currentAdmin = fake.db;
+      const res = await post({ action, params });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe("invalid_params");
+      expect(JSON.stringify(body.error.issues)).toContain(key);
+      expect(fake.touched).toEqual([]);
+    },
+  );
+
+  // A database error's own text names tables and columns. It belongs in the
+  // server log, not in a response a token holder's agent may repeat anywhere.
+  it.each([
+    ["list_calendar_events", {}],
+    ["delete_calendar_entry", { id: ONE_OFF }],
+  ])(
+    "answers a database failure in %s as 500 db_error, without the database's words",
+    async (action, params) => {
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+      currentAdmin = fakeCalendar(
+        { calendar_events: [event(ONE_OFF)] },
+        { fail: { calendar_events: DB_TEXT } },
+      ).db;
+      const res = await post({ action, params });
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error.code).toBe("db_error");
+      expect(JSON.stringify(body)).not.toContain("calendar_events");
+      expect(JSON.stringify(body)).not.toContain("does not exist");
+      expect(logged).toHaveBeenCalledWith("[agent] db_error:", DB_TEXT);
+    },
+  );
 });

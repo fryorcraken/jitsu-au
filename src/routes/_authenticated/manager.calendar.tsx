@@ -15,8 +15,8 @@ import {
   CLUB_TIME_ZONE,
   DEFAULT_EVENT_LOCATION,
   WEEKDAY_LABELS,
+  clubLocalToIso,
   defaultEndForStart,
-  zonedWallTimeToUtc,
 } from "@/lib/calendar";
 import {
   cancelEvent,
@@ -63,17 +63,6 @@ type RsvpRow = {
 type Scope = "event" | "series";
 
 const TZ = CLUB_TIME_ZONE;
-
-/**
- * Read a `datetime-local` value ("YYYY-MM-DDTHH:MM") as CLUB wall-clock time.
- * `new Date(value)` would parse it in the browser's zone, so a manager working
- * from a laptop set to UTC would save 18:00 and see it listed back as 5:00 am.
- * The list and the public page both render in club time.
- */
-function clubLocalToIso(value: string): string {
-  const [date, time] = value.split("T");
-  return zonedWallTimeToUtc(date, time.slice(0, 5), TZ).toISOString();
-}
 
 function fmt(iso: string): string {
   return new Date(iso).toLocaleString("en-AU", {
@@ -313,7 +302,7 @@ function ManagerCalendarPage() {
     const ok = await confirm({
       title: `Stop "${ev.title}" repeating?`,
       description:
-        "Every future date comes off the calendar. Dates that have already happened stay on the record, with their check-ins.",
+        "Every future date comes off the calendar, along with anyone already checked in to one. Dates that have already happened stay on the record, with their check-ins.",
       confirmLabel: "Stop repeating",
     });
     if (!ok) return;
@@ -333,7 +322,7 @@ function ManagerCalendarPage() {
     const ok = await confirm({
       title: `Delete "${ev.title}"?`,
       description:
-        "This takes it off the calendar completely, as though it had never been on it. There is no way to get it back.",
+        "This takes it off the calendar completely, as though it had never been on it, along with anyone checked in to it. There is no way to get it back.",
       footnote: "To call the class off and keep the record of it, cancel it instead.",
       confirmLabel: "Delete",
       destructive: true,
@@ -341,7 +330,12 @@ function ManagerCalendarPage() {
     if (!ok) return;
     setBusy(true);
     try {
-      await removeEvent({ data: { id: ev.id } });
+      const res = await removeEvent({ data: { id: ev.id } });
+      toast.success(
+        res.checkins_removed
+          ? `Deleted, with ${res.checkins_removed} check-in${res.checkins_removed === 1 ? "" : "s"}.`
+          : "Deleted.",
+      );
       await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete the entry");

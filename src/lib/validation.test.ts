@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_EVENT_LOCATION } from "./calendar";
 import {
+  agentCreateCalendarEntrySchema,
+  agentListCalendarEventsSchema,
   agentGetBlogPostSchema,
   agentSaveBlogPostSchema,
   agentUploadBlogImageSchema,
@@ -51,6 +54,8 @@ import {
   updateAnnotationSchema,
   undoCheckInSchema,
   createCalendarEntrySchema,
+  deleteEventSchema,
+  eventRsvpsSchema,
   rsvpSchema,
   updateCalendarEntrySchema,
   decodeDataUrlPng,
@@ -220,6 +225,34 @@ describe("blogPostSchema", () => {
     expect(
       blogPostSchema.parse({ title: "Hello", body_md: "Body", slug: "hello-world" }).slug,
     ).toBe("hello-world");
+  });
+
+  it("takes an optional search title and description, blank meaning the default", () => {
+    const base = { title: "Hello", body_md: "Body" };
+    expect(blogPostSchema.parse(base).seo_title).toBeUndefined();
+    expect(blogPostSchema.parse({ ...base, seo_title: "", seo_description: "" })).toMatchObject({
+      seo_title: "",
+      seo_description: "",
+    });
+    expect(blogPostSchema.parse({ ...base, seo_title: "  Grading day  " }).seo_title).toBe(
+      "Grading day",
+    );
+  });
+
+  // The same ceilings as the columns' CHECKs, so an over-long one is refused
+  // with a sentence rather than as a database error.
+  it("refuses a search title over 100 characters or a description over 300", () => {
+    const base = { title: "Hello", body_md: "Body" };
+    expect(blogPostSchema.safeParse({ ...base, seo_title: "x".repeat(100) }).success).toBe(true);
+    const title = blogPostSchema.safeParse({ ...base, seo_title: "x".repeat(101) });
+    expect(title.success).toBe(false);
+    expect(title.error?.issues[0].message).toMatch(/search title/);
+    expect(blogPostSchema.safeParse({ ...base, seo_description: "x".repeat(300) }).success).toBe(
+      true,
+    );
+    expect(blogPostSchema.safeParse({ ...base, seo_description: "x".repeat(301) }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -2433,6 +2466,32 @@ describe("createCalendarEntrySchema", () => {
     }
   });
 
+  // Left to the database, an impossible date comes back as a failure that
+  // reads as worth retrying, and a retry fails the same way.
+  it.each([
+    ["starts_on", { starts_on: "2026-11-31" }],
+    ["ends_on", { starts_on: "2026-01-05", ends_on: "2026-02-30" }],
+  ])("refuses a weekly %s that is not a real date, and says so there", (field, dates) => {
+    const result = createCalendarEntrySchema.safeParse({
+      ...details,
+      repeat: { ...weekly, ...dates },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(
+        expect.objectContaining({ path: ["repeat", field], message: "That is not a real date." }),
+      );
+    }
+  });
+
+  it("still accepts the last day of a short month, and 29 February in a leap year", () => {
+    for (const ends_on of ["2026-11-30", "2027-02-28", "2028-02-29"]) {
+      expect(
+        createCalendarEntrySchema.safeParse({ ...details, repeat: { ...weekly, ends_on } }).success,
+      ).toBe(true);
+    }
+  });
+
   it("will not accept weekly fields on a one-off, or the reverse", () => {
     // The discriminated union is what makes these mistakes unrepresentable.
     expect(
@@ -2457,6 +2516,213 @@ describe("createCalendarEntrySchema", () => {
       createCalendarEntrySchema.safeParse({ ...details, visibility: "secret", repeat: once })
         .success,
     ).toBe(false);
+  });
+
+  // The manager agent API parses with this schema too. Stripped rather than
+  // refused, a misspelt visibility would default to public and put a
+  // members-only entry in front of everybody (a misspelt invite_only would
+  // quietly leave its badge off).
+  it("refuses an unknown key, at the top level and inside either repeat", () => {
+    expect(
+      createCalendarEntrySchema.safeParse({ ...details, invite_ony: true, repeat: once }).success,
+    ).toBe(false);
+    expect(
+      createCalendarEntrySchema.safeParse({ ...details, repeat: { ...once, weekday: 1 } }).success,
+    ).toBe(false);
+    expect(
+      createCalendarEntrySchema.safeParse({
+        ...details,
+        repeat: { ...weekly, until: "2026-12-01" },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+// What an agent sends to create_calendar_entry: the screen's own schema, after
+// the two things the screen's Add form does for a manager.
+describe("agentCreateCalendarEntrySchema", () => {
+  const details = { title: "Beginner Gi" };
+  const weekly = {
+    type: "weekly" as const,
+    weekday: 1,
+    start_time: "18:00",
+    duration_minutes: 90,
+    starts_on: "2026-07-06",
+  };
+  const oneOff = (starts_at: string, ends_at: string) => ({
+    ...details,
+    repeat: { type: "never" as const, starts_at, ends_at },
+  });
+
+  // Sydney is +11:00 in November and +10:00 in June. An agent left to pick the
+  // offset itself puts a class an hour out every April and October.
+  it("reads a one-off's times with no offset as club time, in either season", () => {
+    const summer = agentCreateCalendarEntrySchema.safeParse(
+      oneOff("2026-11-05T18:00", "2026-11-05T19:30"),
+    );
+    expect(summer.success && summer.data.repeat).toEqual({
+      type: "never",
+      starts_at: "2026-11-05T07:00:00.000Z",
+      ends_at: "2026-11-05T08:30:00.000Z",
+    });
+    const winter = agentCreateCalendarEntrySchema.safeParse(
+      oneOff("2026-06-04T18:00", "2026-06-04T19:30"),
+    );
+    expect(winter.success && winter.data.repeat).toEqual({
+      type: "never",
+      starts_at: "2026-06-04T08:00:00.000Z",
+      ends_at: "2026-06-04T09:30:00.000Z",
+    });
+  });
+
+  // Converted, they would be dropped, and the class would start 30 seconds
+  // from where the caller said. Refused instead.
+  it("refuses seconds other than :00 on a time with no offset", () => {
+    expect(
+      agentCreateCalendarEntrySchema.safeParse(oneOff("2026-11-05T18:00:30", "2026-11-05T19:30"))
+        .success,
+    ).toBe(false);
+  });
+
+  it("accepts :00 seconds on a time with no offset", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse(
+      oneOff("2026-11-05T18:00:00", "2026-11-05T19:30:00"),
+    );
+    expect(result.success && result.data.repeat).toMatchObject({
+      starts_at: "2026-11-05T07:00:00.000Z",
+      ends_at: "2026-11-05T08:30:00.000Z",
+    });
+  });
+
+  it("passes an ISO time with an offset or Z through unchanged", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse(
+      oneOff("2026-11-05T18:00:00+11:00", "2026-11-05T08:30:00Z"),
+    );
+    expect(result.success && result.data.repeat).toMatchObject({
+      starts_at: "2026-11-05T18:00:00+11:00",
+      ends_at: "2026-11-05T08:30:00Z",
+    });
+  });
+
+  // new Date() would quietly read 31 February as 3 March, and the class would
+  // go on the calendar on a day nobody asked for.
+  it("refuses an impossible date rather than rolling it over", () => {
+    expect(
+      agentCreateCalendarEntrySchema.safeParse(oneOff("2026-02-31T18:00", "2026-02-31T19:00"))
+        .success,
+    ).toBe(false);
+  });
+
+  it("refuses an hour that does not exist", () => {
+    expect(
+      agentCreateCalendarEntrySchema.safeParse(oneOff("2026-11-05T24:00", "2026-11-06T01:00"))
+        .success,
+    ).toBe(false);
+  });
+
+  it("still refuses a one-off that ends before it starts", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse(
+      oneOff("2026-11-05T18:00", "2026-11-05T17:00"),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path.includes("ends_at"))).toBe(true);
+    }
+  });
+
+  // The screen's form pre-fills the gym, so an agent that leaves location out
+  // gets what a manager who did not touch the field gets.
+  it("puts an entry sent with no location at the gym", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse(
+      oneOff("2026-11-05T18:00", "2026-11-05T19:30"),
+    );
+    expect(result.success && result.data.location).toBe(DEFAULT_EVENT_LOCATION);
+  });
+
+  it("keeps an empty location as no location, as clearing the field does", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse({
+      ...oneOff("2026-11-05T18:00", "2026-11-05T19:30"),
+      location: "",
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.location).toBeUndefined();
+  });
+
+  // edit_calendar_entry clears a field with null, so an agent will send it
+  // here too. Refused, the whole create would fail on a valid entry.
+  it("takes null as none for location, description and instructor, as edit does", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse({
+      ...oneOff("2026-11-05T18:00", "2026-11-05T19:30"),
+      location: null,
+      description: null,
+      instructor_name: null,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.location).toBeUndefined();
+    expect(result.success && result.data.description).toBeUndefined();
+    expect(result.success && result.data.instructor_name).toBeUndefined();
+  });
+
+  it("keeps a location it is given", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse({
+      ...oneOff("2026-11-05T18:00", "2026-11-05T19:30"),
+      location: "Alumni Green",
+    });
+    expect(result.success && result.data.location).toBe("Alumni Green");
+  });
+
+  // A weekly entry's start_time is already club time, so there is nothing to
+  // convert: only the location default applies.
+  it("leaves a weekly entry alone apart from the location", () => {
+    const result = agentCreateCalendarEntrySchema.safeParse({ ...details, repeat: weekly });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.repeat).toEqual(weekly);
+    expect(result.success && result.data.location).toBe(DEFAULT_EVENT_LOCATION);
+  });
+
+  it("refuses an unknown key, at the top level and inside the repeat", () => {
+    expect(
+      agentCreateCalendarEntrySchema.safeParse({
+        ...oneOff("2026-11-05T18:00", "2026-11-05T19:30"),
+        invite_ony: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      agentCreateCalendarEntrySchema.safeParse({
+        ...details,
+        repeat: {
+          type: "never",
+          starts_at: "2026-11-05T18:00",
+          ends_at: "2026-11-05T19:30",
+          tz: "+11:00",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentCreateCalendarEntrySchema.safeParse({ ...details, repeat: { ...weekly, every: 2 } })
+        .success,
+    ).toBe(false);
+  });
+
+  it("refuses what is not an object, rather than throwing", () => {
+    expect(agentCreateCalendarEntrySchema.safeParse(null).success).toBe(false);
+    expect(agentCreateCalendarEntrySchema.safeParse([]).success).toBe(false);
+    expect(agentCreateCalendarEntrySchema.safeParse({ ...details }).success).toBe(false);
+    expect(agentCreateCalendarEntrySchema.safeParse({ ...details, repeat: "weekly" }).success).toBe(
+      false,
+    );
+  });
+});
+
+// list_calendar_events takes nothing. A `from` it quietly ignored would hand
+// back the whole list for the agent to read as the filtered one.
+describe("agentListCalendarEventsSchema", () => {
+  it("accepts no params", () => {
+    expect(agentListCalendarEventsSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("refuses a filter it does not have, rather than ignoring it", () => {
+    expect(agentListCalendarEventsSchema.safeParse({ from: "2026-11-01" }).success).toBe(false);
   });
 });
 
@@ -2523,12 +2789,53 @@ describe("cancelEventSchema", () => {
     );
     expect(cancelEventSchema.safeParse({ scope: "all", id, cancelled: true }).success).toBe(false);
   });
+
+  // A misspelt `cancelled` would otherwise be dropped, and the call refused for
+  // the wrong reason; a misspelt `scope` would quietly default to one date.
+  it("refuses an unknown key", () => {
+    const id = crypto.randomUUID();
+    expect(cancelEventSchema.safeParse({ id, cancelled: true, scop: "series" }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe("stopRepeatingSchema", () => {
   it("takes the series, not one of its dates", () => {
     expect(stopRepeatingSchema.safeParse({ series_id: crypto.randomUUID() }).success).toBe(true);
     expect(stopRepeatingSchema.safeParse({ series_id: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("refuses an unknown key", () => {
+    expect(
+      stopRepeatingSchema.safeParse({ series_id: crypto.randomUUID(), from: "2026-11-05" }).success,
+    ).toBe(false);
+  });
+});
+
+describe("deleteEventSchema", () => {
+  it("takes one date's id", () => {
+    expect(deleteEventSchema.safeParse({ id: crypto.randomUUID() }).success).toBe(true);
+    expect(deleteEventSchema.safeParse({ id: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("refuses an unknown key", () => {
+    expect(deleteEventSchema.safeParse({ id: crypto.randomUUID(), scope: "series" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("eventRsvpsSchema", () => {
+  it("takes one date's id", () => {
+    expect(eventRsvpsSchema.safeParse({ event_id: crypto.randomUUID() }).success).toBe(true);
+    expect(eventRsvpsSchema.safeParse({ event_id: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("refuses an unknown key", () => {
+    expect(
+      eventRsvpsSchema.safeParse({ event_id: crypto.randomUUID(), response: "going" }).success,
+    ).toBe(false);
   });
 });
 
@@ -3394,6 +3701,31 @@ describe("the blog through the manager agent API", () => {
   it("changes a post from any one field", () => {
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, status: "published" }).success).toBe(true);
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, excerpt: "" }).success).toBe(true);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_title: "Grading" }).success).toBe(true);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_description: "" }).success).toBe(true);
+  });
+
+  // get_blog_post reports a post on the defaults as null, so sending back what
+  // was read must work, and mean the default.
+  it("takes null for a search field, as clearing it", () => {
+    const r = agentSaveBlogPostSchema.safeParse({
+      id: ID,
+      body_md: "New body.",
+      seo_title: null,
+      seo_description: null,
+    });
+    expect(r.success).toBe(true);
+    expect(r.data).toMatchObject({ seo_title: "", seo_description: "" });
+    expect(agentSaveBlogPostSchema.parse({ id: ID, body_md: "x" }).seo_title).toBeUndefined();
+  });
+
+  it("holds the search fields to the editor's limits", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_title: "x".repeat(101) }).success).toBe(
+      false,
+    );
+    expect(
+      agentSaveBlogPostSchema.safeParse({ id: ID, seo_description: "x".repeat(301) }).success,
+    ).toBe(false);
   });
 
   it("refuses a change that names nothing to change", () => {

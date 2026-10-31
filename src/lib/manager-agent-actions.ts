@@ -47,6 +47,13 @@ import {
   MAX_BLOG_IMAGE_BYTES,
   agentSaveSiteBannerSchema,
   siteBannerSchema,
+  agentCreateCalendarEntrySchema,
+  agentListCalendarEventsSchema,
+  cancelEventSchema,
+  deleteEventSchema,
+  eventRsvpsSchema,
+  stopRepeatingSchema,
+  updateCalendarEntrySchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -57,6 +64,7 @@ import {
   classifyAction,
   diffInvoicePatch,
   invoiceEditAudit,
+  projectAgentCalendarEvent,
   projectAgentCodeOfConductVersion,
   mergeAgentBlogPostEdit,
   projectAgentBlogPost,
@@ -188,6 +196,18 @@ import {
 } from "@/lib/blog-image-ticket";
 import { isLoopbackHost, linkOrigin } from "@/lib/site-origin";
 import { decodeBase64 } from "@/lib/waiver-scan";
+import {
+  CalendarEntryError,
+  type CalendarRefusal,
+  cancelEventRows,
+  createCalendarEntryRow,
+  deleteEventRow,
+  listEventRsvpRows,
+  listManagerEventRows,
+  stopRepeatingSeries,
+  updateCalendarEntryRow,
+} from "@/lib/calendar.functions";
+import { CLUB_TIME_ZONE } from "@/lib/calendar";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -2009,6 +2029,8 @@ async function handleGetBlogPost(params: unknown) {
         body_md: row.body_md,
         cover_image_path: row.cover_image_path,
         cover_image_url: row.cover_image_url,
+        seo_title: row.seo_title,
+        seo_description: row.seo_description,
       },
     };
   } catch (e) {
@@ -2038,6 +2060,8 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
           excerpt: input.excerpt,
           cover_image_path: input.cover_image_path,
           status: input.status ?? "draft",
+          seo_title: input.seo_title,
+          seo_description: input.seo_description,
         },
         actingAs,
         { refuseTakenSlug: true },
@@ -2060,6 +2084,8 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
           excerpt: row.excerpt,
           cover_image_path: row.cover_image_path,
           cover_image_url: row.cover_image_url,
+          seo_title: row.seo_title,
+          seo_description: row.seo_description,
         }
       : { id: saved.id, slug: saved.slug, status: saved.status, published_at: saved.published_at },
   };
@@ -2340,6 +2366,152 @@ export async function uploadBlogImageWithTicket(request: Request) {
   }
 }
 
+// ---- the calendar ----
+//
+// Through the plain functions in calendar.functions.ts that /manager/calendar's
+// server functions also call, so an entry an agent adds, edits, cancels or
+// deletes is written exactly as a manager's own, and refused for the same
+// reasons in the same words. Nothing here emails anybody: a calendar change
+// reaches people through the calendar page and their subscribed calendar apps.
+
+/** HTTP status for each refusal: no such thing, a state in the way, or a request that can never work. */
+const CALENDAR_REFUSAL_STATUS: Record<CalendarRefusal, number> = {
+  not_found: 404,
+  not_repeating: 422,
+  repeating_date: 409,
+  already_on_calendar: 409,
+  no_dates: 422,
+};
+
+/** A shared calendar function's failure, in the endpoint's envelope. */
+function calendarAgentError(e: unknown): unknown {
+  if (e instanceof AgentError) return e;
+  if (e instanceof CalendarEntryError) {
+    return new AgentError(CALENDAR_REFUSAL_STATUS[e.reason], e.reason, e.message, e.details);
+  }
+  // Anything else is a database error's own text, which names tables and
+  // columns: it stays in the server log (see errorResponse).
+  return new AgentError(
+    500,
+    "db_error",
+    e instanceof Error ? e.message : "The calendar could not be read.",
+  );
+}
+
+/** Run a shared calendar call, answering its refusals in the endpoint's envelope. */
+async function onCalendar<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    throw calendarAgentError(e);
+  }
+}
+
+// ---- action: list_calendar_events ----
+async function handleListCalendarEvents(params: unknown) {
+  // It takes nothing, and says so: a `from`/`to` an agent hoped would narrow the
+  // list must not come back as the whole list, read as filtered.
+  agentListCalendarEventsSchema.parse(params ?? {});
+  const db = await adminClient();
+  const events = await onCalendar(() => listManagerEventRows(db));
+  return {
+    time_zone: CLUB_TIME_ZONE,
+    count: events.length,
+    events: events.map(projectAgentCalendarEvent),
+  };
+}
+
+// ---- action: list_calendar_rsvps ----
+async function handleListCalendarRsvps(params: unknown) {
+  const input = eventRsvpsSchema.parse(params ?? {});
+  const db = await adminClient();
+  const rsvps = await onCalendar(() => listEventRsvpRows(db, input));
+  return { event_id: input.event_id, count: rsvps.length, rsvps };
+}
+
+// ---- action: create_calendar_entry ----
+async function handleCreateCalendarEntry(params: unknown, actingAs: string) {
+  const input = agentCreateCalendarEntrySchema.parse(params ?? {});
+  const db = await adminClient();
+  const created = await onCalendar(() => createCalendarEntryRow(db, input, actingAs));
+  // `id` is the date for a one-off and the weekly rule for a repeat, which is
+  // two different things every other calendar action tells apart. Named for
+  // what each one is, so a caller cannot hand a series id to edit_calendar_entry.
+  return {
+    repeats: created.repeats,
+    event_id: created.repeats ? null : created.id,
+    series_id: created.repeats ? created.id : null,
+    generated: created.generated,
+    dates: created.dates.map(projectAgentCalendarEvent),
+  };
+}
+
+// ---- action: edit_calendar_entry ----
+async function handleEditCalendarEntry(params: unknown) {
+  const input = updateCalendarEntrySchema.parse(params ?? {});
+  const { scope: _scope, id: _id, ...fields } = input;
+  // The shared function answers "nothing to change" with success, which on the
+  // screen cannot happen (the form sends every field). From an agent it is a
+  // misspelt or misplaced field, so say so rather than report a change.
+  if (Object.values(fields).every((v) => v === undefined)) {
+    throw new AgentError(
+      400,
+      "invalid_params",
+      "Nothing to change: send at least one of title, description, instructor_name, location, visibility or invite_only.",
+    );
+  }
+  const db = await adminClient();
+  const result = await onCalendar(() => updateCalendarEntryRow(db, input));
+  return { id: input.id, scope: input.scope, updated: result.updated };
+}
+
+// ---- action: cancel_calendar_entry ----
+async function handleCancelCalendarEntry(params: unknown) {
+  const input = cancelEventSchema.parse(params ?? {});
+  const db = await adminClient();
+  const result = await onCalendar(() => cancelEventRows(db, input));
+  return {
+    id: input.id,
+    scope: input.scope,
+    cancelled: input.cancelled,
+    updated: result.updated,
+  };
+}
+
+// ---- action: stop_calendar_repeat ----
+async function handleStopCalendarRepeat(params: unknown, actingAs: string) {
+  const input = stopRepeatingSchema.parse(params ?? {});
+  const db = await adminClient();
+  const result = await onCalendar(() => stopRepeatingSeries(db, input));
+  // Not undoable: the dates are deleted. console.info, as for a deleted post:
+  // a manager tidying up is a normal event, and it has to be findable as one.
+  console.info(
+    "[agent.stop_calendar_repeat] audit",
+    JSON.stringify({ seriesId: input.series_id, removed: result.removed, actor: actingAs }),
+  );
+  return {
+    series_id: input.series_id,
+    already_stopped: result.already_stopped,
+    removed: result.removed,
+  };
+}
+
+// ---- action: delete_calendar_entry ----
+async function handleDeleteCalendarEntry(params: unknown, actingAs: string) {
+  const input = deleteEventSchema.parse(params ?? {});
+  const db = await adminClient();
+  const result = await onCalendar(() => deleteEventRow(db, input));
+  console.info(
+    "[agent.delete_calendar_entry] audit",
+    JSON.stringify({
+      eventId: input.id,
+      checkinsRemoved: result.checkins_removed,
+      actor: actingAs,
+    }),
+  );
+  return { deleted: true, id: input.id, checkins_removed: result.checkins_removed };
+}
+
 /**
  * Run one action. `requestOrigin` is the address the request came in on, where
  * a front door knows it; only links an action hands out read it.
@@ -2437,5 +2609,19 @@ export async function dispatch(
       return handleUploadBlogImage(params);
     case "start_blog_image_upload":
       return handleStartBlogImageUpload(params, actingAs, requestOrigin);
+    case "list_calendar_events":
+      return handleListCalendarEvents(params);
+    case "list_calendar_rsvps":
+      return handleListCalendarRsvps(params);
+    case "create_calendar_entry":
+      return handleCreateCalendarEntry(params, actingAs);
+    case "edit_calendar_entry":
+      return handleEditCalendarEntry(params);
+    case "cancel_calendar_entry":
+      return handleCancelCalendarEntry(params);
+    case "stop_calendar_repeat":
+      return handleStopCalendarRepeat(params, actingAs);
+    case "delete_calendar_entry":
+      return handleDeleteCalendarEntry(params, actingAs);
   }
 }

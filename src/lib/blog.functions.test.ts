@@ -7,7 +7,13 @@
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-import { resolveExcerpt, resolvePostSlug, resolvePublishedAt } from "./blog.functions";
+import {
+  resolveExcerpt,
+  resolvePostSlug,
+  resolvePublishedAt,
+  resolveSeoField,
+  seoUpdate,
+} from "./blog.functions";
 
 /**
  * A minimal chainable stub covering the one query shape `resolvePostSlug`
@@ -102,5 +108,35 @@ describe("resolveExcerpt", () => {
 
   it("stores null when there is nothing to derive either", () => {
     expect(resolveExcerpt("", "[[video:https://youtu.be/abc]]")).toBeNull();
+  });
+});
+
+describe("resolveSeoField", () => {
+  it("keeps what the manager typed, trimmed", () => {
+    expect(resolveSeoField("  Grading day results ")).toBe("Grading day results");
+  });
+
+  // NULL is the column's only "not set": the CHECK refuses an empty string,
+  // and the page resolves NULL to the default at read time.
+  it("stores a blank or missing one as null, deriving nothing", () => {
+    expect(resolveSeoField("")).toBeNull();
+    expect(resolveSeoField("   ")).toBeNull();
+    expect(resolveSeoField(undefined)).toBeNull();
+  });
+});
+
+describe("seoUpdate", () => {
+  // An editor tab opened before the search fields existed saves without them;
+  // writing those as NULL would erase a search title somebody else had set.
+  it("leaves out a field the caller did not send", () => {
+    expect(seoUpdate({})).toEqual({});
+    expect(seoUpdate({ seo_title: "Grading" })).toEqual({ seo_title: "Grading" });
+  });
+
+  it("clears a field sent blank", () => {
+    expect(seoUpdate({ seo_title: "", seo_description: "  " })).toEqual({
+      seo_title: null,
+      seo_description: null,
+    });
   });
 });

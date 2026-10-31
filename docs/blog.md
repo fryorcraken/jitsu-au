@@ -62,16 +62,27 @@ severities of moderation, not the same action.
    boundary. A post with no prose at all, one that is only a video, still
    stores no excerpt: the list and the meta description each have their own
    fallback for that.
-9. **A comment's body is plain text**, not Markdown — no formatting, no
-   embedded photos or videos in comments. This is a deliberate scope line for
-   now (see Future features).
-10. **Comments and new posts produce notifications.** A reply emails its
+9. **A post's search title and description are optional, and blank means the
+   default.** They are what search engines and link previews (Facebook,
+   iMessage, Slack) show for the post, set apart from the headline and the
+   excerpt because what reads well in a search result often is not either.
+   A blank search title is "<post title> | UTS Jitsu Blog"; a blank search
+   description is the excerpt. Unlike the excerpt, nothing is derived and
+   stored: a blank one is kept as nothing and resolved each time the page is
+   served (`blogPostSeo` in `src/lib/seo.ts`), so a post left on the defaults
+   follows a later change to its title or excerpt. A search title is used
+   exactly as written, with no club name added, since the manager who set it
+   chose those words for the result.
+10. **A comment's body is plain text**, not Markdown — no formatting, no
+    embedded photos or videos in comments. This is a deliberate scope line for
+    now (see Future features).
+11. **Comments and new posts produce notifications.** A reply emails its
     recipient straight away; thread activity, announcements and the manager
     moderation alert batch into a daily summary. Nobody is notified about their
     own comment, and a reply to a **hidden** comment notifies nobody, since its
     author is being moderated and telling them would undo that quietly.
     Announcements are opt-in. Full spec: `docs/notifications.md`.
-11. **A commenter's display name is their own choice, not their legal name.**
+12. **A commenter's display name is their own choice, not their legal name.**
     `profiles.display_name` is an optional override a person sets in their
     account settings; when unset, the name shown is derived — first (or
     preferred) name plus last initial (`commentDisplayName` in
@@ -140,7 +151,16 @@ blank is filled the same way, from the post's own opening (`deriveExcerpt`
 in `src/lib/blog-content.ts`): the composer shows the text it would use
 under the field and updates it as the body is typed, so what gets stored is
 what the manager was shown. Both the resolved slug and the resolved excerpt
-come back from the save and become the form's new baseline.
+come back from the save and become the form's new baseline. Under the status
+picker, a "Search engines and link previews" box holds the optional search
+title and description (rule 9), and a preview of the result built by the same
+function the public page uses. Each field's placeholder is the default it falls
+back to when blank (the title with the blog's name, the excerpt). Each has a
+count against what a search result usually shows (about 60 and 155
+characters), which warns past it, and warns that the text cannot be saved past
+the most it can hold (100 and 300). Neither is enforced while typing: the
+fields have no length cap, so a pasted paragraph is never silently cut short,
+and the warning is announced to screen readers when it appears.
 `published_at` is stamped the first time a post goes live and **never changes
 again** — not on a later edit, and not on an unpublish/republish round trip —
 so a post's publish date and its position in the public list (sorted by
@@ -218,7 +238,9 @@ why this uses `localStorage` where the waiver's own draft uses `sessionStorage`.
 marketing page. `/blog/:slug` is different: it's the site's first _dynamic_
 public page, so there's no way to list every real post URL in a static array.
 Its `head()` sets a per-post canonical, title, description and `BlogPosting`
-JSON-LD from loader data, so each post is fully indexable — it's just not
+JSON-LD from loader data (the title and description through `blogPostSeo`, so
+a manager's own search title and description win over the defaults; rule 9),
+so each post is fully indexable — it's just not
 enumerated in `PUBLIC_PAGES` (`src/lib/seo.test.ts` has a dedicated check that
 this dynamic route still declares a canonical and is never accidentally
 `noindex`, in place of the literal-path check every static page gets). A slug

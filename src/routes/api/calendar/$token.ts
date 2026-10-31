@@ -16,7 +16,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { hashToken } from "@/lib/manager-api-tokens";
 import { feedTokenVerdict, UNKNOWN_LINK_MESSAGE } from "@/lib/calendar-feed-token";
 import { buildCalendar, type IcsEvent } from "@/lib/ics";
-import { CLUB_TIME_ZONE, withoutHiddenInviteOnly } from "@/lib/calendar";
+import { CLUB_TIME_ZONE } from "@/lib/calendar";
 import type { CalendarClient, CalendarFeedSelection } from "@/lib/calendar-types";
 
 const FEED_WINDOW_PAST_DAYS = 30;
@@ -121,24 +121,9 @@ export const Route = createFileRoute("/api/calendar/$token")({
         const { data: events, error } = await query;
         if (error) return textResponse("Could not build calendar.", 500);
 
-        // Invite-only entries ride along only for someone actually invited (an
-        // RSVP row for that date) or a manager. A series marked invite only
-        // hides every date it generates, matching the read policies.
-        let visible = events ?? [];
-        if (!isMgr) {
-          const [{ data: rsvps }, { data: inviteSeries }] = await Promise.all([
-            admin.from("event_rsvps").select("event_id").eq("user_id", tokenRow.user_id),
-            admin.from("calendar_series").select("id").eq("invite_only", true),
-          ]);
-          visible = withoutHiddenInviteOnly(visible, {
-            isManager: false,
-            invitedEventIds: new Set((rsvps ?? []).map((r) => r.event_id)),
-            inviteOnlySeriesIds: new Set((inviteSeries ?? []).map((s) => s.id)),
-          });
-        }
-
+        // Invite only is a badge, carried into the title, and hides nothing.
         const ics = buildCalendar({
-          events: visible.map(toIcsEvent),
+          events: (events ?? []).map(toIcsEvent),
           calName: "UTS Jitsu",
           // All-day events are the club's calendar days, not UTC's.
           timeZone: CLUB_TIME_ZONE,

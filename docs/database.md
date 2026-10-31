@@ -177,7 +177,7 @@ So the schema a helper lives in follows from who calls it:
 | Helper                                                             | Schema    | Why                                                                            |
 | ------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------ |
 | `has_role`, `has_active_paid_membership`, the `user_emails` family | `public`  | the app calls them over PostgREST (`.rpc(...)`), so they have to stay routable |
-| `event_is_invite_only`, `is_event_invitee`, `is_commenter_blocked` | `private` | only an RLS policy ever calls them, so nothing needs them routable             |
+| `is_commenter_blocked`, `waiver_pdf_readable_by_caller`            | `private` | only an RLS policy ever calls them, so nothing needs them routable             |
 
 > [!IMPORTANT]
 > **Staying routable is not the same as answering anyone.** A function
@@ -200,20 +200,32 @@ So the schema a helper lives in follows from who calls it:
 
 PostgREST routes `/rest/v1/rpc/*` only to the schemas in its `db-schemas` list
 (`public, graphql_public`), so a function in `private` is unreachable from the
-API while RLS can still call it. `anon`/`authenticated` hold `USAGE` on the
-schema (a prerequisite for `EXECUTE`, and nothing on its own) plus `EXECUTE` on
-the individual helpers. Migration `20260802000000_private_rls_helpers.sql`
-created the schema and moved the three helpers into it.
+API while RLS can still call it. `authenticated` holds `USAGE` on the schema
+plus `EXECUTE` on the individual helpers its policies call; `anon` holds nothing
+here. **Which roles' policies can run a helper is decided by the `EXECUTE` grant
+alone**: a stored policy calls its function by OID, so schema `USAGE` is never
+checked for it (verified on PostgreSQL 16 while reviewing `20261031000000`).
+`USAGE` gates only calls by name, such as direct SQL, or PostgREST if `private`
+were ever exposed. So the per-function `REVOKE ALL ... FROM PUBLIC` and
+`GRANT EXECUTE` are the control, not the schema grant. Migration
+`20260802000000_private_rls_helpers.sql` created the schema and moved three
+helpers into it. `20261031000000` dropped two of them, the calendar's
+invite-only helpers (see "Calendar"), and revoked `anon`'s `USAGE` as defence
+in depth, since no helper left here is granted to `anon`.
 
 > [!IMPORTANT]
-> **`private` is an API boundary, not a privilege boundary.** `anon` keeps
-> `USAGE` on the schema and `EXECUTE` on `event_is_invite_only` — it has to, or
-> the anon read policy fails. What stops the outside world calling it is only
-> that `private` is absent from **Settings → API → Exposed schemas**. Add it
-> there and all three helpers are routable again, with no migration to review
-> and nothing for CI or the advisors to report (both lints scan the exposed
-> schemas only). So: never add `private` to that list, and check it is still
-> `public, graphql_public` when verifying a migration that touches this schema.
+> **`private` is an API boundary, not a privilege boundary.** `authenticated`
+> keeps `USAGE` on the schema and `EXECUTE` on `is_commenter_blocked` and
+> `waiver_pdf_readable_by_caller`. Its policies need only the `EXECUTE`; the
+> `USAGE` is what lets a signed-in caller name the helpers, and what stops one
+> calling them directly is only that `private` is absent from
+> **Settings → API → Exposed schemas**. Add it there and both helpers are
+> routable again, with no migration to review and nothing for CI or the
+> advisors to report (both lints scan the exposed schemas only). So: never add
+> `private` to that list, and check it is still `public, graphql_public` when
+> verifying a migration that touches this schema. Revoking `authenticated`'s
+> `USAGE` too would close that without breaking either policy; it has not been
+> done.
 
 **No tables belong in `private`, only helper functions.** Supabase's bootstrap
 `ALTER DEFAULT PRIVILEGES` is scoped to `public`, so objects created in `private`
@@ -844,7 +856,7 @@ its details including `visibility` and `invite_only`.
 | `instructor_name`  | `text`        | yes  | Default instructor for generated dates.                                      |
 | `location`         | `text`        | yes  | No column default. The add form pre-fills the club's gym; it can be cleared. |
 | `visibility`       | `text`        | no   | `public\|members`. Default `public`. Copied onto every generated date.       |
-| `invite_only`      | `boolean`     | no   | Default `false`. Access, and a badge. Copied onto every generated date.      |
+| `invite_only`      | `boolean`     | no   | Default `false`. A badge only. Copied onto every generated date.             |
 | `weekday`          | `int`         | no   | `CHECK 0..6` (0 = Sunday, JS `getDay()`).                                    |
 | `start_time`       | `time`        | no   | Local to the club (Australia/Sydney).                                        |
 | `duration_minutes` | `int`         | no   | `CHECK > 0`.                                                                 |
@@ -878,34 +890,30 @@ on the calendar — cancel those individually.
 | `ends_at`         | `timestamptz` | no   | `CHECK ends_at >= starts_at`.                                                   |
 | `status`          | `text`        | no   | `scheduled\|cancelled`. Default `scheduled` (cancel keeps the row).             |
 | `visibility`      | `text`        | no   | **ACCESS.** `public\|members`. Default `public`; `members` = paid members only. |
-| `invite_only`     | `boolean`     | no   | **ACCESS, and a badge.** Default `false`. Only invitees and managers see it.    |
+| `invite_only`     | `boolean`     | no   | **A badge, not access.** Default `false`. Hides the date from nobody.           |
 | `created_by`      | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                                 |
 | `created_at`      | `timestamptz` | no   | Default `now()`.                                                                |
 | `updated_at`      | `timestamptz` | no   | Default `now()`; set app-side.                                                  |
 
 Partial unique index on `(series_id, starts_at) WHERE series_id IS NOT NULL`
 keeps date generation idempotent. **RLS:** everyone (incl. anon) reads
-`visibility = 'public'` that is not invite-only; a second policy adds `members`
+`visibility = 'public'`; a second policy, for `authenticated`, adds `members`
 events for callers where `has_active_paid_membership(auth.uid())` or
-`has_role(auth.uid(),'manager')`, and lets a non-manager through an invite-only
-date only when they have an RSVP row for it — policies are OR'd, so a paid member
-sees both sets. Cancelled events stay readable so the cancellation shows.
-Managers insert/update/delete.
+`has_role(auth.uid(),'manager')` — policies are OR'd, so a paid member sees both
+sets and a manager sees every date. `invite_only` plays no part in either.
+Cancelled events stay readable so the cancellation shows. Managers
+insert/update/delete.
 
-Those policies call two helpers that live in the **`private`** schema, not
-`public` (see "RLS-only helpers live in `private`" above):
-
-**`private.event_is_invite_only(_event_id uuid) → boolean`** — SECURITY DEFINER
-(`SET search_path = ''`): is this date invite-only, on its own row or inherited
-from its series? It is SECURITY DEFINER because the policy has to read
-`calendar_series`, which no client role may read directly. `anon` and
-`authenticated` hold EXECUTE, since both read policies call it.
-
-**`private.is_event_invitee(_event_id uuid, _user_id uuid) → boolean`** —
-SECURITY DEFINER (`SET search_path = ''`): does an `event_rsvps` row exist for
-this person and date? That is what unlocks an invite-only date for its invitees,
-and it is SECURITY DEFINER so the check does not depend on the caller's own RLS
-over `event_rsvps`. `authenticated` holds EXECUTE; `anon` does not.
+From `20260730113925` until `20261031000000` both policies also hid an
+invite-only date (marked itself, or generated by an invite-only series) from
+everybody but managers and the people with an RSVP row for it, through two
+helpers (in `private` since `20260802000000`), `event_is_invite_only` and
+`is_event_invitee`. Nothing in the product ever wrote that RSVP row for somebody
+else, so the rule hid the class from every member while the manager form called
+invite only a label.
+`20261031000000_calendar_invite_only_is_a_badge.sql` removed the clause, dropped
+both helpers, and revoked `anon`'s `USAGE` on `private`, which only the first
+had needed. The product decision is in `docs/calendar.md`.
 
 ### `event_rsvps` — who's coming
 
@@ -1054,6 +1062,8 @@ RSVPs — and upvote a comment once (no downvote). Product spec:
 | `excerpt`          | `text`        | yes  | ≤ 500 chars. Shown on the list page. Derived from `body_md` on save when left blank (`deriveExcerpt`).  |
 | `body_md`          | `text`        | no   | 1–50,000 chars. Markdown; a `[[video:<url>]]` line embeds a video.                                      |
 | `cover_image_path` | `text`        | yes  | Object path in the `blog-media` Storage bucket.                                                         |
+| `seo_title`        | `text`        | yes  | 1–100 chars. The page's `<title>` as written; NULL means `<title> \| UTS Jitsu Blog` (`blogPostSeo`).   |
+| `seo_description`  | `text`        | yes  | 1–300 chars. The meta/og description; NULL means the excerpt. Never derived on save, unlike `excerpt`.  |
 | `status`           | `text`        | no   | `draft\|published`. Default `draft`.                                                                    |
 | `author_id`        | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The writing manager.                                    |
 | `published_at`     | `timestamptz` | yes  | Set the first time `status` moves to `published`; never changed again — including on a later unpublish. |

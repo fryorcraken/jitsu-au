@@ -3,12 +3,15 @@ import {
   DEFAULT_EVENT_LOCATION,
   addMinutes,
   clubLocalDate,
+  clubLocalDateTime,
+  clubLocalToIso,
   defaultEndForStart,
   diffOccurrences,
+  firstDateToCome,
   generateOccurrences,
   tzOffsetMinutes,
   weeklyOccurrenceDates,
-  withoutHiddenInviteOnly,
+  weeklyRunsShareADate,
   zonedWallTimeToUtc,
 } from "./calendar";
 
@@ -28,6 +31,150 @@ describe("weeklyOccurrenceDates", () => {
 
   it("returns nothing when the range is inverted", () => {
     expect(weeklyOccurrenceDates(1, "2026-07-31", "2026-07-01")).toEqual([]);
+  });
+});
+
+// Dates are only ever generated from today on, so a weekly entry is judged on
+// the dates it will actually put on the calendar, not the ones typed into it.
+// Monday 2 November 2026 throughout.
+const TODAY = "2026-11-02";
+const MONDAY = 1;
+const WEDNESDAY = 3;
+
+describe("firstDateToCome", () => {
+  it("snaps a run that starts later forward to its weekday", () => {
+    // Wednesday 4 November: the first Monday on or after it.
+    expect(
+      firstDateToCome({ weekday: MONDAY, starts_on: "2026-11-04", ends_on: null }, TODAY),
+    ).toBe("2026-11-09");
+  });
+
+  it("starts a run that began in the past from today, not from its first date", () => {
+    const sinceSeptember = { starts_on: "2026-09-07", ends_on: null };
+    expect(firstDateToCome({ ...sinceSeptember, weekday: WEDNESDAY }, TODAY)).toBe("2026-11-04");
+    // Today is itself a Monday, and today is still to come.
+    expect(firstDateToCome({ ...sinceSeptember, weekday: MONDAY }, TODAY)).toBe(TODAY);
+  });
+
+  it("counts a last date that falls on the weekday", () => {
+    expect(
+      firstDateToCome({ weekday: MONDAY, starts_on: "2026-11-03", ends_on: "2026-11-09" }, TODAY),
+    ).toBe("2026-11-09");
+  });
+
+  it("is null when the run ends before its first matching weekday", () => {
+    // Tuesday 3 to Sunday 8 November holds no Monday.
+    expect(
+      firstDateToCome({ weekday: MONDAY, starts_on: "2026-11-03", ends_on: "2026-11-08" }, TODAY),
+    ).toBeNull();
+  });
+
+  it("is null when the run's last date has already passed", () => {
+    expect(
+      firstDateToCome({ weekday: MONDAY, starts_on: "2026-07-13", ends_on: "2026-10-30" }, TODAY),
+    ).toBeNull();
+  });
+
+  it("is never null for a run with no last date, whatever the day or start", () => {
+    for (let weekday = 0; weekday <= 6; weekday += 1) {
+      for (const starts_on of ["2026-01-01", TODAY, "2027-06-30"]) {
+        const first = firstDateToCome({ weekday, starts_on, ends_on: null }, TODAY);
+        expect(first).not.toBeNull();
+        expect(new Date(`${first}T00:00:00Z`).getUTCDay()).toBe(weekday);
+      }
+    }
+  });
+});
+
+// Whether adding a weekly run would double up a class that is already there.
+// Both runs share a weekday (the database lookup already matched on it), so
+// `existing` carries only its dates.
+describe("weeklyRunsShareADate", () => {
+  const mondays = (starts_on: string, ends_on: string | null) => ({
+    weekday: MONDAY,
+    starts_on,
+    ends_on,
+  });
+
+  it("is true for two runs that hold the same Mondays", () => {
+    expect(
+      weeklyRunsShareADate(
+        { starts_on: "2026-09-07", ends_on: "2026-12-14" },
+        mondays("2026-11-09", "2027-02-01"),
+        TODAY,
+      ),
+    ).toBe(true);
+  });
+
+  // Tue 10 to Sun 15 Nov holds no Monday, so it can clash with nothing. New
+  // runs like it are refused as no_dates, but rows from before that rule exist.
+  it("is false against an existing run that holds no such weekday at all", () => {
+    expect(
+      weeklyRunsShareADate(
+        { starts_on: "2026-11-10", ends_on: "2026-11-15" },
+        mondays("2026-11-02", null),
+        TODAY,
+      ),
+    ).toBe(false);
+  });
+
+  it("is false for next semester's run, which starts after this one's last date", () => {
+    expect(
+      weeklyRunsShareADate(
+        { starts_on: "2026-07-13", ends_on: "2026-11-23" },
+        mondays("2027-02-22", null),
+        TODAY,
+      ),
+    ).toBe(false);
+  });
+
+  it("is false for this semester's run added after next semester's is already there", () => {
+    expect(
+      weeklyRunsShareADate(
+        { starts_on: "2027-02-22", ends_on: null },
+        mondays(TODAY, "2026-11-30"),
+        TODAY,
+      ),
+    ).toBe(false);
+  });
+
+  // The typed dates overlap on Friday 27 November, but the old run's last
+  // Monday is the 23rd and the new run's first is the 30th.
+  it("is false when the old run ends on a Friday and the new one starts that Friday", () => {
+    const endsFriday = { starts_on: "2026-09-07", ends_on: "2026-11-27" };
+    expect(weeklyRunsShareADate(endsFriday, mondays("2026-11-27", null), TODAY)).toBe(false);
+    // One day earlier is a Monday the old run still has.
+    expect(weeklyRunsShareADate(endsFriday, mondays("2026-11-23", null), TODAY)).toBe(true);
+  });
+
+  // A run whose last date has passed still counts as active until somebody
+  // stops it, but it will never hold another class.
+  it("is false against a run that is over, even when the new run is backdated into it", () => {
+    expect(
+      weeklyRunsShareADate(
+        { starts_on: "2026-07-13", ends_on: "2026-10-26" },
+        mondays("2026-10-01", null),
+        TODAY,
+      ),
+    ).toBe(false);
+  });
+
+  it("is true against a run with no last date, however far out the new one starts", () => {
+    expect(
+      weeklyRunsShareADate(
+        { starts_on: "2026-09-07", ends_on: null },
+        mondays("2027-03-01", "2027-05-31"),
+        TODAY,
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for a new run that would put no date on the calendar", () => {
+    const openEnded = { starts_on: "2026-09-07", ends_on: null };
+    // Over already.
+    expect(weeklyRunsShareADate(openEnded, mondays("2026-07-13", "2026-10-30"), TODAY)).toBe(false);
+    // Tuesday to Sunday: no Monday in it.
+    expect(weeklyRunsShareADate(openEnded, mondays("2026-11-03", "2026-11-08"), TODAY)).toBe(false);
   });
 });
 
@@ -66,6 +213,74 @@ describe("zonedWallTimeToUtc", () => {
     expect(zonedWallTimeToUtc("2026-01-26", "18:00", SYDNEY).toISOString()).toBe(
       "2026-01-26T07:00:00.000Z",
     );
+  });
+});
+
+// The manager calendar's pickers and the manager agent API's one-off times both
+// arrive as club wall-clock time, and the agent reads them back through
+// clubLocalDateTime, so the two have to agree with each other on either side of
+// a daylight saving change, not just with the zone in the middle of a season.
+describe("clubLocalToIso", () => {
+  it("reads a summer evening as daylight time (AEDT, +11)", () => {
+    expect(clubLocalToIso("2026-11-05T18:00")).toBe("2026-11-05T07:00:00.000Z");
+  });
+
+  it("reads a winter evening as standard time (AEST, +10)", () => {
+    expect(clubLocalToIso("2026-06-04T18:00")).toBe("2026-06-04T08:00:00.000Z");
+  });
+
+  // A picker can emit seconds, and a minute-resolution calendar has no use for
+  // them: they are dropped, not rounded.
+  it("ignores seconds", () => {
+    expect(clubLocalToIso("2026-11-05T18:00:00")).toBe("2026-11-05T07:00:00.000Z");
+    expect(clubLocalToIso("2026-11-05T18:00:59")).toBe("2026-11-05T07:00:00.000Z");
+  });
+
+  it("reads the club's zone unless told another", () => {
+    expect(clubLocalToIso("2026-11-05T18:00", "UTC")).toBe("2026-11-05T18:00:00.000Z");
+  });
+});
+
+describe("clubLocalDateTime", () => {
+  it("gives the club's wall clock, not UTC's, on both sides of daylight saving", () => {
+    expect(clubLocalDateTime(new Date("2026-11-05T07:00:00Z"))).toBe("2026-11-05T18:00");
+    expect(clubLocalDateTime(new Date("2026-06-04T08:00:00Z"))).toBe("2026-06-04T18:00");
+  });
+
+  // A 07:30 Sydney class is still the previous evening in UTC.
+  it("lands a morning class on the club's day", () => {
+    expect(clubLocalDateTime(new Date("2026-11-04T20:30:00Z"))).toBe("2026-11-05T07:30");
+    expect(clubLocalDateTime(new Date("2026-06-03T21:30:00Z"))).toBe("2026-06-04T07:30");
+  });
+
+  it("is the inverse of clubLocalToIso in either season", () => {
+    for (const local of [
+      "2026-11-05T18:00",
+      "2026-06-04T18:00",
+      "2026-11-05T07:30",
+      "2026-06-04T00:00",
+      "2026-12-31T23:59",
+    ]) {
+      expect(clubLocalDateTime(new Date(clubLocalToIso(local)))).toBe(local);
+    }
+  });
+
+  // Sydney springs forward at 02:00 on 4 October 2026 (02:00-02:59 never
+  // happens) and falls back at 03:00 on 4 April 2027 (02:00-02:59 happens
+  // twice). The hour either side of each change has exactly one meaning, and
+  // the round trip has to land on it.
+  it("round-trips the hour either side of the October 2026 change", () => {
+    expect(clubLocalToIso("2026-10-04T01:00")).toBe("2026-10-03T15:00:00.000Z"); // AEST
+    expect(clubLocalToIso("2026-10-04T03:00")).toBe("2026-10-03T16:00:00.000Z"); // AEDT
+    expect(clubLocalDateTime(new Date("2026-10-03T15:00:00Z"))).toBe("2026-10-04T01:00");
+    expect(clubLocalDateTime(new Date("2026-10-03T16:00:00Z"))).toBe("2026-10-04T03:00");
+  });
+
+  it("round-trips the hour either side of the April 2027 change", () => {
+    expect(clubLocalToIso("2027-04-04T01:00")).toBe("2027-04-03T14:00:00.000Z"); // AEDT
+    expect(clubLocalToIso("2027-04-04T03:00")).toBe("2027-04-03T17:00:00.000Z"); // AEST
+    expect(clubLocalDateTime(new Date("2027-04-03T14:00:00Z"))).toBe("2027-04-04T01:00");
+    expect(clubLocalDateTime(new Date("2027-04-03T17:00:00Z"))).toBe("2027-04-04T03:00");
   });
 });
 
@@ -247,37 +462,5 @@ describe("DEFAULT_EVENT_LOCATION", () => {
     expect(DEFAULT_EVENT_LOCATION).toBe(
       "ActivateFit Gym, UTS Building 4, 745 Harris Street, Ultimo NSW 2007",
     );
-  });
-});
-
-// The calendar reads run on the service role, which skips the read policies,
-// so this is the only thing keeping an invite-only date off the public page.
-describe("withoutHiddenInviteOnly", () => {
-  const open = { id: "open", series_id: null, invite_only: false };
-  const marked = { id: "marked", series_id: null, invite_only: true };
-  // A date whose own flag is off but whose series is invite only.
-  const fromSeries = { id: "from-series", series_id: "s-invite", invite_only: false };
-  const events = [open, marked, fromSeries];
-  const nobody = {
-    isManager: false,
-    invitedEventIds: new Set<string>(),
-    inviteOnlySeriesIds: new Set(["s-invite"]),
-  };
-
-  it("hides every invite-only date from someone not invited, signed out included", () => {
-    expect(withoutHiddenInviteOnly(events, nobody).map((e) => e.id)).toEqual(["open"]);
-  });
-
-  it("hides a date generated by an invite-only series even when its own flag is off", () => {
-    expect(withoutHiddenInviteOnly([fromSeries], nobody)).toEqual([]);
-  });
-
-  it("shows an invitee only the dates they are invited to", () => {
-    const invitee = { ...nobody, invitedEventIds: new Set(["marked"]) };
-    expect(withoutHiddenInviteOnly(events, invitee).map((e) => e.id)).toEqual(["open", "marked"]);
-  });
-
-  it("shows a manager everything", () => {
-    expect(withoutHiddenInviteOnly(events, { ...nobody, isManager: true })).toEqual(events);
   });
 });

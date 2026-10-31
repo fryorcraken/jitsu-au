@@ -29,11 +29,14 @@ import { blogMarkdownComponents } from "@/lib/blog-markdown";
 import { BlogVideoBlock } from "@/components/site/BlogVideoBlock";
 import { defaultBlogSlug, slugify } from "@/lib/slug";
 import {
+  BLOG_SEO_DESCRIPTION_MAX,
+  BLOG_SEO_TITLE_MAX,
   blogImageMimeTypes,
   blogPostSchema,
   type BlogImageMimeType,
   type BlogPostStatus,
 } from "@/lib/validation";
+import { BLOG_SEO_DESCRIPTION_SHOWN, BLOG_SEO_TITLE_SHOWN, blogPostSeo } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useEditorDraft } from "@/hooks/use-editor-draft";
@@ -76,6 +79,8 @@ type BlogDraftFields = {
   status: string;
   coverPath: string;
   coverUrl: string;
+  seoTitle: string;
+  seoDescription: string;
 };
 
 const BLOG_DRAFT_SHAPE: BlogDraftFields = {
@@ -86,7 +91,61 @@ const BLOG_DRAFT_SHAPE: BlogDraftFields = {
   status: "draft",
   coverPath: "",
   coverUrl: "",
+  seoTitle: "",
+  seoDescription: "",
 };
+
+/**
+ * A search field's length against what a search result usually shows, and
+ * against the most it can hold.
+ *
+ * Neither is enforced as you type. Past `shown` is allowed and only means the
+ * end may be cut off in a result. Past `max` cannot be saved, but the field has
+ * no `maxLength` on purpose: that would silently cut a pasted paragraph short,
+ * and the person would never see what was dropped. They see this instead, with
+ * all of their text still there to trim.
+ *
+ * The count is not announced (it would be read out on every keystroke), but
+ * the warning is: it sits in a live region that only changes when a threshold
+ * is crossed.
+ */
+function SeoLengthHint({
+  id,
+  length,
+  shown,
+  max,
+}: {
+  id: string;
+  length: number;
+  shown: number;
+  max: number;
+}) {
+  const warning =
+    length > max
+      ? `That is ${length - max} over the ${max} that can be saved, so shorten it before saving.`
+      : length > shown
+        ? `Search results usually show about ${shown}, so the end may be cut off.`
+        : "";
+  return (
+    <p
+      id={id}
+      className={cn(
+        "mt-1 text-xs",
+        // Theme tokens, so the contrast test covers both.
+        length > max
+          ? "font-medium text-destructive"
+          : length > shown
+            ? "font-medium text-foreground"
+            : "text-muted-foreground",
+      )}
+    >
+      {length > shown
+        ? `${length} characters. `
+        : `${length} of about ${shown} characters a search result usually shows.`}
+      <span role="status">{warning}</span>
+    </p>
+  );
+}
 
 export type BlogPostEditorValue = {
   title: string;
@@ -96,11 +155,15 @@ export type BlogPostEditorValue = {
   cover_image_path: string;
   cover_image_url: string | null;
   status: BlogPostStatus;
+  /** Blank means the default, `blogPostSeo` in `src/lib/seo.ts`. */
+  seo_title: string;
+  seo_description: string;
 };
 
 /**
  * The manager post composer: title/slug/excerpt fields, a Markdown body with a
- * formatting toolbar and image/video insert, a status picker, and a live
+ * formatting toolbar and image/video insert, a status picker, the optional
+ * search-engine title and description with a preview of the result, and a live
  * preview — same textarea-plus-`ReactMarkdown`-preview shape as the waiver
  * template editor (`manager.waiver-template.tsx`), extended with the image
  * upload and `[[video:<url>]]` embed convention this feature adds.
@@ -137,6 +200,8 @@ export function BlogPostEditor({
   const [status, setStatus] = useState<BlogPostStatus>(initial.status);
   const [coverPath, setCoverPath] = useState(initial.cover_image_path);
   const [coverUrl, setCoverUrl] = useState(initial.cover_image_url);
+  const [seoTitle, setSeoTitle] = useState(initial.seo_title);
+  const [seoDescription, setSeoDescription] = useState(initial.seo_description);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
   const [mobileTab, setMobileTab] = useState<"write" | "preview">("write");
@@ -167,6 +232,8 @@ export function BlogPostEditor({
     setStatus(initial.status);
     setCoverPath(initial.cover_image_path);
     setCoverUrl(initial.cover_image_url);
+    setSeoTitle(initial.seo_title);
+    setSeoDescription(initial.seo_description);
   }, [initial]);
 
   const dirty =
@@ -175,7 +242,9 @@ export function BlogPostEditor({
     excerpt !== initial.excerpt ||
     body !== initial.body_md ||
     status !== initial.status ||
-    coverPath !== initial.cover_image_path;
+    coverPath !== initial.cover_image_path ||
+    seoTitle !== initial.seo_title ||
+    seoDescription !== initial.seo_description;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -187,7 +256,7 @@ export function BlogPostEditor({
   // work it never saw.
   useEffect(() => {
     setSaveError(null);
-  }, [title, slug, excerpt, body, status, coverPath]);
+  }, [title, slug, excerpt, body, status, coverPath, seoTitle, seoDescription]);
 
   // Covers a closed tab / refresh / typed-in address bar on a DESKTOP browser.
   // In-app navigation (clicking another sidebar link) is guarded separately by
@@ -211,8 +280,18 @@ export function BlogPostEditor({
   // `src/lib/editor-draft.ts` for why this is localStorage where the waiver's
   // equivalent is sessionStorage.
   const draftFields = useMemo<BlogDraftFields>(
-    () => ({ title, slug, excerpt, body, status, coverPath, coverUrl: coverUrl ?? "" }),
-    [title, slug, excerpt, body, status, coverPath, coverUrl],
+    () => ({
+      title,
+      slug,
+      excerpt,
+      body,
+      status,
+      coverPath,
+      coverUrl: coverUrl ?? "",
+      seoTitle,
+      seoDescription,
+    }),
+    [title, slug, excerpt, body, status, coverPath, coverUrl, seoTitle, seoDescription],
   );
   const draftBaseline = useMemo<BlogDraftFields>(
     () => ({
@@ -223,6 +302,8 @@ export function BlogPostEditor({
       status: initial.status,
       coverPath: initial.cover_image_path,
       coverUrl: initial.cover_image_url ?? "",
+      seoTitle: initial.seo_title,
+      seoDescription: initial.seo_description,
     }),
     [initial],
   );
@@ -245,6 +326,8 @@ export function BlogPostEditor({
     setStatus(stored.status === "published" ? "published" : "draft");
     setCoverPath(stored.coverPath);
     setCoverUrl(stored.coverUrl || null);
+    setSeoTitle(stored.seoTitle);
+    setSeoDescription(stored.seoDescription);
     draft.restore();
   }
 
@@ -312,6 +395,8 @@ export function BlogPostEditor({
       cover_image_path: coverPath,
       cover_image_url: coverUrl,
       status,
+      seo_title: seoTitle.trim(),
+      seo_description: seoDescription.trim(),
     };
     const check = blogPostSchema.safeParse(value);
     if (!check.success) {
@@ -342,6 +427,23 @@ export function BlogPostEditor({
   // What the server will store if the excerpt is left blank. Memoised because
   // it re-derives from the whole body, which changes on every keystroke.
   const derivedExcerpt = useMemo(() => deriveExcerpt(body), [body]);
+  // What a search result will show, through the same function the public page
+  // uses. The excerpt a blank one falls back to is the one the server will
+  // store, so a blank excerpt is previewed as the derived one.
+  // The result as served, and the defaults the two fields fall back to (their
+  // placeholders), all from the function the public page uses.
+  const search = useMemo(() => {
+    const inputs = {
+      title: title.trim() || "Your post title",
+      excerpt: excerpt.trim() || derivedExcerpt || null,
+      seo_title: seoTitle,
+      seo_description: seoDescription,
+    };
+    return {
+      result: blogPostSeo(inputs),
+      defaults: blogPostSeo({ ...inputs, seo_title: null, seo_description: null }),
+    };
+  }, [title, excerpt, derivedExcerpt, seoTitle, seoDescription]);
 
   const formFields = (
     <div className="space-y-4">
@@ -506,6 +608,61 @@ export function BlogPostEditor({
           </p>
         )}
       </div>
+      <fieldset className="space-y-4 rounded-lg border p-4">
+        <legend className="px-1 text-sm font-semibold">Search engines and link previews</legend>
+        <p className="text-xs text-muted-foreground">
+          Optional. Leave these blank to use the post title and the excerpt.
+        </p>
+        <div>
+          <Label htmlFor="post-seo-title">Search title</Label>
+          <Input
+            id="post-seo-title"
+            value={seoTitle}
+            onChange={(e) => setSeoTitle(e.target.value)}
+            placeholder={search.defaults.title}
+            aria-describedby="post-seo-title-count"
+            className="mt-1.5"
+          />
+          <SeoLengthHint
+            id="post-seo-title-count"
+            length={seoTitle.trim().length}
+            shown={BLOG_SEO_TITLE_SHOWN}
+            max={BLOG_SEO_TITLE_MAX}
+          />
+        </div>
+        <div>
+          <Label htmlFor="post-seo-description">Search description</Label>
+          <Textarea
+            id="post-seo-description"
+            value={seoDescription}
+            onChange={(e) => setSeoDescription(e.target.value)}
+            rows={3}
+            placeholder={search.defaults.description}
+            aria-describedby="post-seo-description-count"
+            className="mt-1.5"
+          />
+          <SeoLengthHint
+            id="post-seo-description-count"
+            length={seoDescription.trim().length}
+            shown={BLOG_SEO_DESCRIPTION_SHOWN}
+            max={BLOG_SEO_DESCRIPTION_MAX}
+          />
+        </div>
+        <div aria-label="How the post may look in search results" role="group">
+          <p className="text-xs font-medium text-muted-foreground">
+            How it may look in search results
+          </p>
+          <div className="mt-1.5 rounded-md bg-muted/50 p-3">
+            <p className="truncate text-xs text-muted-foreground">
+              {SITE_HOST}/blog/{previewSlug}
+            </p>
+            <p className="line-clamp-1 text-base font-medium text-primary">{search.result.title}</p>
+            <p className="line-clamp-2 text-sm text-muted-foreground">
+              {search.result.description}
+            </p>
+          </div>
+        </div>
+      </fieldset>
     </div>
   );
 
