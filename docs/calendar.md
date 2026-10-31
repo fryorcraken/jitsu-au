@@ -70,27 +70,29 @@ date actually has, so an entry with no location keeps having none.
 
 ## Two settings that are easy to confuse
 
-| Setting                           | What it is                         | Effect                                                                                                                          |
-| --------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **Who can see it** (`visibility`) | **Access.** `public` or `members`. | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member.                           |
-| **Invite only** (`invite_only`)   | **Access, and a badge.**           | Enforced. Only people invited to that date (they have an RSVP row) and managers can see it. Everyone else never sees the entry. |
+| Setting                           | What it is                         | Effect                                                                                                |
+| --------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Who can see it** (`visibility`) | **Access.** `public` or `members`. | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member. |
+| **Invite only** (`invite_only`)   | **A badge.** Nothing else.         | Restricts nothing. Everybody the entry's `visibility` admits still sees it and can RSVP.              |
 
-Invite only is enforced in the database, not just in the interface: the
-`calendar_events` read policies hide an invite-only date from the public feed and
-from ordinary members. Marking a repeating entry invite only hides every date it
-generates the same way, so the series and its dates can never disagree. To let
-someone see an invite-only date, a manager creates their RSVP for it.
+`visibility` is the one setting that decides who sees an entry. Invite only
+labels it, on the calendar page and in calendar apps ("(invite only)" after the
+title, "Invite only." in the description), and leaves the rest to the people
+reading it: the site checks nothing. To keep an entry away from people, make it
+_Paid members only_. The manager form says the same under the box.
 
-The calendar page and the personal calendar link read through the service role,
-which skips those policies, so both apply the same rule in code through one
-shared helper (`withoutHiddenInviteOnly` in `src/lib/calendar.ts`). If it cannot
-work out who is invited, the calendar page fails to load rather than showing
-everything.
+Until `20261031000000` it was enforced. The `calendar_events` read policies, and
+the calendar page and calendar links in code, hid an invite-only date from
+everybody but managers and people with an RSVP row for it. Nothing in the
+product ever wrote that row for somebody else, so there was no way to invite
+anyone: ticking the box hid the class from every member, while the form beside
+it said it was only a label. The club decided on 2026-10-30 that it is only a
+label, which made the form right and removed the rule.
 
-An entry can be public and invite-only (only invitees see it), members-only and
-not invite-only, or any other combination. Both settings apply to repeating
-entries too, which is what the old two-form design made impossible: every date a
-repeat generated was forced to be public.
+An entry can be public and invite only (everybody sees it, with the badge),
+members-only and not invite only, or any other combination. Both settings apply
+to repeating entries too, which is what the old two-form design made
+impossible: every date a repeat generated was forced to be public.
 
 ## Repeating: start and end dates
 
@@ -109,12 +111,19 @@ rest.
 **Nobody has to press anything to keep future dates appearing.** The app keeps a
 rolling horizon of upcoming dates topped up whenever the calendar is read. There
 is no "Add dates" button; that was an implementation detail leaking into the UI.
+A new entry gets about twelve weeks of dates straight away, and from then on it
+holds between six and twelve: once its furthest date is within six weeks, it is
+topped back up to twelve. A week further out than that may not be on the list
+yet. It is not missing, it simply cannot be edited or cancelled until it
+appears, and it is no reason to add a one-off for it.
 
 ## Manager actions
 
 1. **Add something to the calendar** — one form. Type a title, set when, choose
    whether it repeats, and optionally fill in instructor, location, description,
    who can see it, and the invite-only badge. Its dates appear straight away.
+   Adding the same entry twice is refused, and so is a weekly entry that would
+   put no date on the calendar at all (both below).
 2. **See what's on** — a single list of upcoming dates. A repeating one is marked
    _Weekly_ and shows who can see it.
 3. **Edit** — for a repeating entry, editing asks the question Google Calendar
@@ -128,16 +137,68 @@ is no "Add dates" button; that was an implementation detail leaking into the UI.
    it clears from subscribed calendars, and RSVPs are kept. Reversible with
    "Restore".
 5. **Stop repeating** — ends future dates and deactivates the rule. Past dates are
-   untouched, because they happened.
+   untouched, because they happened. Anybody already checked in to one of the
+   future dates it removes is removed with it: once the class is gone, its
+   check-ins go too, as clean-up. The confirm says so before the click.
 6. **See who's coming** — a going/maybe tally per date, expandable to the list of
    names and emails.
 7. **Check people in** — who actually turned up, on the `/manager/check-in`
    screen. A check-in belongs to a date on this calendar, and a **cancelled**
    date cannot be checked in to. See `docs/check-in.md`.
 
+Adding the same entry twice is refused: a one-off with the same title and start
+as a date already on the calendar (whether that date is a one-off or one week of
+a repeat), or a weekly entry with the same title, weekday and time as one still
+repeating that holds any of the same dates. Nobody adds the same class twice on
+purpose; the one way it happens is a retry that never heard back from its first
+try. A genuine second entry at the same time needs a different title.
+
+- A **scheduled** date at that start always counts. A **cancelled** one counts
+  only if it also ends at the same time, because cancelling one class and adding
+  a longer one-off in its place is how a single class is made longer, and that
+  one-off starts where the cancelled date did. A cancelled match that does count
+  says so, and the answer there is to restore it rather than add it again.
+- Two weekly entries are compared on the classes they actually hold, not the
+  dates typed in. Next semester's run of a class, added while this semester's is
+  still on, is not a duplicate: a Monday class whose run ends on the Friday the
+  semester ends shares no Monday with the next run starting that Friday. A run
+  whose last date has passed is over, even though it still counts as repeating
+  until somebody stops it, so it never clashes. One with no end date holds every
+  week from its start on, so a new run after it is refused until the old one is
+  stopped.
+
+A weekly entry that would put **no date on the calendar at all** is refused too,
+with a message to check the day and the dates: one whose last date has passed
+(dates are only ever made from today on), or one whose dates hold no day of that
+weekday (a Monday class running from a Tuesday to the Saturday after it). Saved,
+it would say it was added and never appear.
+
 Deleting an entry outright exists for mistakes only, and only for one-off
-entries: deleting a single date of a repeat would just be regenerated at the next
-top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
+entries: an upcoming date of a repeat, deleted, would just be regenerated at the
+next top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
+The server refuses to delete a date still to come of a repeat still running as
+well, so leaving the button off the screen is not the only thing holding that
+rule; a past date of a repeat, or any date of a stopped one, cannot come back
+and can be deleted. A deleted date takes
+its check-ins with it as clean-up (the confirm says so), the same as "Stop
+repeating" does.
+
+An action on a date that is no longer there (another manager deleted it, or a
+stopped repeat took it) says so: "That date is no longer on the calendar.
+Refresh the list and try again." That covers editing, cancelling, deleting and
+listing who replied, each of which would otherwise succeed having changed
+nothing, which reads as done (and an empty list of replies as "nobody is
+coming").
+
+### From a manager's agent
+
+Every action above except checking people in is also on the manager agent API
+(`list_calendar_events`, `list_calendar_rsvps`, `create_calendar_entry`,
+`edit_calendar_entry`, `cancel_calendar_entry`, `stop_calendar_repeat`,
+`delete_calendar_entry`), through the same functions this screen calls, so an
+entry an agent adds is the same entry and is refused for the same reasons. Its
+contract, and the few things that are the agent's alone, are in
+`docs/manager-agent-api.md`.
 
 ## Member and visitor actions
 
@@ -173,9 +234,11 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
 
 1. **Managers write, everyone else reads.** Every mutation is a manager-only
    server function; the route guard alone is not enough, so each function
-   re-checks the role and writes through the service-role client.
+   re-checks the role and writes through the service-role client. The manager
+   agent API's calendar actions call the same code after checking the same role.
 2. **Cancel, don't delete.** Cancelling keeps the row so subscribers and RSVPs
-   survive. Deletion is for mistakes only.
+   survive. Deletion is for mistakes only, and only of a one-off date; its
+   check-ins go with it.
 3. **One RSVP per person per date**, owned by that person.
 4. **No public calendar feed, and one live link per person.** Only per-person
    links, so a subscriber can never silently miss a members-only entry. A link
@@ -206,7 +269,9 @@ top-up, so a repeat offers "Stop repeating" instead. Cancel keeps the record.
    invite-only badge. Nothing about a repeat is hardcoded.
 7. **Times.** A repeat's time of day is local to the club (Australia/Sydney); every
    dated row stores an absolute `timestamptz`; the calendar link emits UTC. The
-   manager form reads its date/time inputs as club time, not the browser's zone.
+   manager form reads its date/time inputs as club time, not the browser's zone,
+   and the manager agent API reads a one-off time sent with no offset the same
+   way.
 
 ## Not built, on purpose
 

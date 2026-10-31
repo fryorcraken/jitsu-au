@@ -6,7 +6,8 @@ description: >-
   membership for someone, cancel or delete an invoice, edit an invoice's
   details, file a scanned paper waiver, edit and publish the waiver template
   people sign and the code of conduct members agree to, manage the club's membership dates, publish and reorder the
-  club's knowledge base and read members' comments on it) against the live site
+  club's knowledge base and read members' comments on it, keep the club
+  calendar) against the live site
   via its manager agent HTTP API. Use when a club
   manager asks an agent to look up members/invoices, check one person's state
   (verification, code of conduct, waivers, attendance, profile), put a member on a plan or
@@ -22,7 +23,10 @@ description: >-
   window's start/end dates (and email every member about a plan), or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them, or write, edit, publish or delete a
-  blog post at /blog/<slug> and upload its pictures. Requires the
+  blog post at /blog/<slug> and upload its pictures, or see what is on the club
+  calendar and who is coming, add a class or event (once or weekly), edit,
+  cancel or restore a date, stop a weekly class, or delete one added by
+  mistake. Requires the
   UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
 ---
 
@@ -486,7 +490,7 @@ closes the membership and keeps the record (`edit_invoice` with
 >   money moved. Cancel it instead.
 > - **`attended`** — a class was checked in against it. **You cannot clear this
 >   one.** It is cleared by moving those check-ins to another membership, which
->   is a manager-screen action; this API has no check-in actions. Tell the
+>   is a manager-screen action; this API cannot move a check-in. Tell the
 >   manager what is blocking it and leave it to them.
 >
 > Being **active is not a blocker**. Every membership is authorised from the
@@ -1345,6 +1349,305 @@ blog and keep it, save it with `"status":"draft"` instead.
 scripts/agent.sh delete_blog_post '{"id":"<id>"}'
 ```
 
+### The calendar
+
+Classes, gradings and socials, shown on the calendar page at `/calendar` and in
+every calendar app somebody has subscribed with their personal calendar link.
+These seven actions are the agent's equivalent of the manager's Calendar screen
+at `/manager/calendar`, through the same functions that screen calls, so an
+entry you add is the same entry a manager would add, refused for the same
+reasons in the same words.
+
+An entry is either a **one-off** (one date) or **weekly**. A weekly entry keeps
+between six and twelve weeks of its dates on the calendar: it is topped back up
+to twelve once its furthest date is within six weeks, so more appear as they get
+close. Each of those dates is a row of its own, with its own `id`, carrying the
+entry's `series_id`.
+
+> [!IMPORTANT]
+>
+> - **A calendar change is public the moment it saves, and emails nobody.** It
+>   is on the calendar page straight away and in subscribers' calendar apps on
+>   their next refresh, and nobody is told. Before any create, edit, cancel,
+>   stop or delete, say back to the manager the title, the day and time
+>   (weekday, date and club time) and who can see it, and get a yes.
+> - **Every `id` is a date**, one row of `list_calendar_events`. The one
+>   exception is `stop_calendar_repeat`, which takes the weekly entry's
+>   `series_id`. A `series_id` sent where a date's `id` belongs is
+>   `404 not_found`, and so is the reverse.
+> - **"This date and every later one" is `scope: "series"`**, sent with the `id`
+>   of the first date to change, and only on a date of a weekly entry
+>   (`repeats: true`). On a one-off it is `422 not_repeating`.
+> - **Club time is Sydney time.** Take a date's `weekday` and `starts_local` from
+>   the response rather than working them out from `starts_at`, which is UTC:
+>   for anything before 10 or 11 in the morning in Sydney the UTC date is the
+>   day before, and the offset moves in April and October.
+
+### `list_calendar_events` — what is on
+
+```bash
+scripts/agent.sh list_calendar_events '{}'
+```
+
+No params, and any param is `400 invalid_params`: there is no `from`, `to` or
+filter, and one quietly ignored would come back as the whole list, read as
+filtered. Every date from 30 days ago to 180 days ahead, oldest first,
+cancelled ones included: the list on the Calendar screen, from the same read.
+The result is `{ time_zone, count, events }`, and each event has:
+
+- `id`, what every other calendar action takes, and `series_id` and `repeats`,
+  set when the date is one week of a weekly entry (`series_id` is what
+  `stop_calendar_repeat` takes).
+- `starts_at` / `ends_at` in UTC, and `starts_local` / `ends_local`, the same
+  times in club time as `YYYY-MM-DDTHH:MM` (the shape `create_calendar_entry`
+  takes back), plus `weekday`, the club-time day it starts on, as a name
+  (`"Monday"`). `create_calendar_entry` takes the weekday as a number.
+- `status` (`scheduled | cancelled`), `visibility` (`public | members`) and
+  `invite_only`, a badge on the date that hides it from nobody. `visibility`
+  is what decides who sees it.
+- `title`, `instructor_name`, `location` and `description`.
+- `rsvps`: `{ going, maybe, declined }`, how many replied each way.
+
+When a manager names a date ("Thursday's class next week"), find it by `title`,
+`weekday` and `starts_local`, and ask if more than one row could be meant. A
+week of a weekly entry more than six weeks out may not be listed yet: it is not
+missing, it cannot be edited or cancelled until it appears, and it is no reason
+to add a one-off for it. If the manager wants that week changed now, tell them
+it is not on the calendar yet and will be by the time it is six weeks away.
+
+### `list_calendar_rsvps` — who said they are coming
+
+```bash
+scripts/agent.sh list_calendar_rsvps '{"event_id":"<date id>"}'
+```
+
+`params`: `event_id` (**required**, a date's `id`). The result is
+`{ event_id, count, rsvps }`, newest reply first, each with `user_id`, `name`,
+`email`, `response` (`going | maybe | declined`) and `updated_at`. Only people
+signed in to the site can reply, so each `email` is that person's own. A date
+that is not there is `404 not_found`, so an empty list always means nobody has
+replied.
+
+A reply is not attendance. Who actually turned up is a check-in, made on the
+manager's check-in screen and read per person through `get_user`'s `checkins`;
+this API cannot make or change one. Deleting a date, or stopping a repeat,
+does remove the check-ins on the dates that go, as clean-up: say so to the
+manager before either.
+
+### `create_calendar_entry` — add a class or event
+
+`params`: `title` (**required**, up to 120 characters), `repeat` (**required**,
+a one-off or weekly, below), and optional `instructor_name` (up to 80
+characters), `location` (up to 120), `description` (up to 4000), `visibility`
+(`public`, the default, or `members`) and `invite_only` (default `false`, a
+badge only, below). Any other key is refused, inside `repeat` too, so a
+misspelt `visibility` is a `400` rather than an entry everybody can see.
+
+A one-off:
+
+```bash
+scripts/agent.sh create_calendar_entry '{
+  "title": "Grading",
+  "repeat": {"type": "never", "starts_at": "2026-11-21T10:00", "ends_at": "2026-11-21T12:00"}
+}'
+```
+
+A weekly class, Mondays at 6pm for 90 minutes until 14 December:
+
+```bash
+scripts/agent.sh create_calendar_entry '{
+  "title": "Beginner Gi",
+  "repeat": {"type": "weekly", "weekday": 1, "start_time": "18:00", "duration_minutes": 90,
+             "starts_on": "2026-11-02", "ends_on": "2026-12-14"}
+}'
+```
+
+- **Send a one-off's times as club time with no offset**, `"2026-11-05T18:00"`,
+  as the manager says them. The server reads them as Sydney time, the way the
+  screen reads its pickers. An offset or `Z` is accepted too, but never convert
+  a time yourself to supply one: Sydney moves between `+10:00` and `+11:00` in
+  April and October, and a wrong guess puts the class an hour out. An
+  impossible date (`2026-02-31T18:00`) is refused rather than rolled into
+  March, and the end cannot be before the start.
+- **`weekday` is a number: 0 Sunday, 1 Monday, 2 Tuesday, 3 Wednesday,
+  4 Thursday, 5 Friday, 6 Saturday.** Sunday is 0, never 7. `start_time` is
+  club time, 24-hour `HH:MM`; `duration_minutes` is 1 to 600; `starts_on` is the
+  first day it may run and `ends_on` the last (`YYYY-MM-DD`; leave `ends_on`
+  out, or send `null`, to keep it repeating). Both must be real dates:
+  `"2026-11-31"` is `400 invalid_params` ("That is not a real date."), which
+  needs the date fixed, not a retry.
+- **`422 no_dates`: a weekly entry has to put at least one date on the
+  calendar.** It is refused, with nothing saved, when its `ends_on` has passed
+  (dates are only made from today on), or when no day from `starts_on` to
+  `ends_on` falls on that `weekday`. Both usually mean a wrong weekday number or
+  a mistyped year: check them with the manager rather than adjusting the dates
+  yourself.
+- **A weekly entry's day, time and length are fixed once it is made.** Get them
+  right now: changing one later means stopping it and adding it again.
+- **A `location` left out is the club's gym**, which the screen's form fills
+  in. Send `""` (or `null`) for no location at all, or the place, for anything
+  held somewhere else. `null` clears `description` and `instructor_name` here
+  too, as it does on `edit_calendar_entry`.
+- **A weekly entry skips any week where a scheduled date with the same title
+  and visibility is already at that time**, such as a one-off for the same
+  class, so it never puts a second copy of a class on top of one.
+- **`visibility: "members"` means paid members only**, not everyone with an
+  account: an active, priced membership that is not a trial (held by the person
+  or by a child on their account), plus managers. Somebody on the free trial or
+  a casual class does not see it, on the site or in their calendar app.
+  `public` is everybody, signed in or not.
+- **`invite_only: true` is a badge and hides nothing.** It shows "invite only"
+  on each date, on the calendar page and in calendar apps, and everybody the
+  entry's `visibility` admits still sees it and can reply. There is no invite
+  list. If the manager wants to limit who sees an entry, that is
+  `visibility: "members"`; say so rather than setting `invite_only` and
+  letting them believe the entry is hidden.
+
+The result is `{ repeats, event_id, series_id, generated, dates }`. `event_id`
+is the one-off's date (`null` for a weekly entry) and `series_id` the weekly
+entry (`null` for a one-off). `generated` is how many dates went on, and `dates`
+is each of them as `list_calendar_events` reports it, without `rsvps`.
+
+> **Read the first date back to the manager**, from its `weekday` and
+> `starts_local`: "Beginner Gi is on the calendar every Monday at 18:00, from
+> Monday 2 November to 14 December." That is how a wrong weekday number or a
+> time an hour out gets caught while it is one entry to fix. `generated: 0` on a
+> weekly entry is not a failure: it happens only when the entry starts more
+> than about twelve weeks away (a new entry is generated that far ahead), and
+> its dates appear as it gets close.
+>
+> **`409 already_on_calendar` after a retry means your first attempt landed.**
+> There is no `client_submission_id` here: the entry itself is the key.
+>
+> - **A one-off** is refused when a date with the same title already starts at
+>   that time, whether a one-off or one week of a weekly entry. A scheduled
+>   match always refuses. A cancelled one refuses only if it also ends at the
+>   same time, so cancelling a date and adding a longer one-off in its place
+>   works. `error.details` is `{ event_id, series_id, status }`.
+> - **A weekly entry** is refused when the same title already repeats on that
+>   weekday at that time on any of the same dates. That means the dates the two
+>   runs actually hold: a run ending on the Friday the semester ends does not
+>   clash with the next one starting that Friday, and a run whose last date has
+>   passed is over, even though it still counts as active until it is stopped.
+>   `error.details` is `{ series_id }`.
+>
+> If you were retrying a create you never heard back from, that match is your
+> entry: find it in `list_calendar_events` and report it rather than adding it
+> again.
+>
+> Otherwise, read the message. A cancelled match says so: restore it with
+> `cancel_calendar_entry` rather than adding it again. A genuine second entry at
+> the same time needs a different title. Next semester's run of a weekly class
+> is not a duplicate of this semester's, provided this one has an `ends_on`
+> before the new one's first class; one with no end holds every week from its
+> start on, so the new run is refused until the old one is stopped.
+
+### `edit_calendar_entry` — change an entry's details
+
+```bash
+# This date only:
+scripts/agent.sh edit_calendar_entry '{"scope":"event","id":"<date id>","description":"Bring your gi and a water bottle."}'
+# This date and every later one of a weekly class:
+scripts/agent.sh edit_calendar_entry '{"scope":"series","id":"<first date to change>","title":"Beginner Gi (all levels)"}'
+```
+
+`params`: `scope` (**required**, `event | series`), `id` (**required**, a
+date), and at least one of `title`, `description`, `instructor_name`,
+`location`, `visibility` and `invite_only`. Only what you send changes. `""` or
+`null` clears `description`, `instructor_name` or `location`; `title` cannot be
+cleared. A call with nothing to change is `400 invalid_params`, so a misspelt
+field never comes back as a success that changed nothing.
+
+`scope: "series"` changes that date, every later one and the weekly rule
+itself, so weeks still to be generated carry the change too. Dates before the
+one you name, and dates already past, are never rewritten, because they record
+what happened.
+
+The result is `{ id, scope, updated }`, where `updated` is how many dates
+changed. `404 not_found` when there is no such date; `422 not_repeating` for
+`scope: "series"` on a one-off.
+
+> **A date's day, time and length cannot be edited**, on either scope. To move
+> or lengthen one date, cancel it and add a one-off at the new time. The same
+> title is fine, even at the same start: a cancelled date only counts as a
+> duplicate when the new one-off also ends when it did. To move a weekly class,
+> stop it and add it again.
+>
+> **`invite_only` changes the badge and nothing else**, on whichever dates the
+> scope covers, like any other field. To change who can see an entry, change
+> `visibility`.
+
+### `cancel_calendar_entry` — call off a date, or restore it
+
+```bash
+scripts/agent.sh cancel_calendar_entry '{"id":"<date id>","cancelled":true}'
+scripts/agent.sh cancel_calendar_entry '{"id":"<date id>","cancelled":false}'
+```
+
+`params`: `id` (**required**, a date), `cancelled` (**required**: `true`
+cancels, `false` restores) and `scope` (`event`, the default, or `series`). A
+cancelled date stays on the calendar, struck through and marked Cancelled, with
+its replies kept, and subscribed calendar apps show it as cancelled. Nobody can
+reply to it or be checked in to it while it is cancelled. Restoring puts it back
+as it was. The result is `{ id, scope, cancelled, updated }`, with
+`404 not_found` and `422 not_repeating` as for editing.
+
+> **Cancelling is almost always what the manager wants** when they say a class
+> is off, and over `delete_calendar_entry` in particular: it keeps the record,
+> it can be undone, and a subscriber sees the class marked cancelled instead of
+> quietly gone.
+>
+> **Cancelling with `scope: "series"` does not end a weekly class.** It cancels
+> that date and every later one already on the calendar, but the weeks the
+> entry adds later still arrive scheduled. To end a weekly class, use
+> `stop_calendar_repeat`. For a break of a few weeks, cancel those dates one at
+> a time.
+
+### `stop_calendar_repeat` — end a weekly class
+
+```bash
+scripts/agent.sh stop_calendar_repeat '{"series_id":"<series_id from any of its dates>"}'
+```
+
+`params`: `series_id` (**required**), read off any date of the entry in
+`list_calendar_events`. This is the one calendar action that does not take a
+date's `id`, and sending one is `404 not_found`.
+
+Every date still to start comes off the calendar, with its replies, and no more
+are made. Dates that have started stay, because they happened. Anybody already
+checked in to a date that comes off has that check-in removed with it. The
+result is `{ series_id, already_stopped, removed }`: `removed` is how many
+dates came off.
+
+> **There is no undo.** To have the class back, add it again with
+> `create_calendar_entry`. Confirm which class with the manager first, and
+> report `removed` afterwards.
+>
+> **It stops the class now.** No action gives a weekly class that is already
+> running a last date, so if the manager wants it to run until a set day, say
+> so and let them choose rather than stopping it early.
+>
+> **Safe to send again.** A repeat already stopped is left as it is, apart from
+> clearing any date a first call missed, and comes back `already_stopped: true`.
+
+### `delete_calendar_entry` — remove a one-off added by mistake
+
+```bash
+scripts/agent.sh delete_calendar_entry '{"id":"<date id>"}'
+```
+
+`params`: `id` (**required**, a date). Removes a one-off as though it was never
+there, with every reply and every check-in to it. There is no undo and no
+confirm flag, so asking the manager first is your job, and say if people are
+already checked in. The result is `{ deleted: true, id, checkins_removed }`.
+
+- **`409 repeating_date`**: the date is still to come in a weekly entry that
+  is still repeating (`error.details.series_id`), so it would only come back.
+  Cancel the date, or `stop_calendar_repeat` to end the class. A past date of a
+  weekly entry, or any date of a stopped one, can be deleted.
+- **`404 not_found`**: there is no such date. It was already deleted, or a
+  stopped repeat took it.
+
 ## Guidance
 
 - Confirm the target invoice with the manager (member name + amount) before an
@@ -1366,6 +1669,13 @@ scripts/agent.sh delete_blog_post '{"id":"<id>"}'
   say plainly that it goes public and is announced to members. Drafting is
   safe; publishing is the step to confirm. The same goes for
   `delete_blog_post`, which cannot be undone.
+- Before any calendar change, read back to the manager what will be on the
+  calendar: the title, the weekday, date and time in club time, who can see it
+  (everybody, or paid members only), and whether it carries the invite-only
+  badge, which hides it from nobody. It is public at once, on the site and in
+  subscribers' calendar apps, and nobody is emailed about it, so there is no
+  later step where a wrong day gets caught. When they say a class is off,
+  cancel it; delete only what should never have been added.
 - Before a `file_waiver` batch, confirm scope with the manager: how many
   records, whether any should be flagged for review rather than filed
   automatically, and that leaving everything pending (not approved) is what
@@ -1386,7 +1696,7 @@ scripts/agent.sh delete_blog_post '{"id":"<id>"}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"25"`), and its
+- The manifest's `version` tells generations apart (currently `"32"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

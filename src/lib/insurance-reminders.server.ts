@@ -30,6 +30,7 @@ import { SITE_NAME } from "@/lib/email-sender";
 import { SITE_ORIGIN } from "@/lib/site-origin";
 import { loadHouseholdContacts } from "@/lib/household-email";
 import { contactUserIdFor } from "@/lib/household";
+import { chunks } from "@/lib/id-chunks";
 import { writeNotifications } from "@/lib/notification-email.server";
 import {
   INSURANCE_ENDED_CAP_DAYS,
@@ -61,15 +62,6 @@ type AdminClient = SupabaseClient<Database>;
  * after it in the same request.
  */
 const SEND_BATCH = 20;
-
-/** PostgREST renders `.in()` into the URL; same chunk size as household-email.ts. */
-const ID_CHUNK = 100;
-
-function chunks<T>(xs: readonly T[]): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < xs.length; i += ID_CHUNK) out.push(xs.slice(i, i + ID_CHUNK));
-  return out;
-}
 
 /** The ids of every plan whose KIND is insurance. Never the plan code. */
 async function insurancePlanIds(db: AdminClient): Promise<string[]> {
