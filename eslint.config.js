@@ -53,9 +53,10 @@ export default defineConfig(
           ],
         },
       ],
-      // TanStack Start 1.169 removes `.inputValidator()` with no alias, and a
-      // removed builder method fails only at runtime, so the deprecated name is
-      // refused here, before anything can bring it back.
+      // TanStack Start 1.169 removes `.inputValidator()` with no alias. On the
+      // 1.168 line it still type-checks (it is only deprecated) and the build
+      // does not type-check at all, so lint is the one check that refuses it
+      // before the upgrade turns it into a broken server function.
       "no-restricted-properties": [
         "error",
         {

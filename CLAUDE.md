@@ -255,8 +255,8 @@ Read `src/routes/README.md` before touching routes. Key points:
 - **Server functions** live in `src/lib/*.functions.ts` and use
   `createServerFn()` from `@tanstack/react-start`. Client code calls them via
   `useServerFn(fn)` (see `src/routes/register-interest.tsx`). Validate every
-  input with a Zod `.validator(...)`. Never `.inputValidator(...)`: it is
-  deprecated and gone in TanStack Start 1.169, and lint refuses it.
+  input with a Zod `.validator(...)`, never `.inputValidator(...)` (see "The
+  TanStack versions are pinned exactly").
 - ⚠️ **`*.functions.ts` and route files are bundled to the client.** Do **not**
   top-level `import` `client.server.ts` (service-role key) from them. Instead
   lazy-load inside the handler:
