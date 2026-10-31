@@ -3,7 +3,7 @@ import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { formatDate } from "@/lib/dates";
-import { BLOG_POST_KIND_LABELS, blogListSearchSchema } from "@/lib/validation";
+import { blogListSearchSchema } from "@/lib/validation";
 import { listPublishedBlogPosts } from "@/lib/blog.functions";
 import { buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { cn } from "@/lib/utils";
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/blog/")({
   },
   head: () => ({
     meta: buildPageMeta({
-      title: "Blog | UTS Jitsu",
+      title: "Blog: training and club news | UTS Jitsu",
       description:
         "Articles on training and self-defence, and the latest club news from UTS Jitsu, Japanese Jiu-Jitsu at UTS Ultimo, Sydney.",
       path: "/blog",
@@ -60,13 +60,10 @@ function ArticleCard({ article }: { article: Article }) {
         />
       )}
       <div className="flex flex-1 flex-col p-6">
-        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+        {/* No "Article" label: the section heading above already says so. */}
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-primary">
           <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
-          {BLOG_POST_KIND_LABELS.article}
-          <span aria-hidden="true">·</span>
-          <span className="normal-case tracking-normal text-muted-foreground">
-            {article.reading_minutes} min read
-          </span>
+          {article.reading_minutes} min read
         </p>
         <h3 className="mt-2 text-balance text-2xl font-bold">
           <Link
@@ -144,14 +141,14 @@ function BlogIndex() {
     <SiteLayout>
       <section className="mx-auto max-w-4xl px-4 py-16 md:py-24">
         <p className="text-sm font-semibold uppercase tracking-wider text-primary">Blog</p>
-        <h1 className="mt-3 text-4xl font-bold md:text-5xl">News from the mat</h1>
+        <h1 className="mt-3 text-4xl font-bold md:text-5xl">From the mat</h1>
         <p className="mt-4 text-muted-foreground">
-          Articles worth coming back to, and the latest from the club.
+          How we train, and what's been happening at the club.
         </p>
 
         {error ? (
           <div className="mt-10 rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm">
-            <p>Something went wrong loading the blog.</p>
+            <p>We couldn't load the blog. Check your connection and try again.</p>
             <Button
               variant="outline"
               size="sm"
@@ -192,7 +189,7 @@ function BlogIndex() {
 
             <section aria-labelledby="blog-updates" className="mt-14">
               <h2 id="blog-updates" className="text-2xl font-bold">
-                {page > 1 ? `Club updates, page ${page}` : "Latest club updates"}
+                {page > 1 ? `Club news, page ${page}` : "Club news"}
               </h2>
               {page > 1 && (result?.articleCount ?? 0) > 0 && (
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -209,7 +206,7 @@ function BlogIndex() {
               )}
               {posts.length === 0 ? (
                 <p className="mt-4 text-sm text-muted-foreground">
-                  No club updates yet. Check back soon.
+                  No club news yet. Check back soon.
                 </p>
               ) : (
                 <div className="mt-2 divide-y border-b">
@@ -224,7 +221,7 @@ function BlogIndex() {
 
         {!error && !pageOutOfRange && totalPages > 1 && (
           <nav
-            aria-label="Club updates pagination"
+            aria-label="Club news pagination"
             className="mt-10 flex items-center justify-between"
           >
             {page > 1 ? (
