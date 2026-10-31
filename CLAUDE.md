@@ -679,11 +679,22 @@ So upgrade the three together, to versions that agree, and keep them exact.
 `bun run typecheck` is the check that proves it — a duplicated router is
 invisible to `bun run build`.
 
-`@tanstack/react-start` 1.169 removes `.inputValidator()` from server
-functions, with no alias. Every call here already uses its replacement,
-`.validator()`, since 2026-10-31, and a `no-restricted-properties` lint rule
-refuses the old name (Lovable's project knowledge says the same), so moving
-past 1.168 is an ordinary upgrade of the three together.
+`@tanstack/react-start` 1.169 removes `.inputValidator()`, with no alias, from
+both builders that have it: `createServerFn()` and `createMiddleware()`. Every
+server function here uses `.validator()` since 2026-10-31 (no middleware here
+validates input), and a `no-restricted-properties` lint rule refuses the old
+name on any object. So moving past 1.168 is an upgrade of the three together,
+with one thing to check first:
+
+- **Lovable's editor is the likely way back in.** Its project knowledge (in
+  Lovable, not in this repo) was told on 2026-10-31 to write `.validator()`.
+  Lovable pushes straight to `main` without running lint, so if it slips, the
+  first sign is `main` red on that rule. That is the rule doing its job: rename
+  the call in a follow-up commit, and do not bump past 1.168 while it is red,
+  because on 1.169 the same call breaks its server function at runtime and the
+  build would not say so.
+- **Once on 1.169 the rule is redundant.** The method is gone from the types,
+  so `bun run typecheck` rejects it on its own; the rule can then be deleted.
 
 ## Conventions & style
 
