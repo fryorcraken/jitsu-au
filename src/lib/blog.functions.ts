@@ -9,6 +9,8 @@ import {
   blogPostSlugSchema,
   type BlogImageMimeType,
   type BlogPostInput,
+  asBlogPostKind,
+  type BlogPostKind,
   type BlogPostStatus,
   deleteBlogPostSchema,
   getBlogPostForEditSchema,
@@ -16,7 +18,7 @@ import {
   uploadBlogImageSchema,
 } from "@/lib/validation";
 import { defaultBlogSlug, uniqueSlug } from "@/lib/slug";
-import { deriveExcerpt } from "@/lib/blog-content";
+import { deriveExcerpt, readingMinutes } from "@/lib/blog-content";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
 const BUCKET = "blog-media";
@@ -160,26 +162,60 @@ export function seoUpdate(data: { seo_title?: string; seo_description?: string }
   };
 }
 
+/**
+ * The kind an update writes: only when the caller sent one. A field left out
+ * keeps what is stored, for the same reason as `seoUpdate`: an editor tab
+ * opened before articles existed saves without it, and writing the default
+ * would quietly turn an article back into a club update. Exported for its
+ * test.
+ */
+export function kindUpdate(data: { kind?: BlogPostKind }): { kind?: BlogPostKind } {
+  return data.kind === undefined ? {} : { kind: data.kind };
+}
+
 // ---- Public: published posts ----
 
+/**
+ * The public blog list: the articles, then a page of club updates.
+ *
+ * Articles are timeless, so they are not paged and not pushed down by newer
+ * posts: every published article comes back on the first page, newest first,
+ * with its reading time. Updates are paged exactly as every post was before
+ * articles existed, and `total` counts updates only, so the page count is
+ * about the list it pages. Later pages carry no articles, only how many there
+ * are (`articleCount`), so they can point back to page one when there is
+ * something there to point at.
+ */
 export const listPublishedBlogPosts = createServerFn({ method: "GET" })
   .validator((d: unknown) => listBlogPostsSchema.parse(d))
   .handler(async ({ data }) => {
     const supabase = serverSupabase();
     const from = (data.page - 1) * POSTS_PAGE_SIZE;
     const to = from + POSTS_PAGE_SIZE - 1;
-    const {
-      data: rows,
-      error,
-      count,
-    } = await supabase
-      .from("blog_posts")
-      .select("id, slug, title, excerpt, cover_image_path, published_at", { count: "exact" })
-      .eq("status", "published")
-      .order("published_at", { ascending: false })
-      .range(from, to);
-    if (error) throw new Error(error.message);
-    const posts = (rows ?? []).map((r) => ({
+    const [updates, articles] = await Promise.all([
+      supabase
+        .from("blog_posts")
+        .select("id, slug, title, excerpt, cover_image_path, published_at", { count: "exact" })
+        .eq("status", "published")
+        .eq("kind", "update")
+        .order("published_at", { ascending: false })
+        .range(from, to),
+      // On later pages only the count is wanted: `head` asks for it without
+      // the rows, so no article body leaves the database for a page that
+      // does not show them.
+      supabase
+        .from("blog_posts")
+        .select("id, slug, title, excerpt, body_md, cover_image_path, published_at", {
+          count: "exact",
+          head: data.page !== 1,
+        })
+        .eq("status", "published")
+        .eq("kind", "article")
+        .order("published_at", { ascending: false }),
+    ]);
+    if (updates.error) throw new Error(updates.error.message);
+    if (articles.error) throw new Error(articles.error.message);
+    const posts = (updates.data ?? []).map((r) => ({
       id: r.id,
       slug: r.slug,
       title: r.title,
@@ -187,7 +223,22 @@ export const listPublishedBlogPosts = createServerFn({ method: "GET" })
       published_at: r.published_at,
       cover_image_url: coverImageUrl(supabase, r.cover_image_path),
     }));
-    return { posts, total: count ?? 0, page: data.page, pageSize: POSTS_PAGE_SIZE };
+    return {
+      articleCount: articles.count ?? 0,
+      articles: (articles.data ?? []).map((r) => ({
+        id: r.id,
+        slug: r.slug,
+        title: r.title,
+        excerpt: r.excerpt,
+        published_at: r.published_at,
+        cover_image_url: coverImageUrl(supabase, r.cover_image_path),
+        reading_minutes: readingMinutes(r.body_md),
+      })),
+      posts,
+      total: updates.count ?? 0,
+      page: data.page,
+      pageSize: POSTS_PAGE_SIZE,
+    };
   });
 
 export const getBlogPostBySlug = createServerFn({ method: "GET" })
@@ -197,7 +248,7 @@ export const getBlogPostBySlug = createServerFn({ method: "GET" })
     const { data: row, error } = await supabase
       .from("blog_posts")
       .select(
-        "id, slug, title, excerpt, body_md, cover_image_path, published_at, seo_title, seo_description",
+        "id, slug, title, excerpt, body_md, cover_image_path, published_at, seo_title, seo_description, kind",
       )
       .eq("slug", data.slug)
       .eq("status", "published")
@@ -214,6 +265,9 @@ export const getBlogPostBySlug = createServerFn({ method: "GET" })
       cover_image_url: coverImageUrl(supabase, row.cover_image_path),
       seo_title: row.seo_title,
       seo_description: row.seo_description,
+      kind: asBlogPostKind(row.kind),
+      // Only an article shows one; an update leads with its date instead.
+      reading_minutes: row.kind === "article" ? readingMinutes(row.body_md) : null,
     };
   });
 
@@ -240,7 +294,7 @@ export class BlogPostNotFoundError extends Error {
 export async function listBlogPostRows(admin: AdminClient) {
   const { data, error } = await admin
     .from("blog_posts")
-    .select("id, slug, title, status, published_at, created_at, updated_at")
+    .select("id, slug, title, status, kind, published_at, created_at, updated_at")
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -339,6 +393,7 @@ export async function createBlogPostRow(
       published_at: publishedAt,
       seo_title: resolveSeoField(data.seo_title),
       seo_description: resolveSeoField(data.seo_description),
+      kind: data.kind ?? "update",
     })
     .select("id, slug")
     .single();
@@ -425,6 +480,7 @@ export async function updateBlogPostRow(
       status: data.status,
       published_at: publishedAt,
       ...seoUpdate(data),
+      ...kindUpdate(data),
       updated_at: new Date().toISOString(),
     })
     .eq("id", data.id);

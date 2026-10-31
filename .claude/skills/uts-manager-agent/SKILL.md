@@ -23,7 +23,8 @@ description: >-
   window's start/end dates (and email every member about a plan), or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them, or write, edit, publish or delete a
-  blog post at /blog/<slug> and upload its pictures, or see what is on the club
+  blog post at /blog/<slug> (an article kept on top, or a club update) and
+  upload its pictures, or see what is on the club
   calendar and who is coming, add a class or event (once or weekly), edit,
   cancel or restore a date, stop a weekly class, or delete one added by
   mistake. Requires the
@@ -1231,13 +1232,29 @@ Posts at `/blog/<slug>`, written in Markdown. These are the same saves the
 manager's blog editor at `/manager/blog` makes. A post is a **draft** (only
 managers can see it) or **published** (anyone on the internet can).
 
+Every post also has a `kind`, which decides where it sits on the public blog:
+
+- **`article`**: a timeless piece (training, self-defence, the club's approach)
+  that is worth reading for years. Every published article stays at the **top**
+  of `/blog`, above the club updates, whatever is posted after it, and shows its
+  reading time rather than leading with its date.
+- **`update`**: club news that dates: a session log, a grading, the week.
+  Listed newest first under the articles, so it moves down as newer posts
+  arrive. Every post written before articles existed is an update, and a new
+  post is one unless you say otherwise.
+
+If the manager does not say which, judge it from the piece: "Wednesday session
+log" is an update, an essay on why the club trains against resistance is an
+article. When it is not obvious, ask, because an article stays on top for good.
+
 ### `list_blog_posts` — every post, drafts included
 
 ```bash
 scripts/agent.sh list_blog_posts '{}'
 ```
 
-Each post has `url`, its public address, which is **null for a draft**: a draft
+Each post has `kind` (`article` or `update`) and `url`, its public address,
+which is **null for a draft**: a draft
 has no public address, so never hand a draft's slug to anybody as a link. Give a
 manager `edit_url` instead, their own screen for the post.
 
@@ -1271,6 +1288,14 @@ A blank `slug` is made from today's date and the title, and a blank `excerpt`
 from the opening of the body; read both back from the result. An excerpt does
 not follow a rewritten body by itself: send `"excerpt": ""` with the new body to
 have it taken afresh.
+
+`kind` makes a post an article or a club update (above). Leave it out on a
+change to keep the stored one; send it to move a post between the two sections
+of the blog, which happens at once on a published post and announces nothing:
+
+```bash
+scripts/agent.sh save_blog_post '{"id":"<id>","kind":"article"}'
+```
 
 `seo_title` and `seo_description` are what search engines and link previews
 show for the post, when the headline or the excerpt is not what should appear

@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
+import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { Loading } from "@/components/site/Loading";
@@ -22,6 +23,7 @@ import { blogPostClass } from "@/lib/status-colours";
 import { canonicalUrl } from "@/lib/seo";
 import { formatDateTime } from "@/lib/dates";
 import { deleteBlogPost, listAllBlogPosts } from "@/lib/blog.functions";
+import { asBlogPostKind, BLOG_POST_KIND_LABELS } from "@/lib/validation";
 import { useAuth, useRoles } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_authenticated/manager/blog")({
@@ -121,6 +123,9 @@ function BlogPostsPage() {
                   Title
                 </th>
                 <th scope="col" className="p-3">
+                  Kind
+                </th>
+                <th scope="col" className="p-3">
                   Status
                 </th>
                 <th scope="col" className="p-3">
@@ -161,6 +166,18 @@ function BlogPostsPage() {
                         />
                       )}
                     </div>
+                  </td>
+                  <td className="p-3">
+                    {/* An article is the exception, so it is the one that
+                        stands out: it sits on top of the public blog. */}
+                    {asBlogPostKind(row.kind) === "article" ? (
+                      <span className="inline-flex items-center gap-1 font-semibold text-primary">
+                        <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                        {BLOG_POST_KIND_LABELS.article}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">{BLOG_POST_KIND_LABELS.update}</span>
+                    )}
                   </td>
                   <td className="p-3">
                     <Pill label={row.status} className={blogPostClass(row.status)} />

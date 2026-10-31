@@ -19,6 +19,7 @@ const post = {
   excerpt: "An excerpt",
   body_md: "Original body",
   status: "draft" as const,
+  kind: "update",
   cover_image_path: null,
   cover_image_url: null,
   seo_title: null,
@@ -150,6 +151,31 @@ describe("/manager/blog/:id", () => {
     expect(sent.data.seo_title).toBe("Hello from the mats");
     // Blank goes as blank, which the server stores as "use the excerpt".
     expect(sent.data.seo_description).toBe("");
+  });
+
+  it("loads the stored kind and sends the one the manager picked", async () => {
+    const user = userEvent.setup();
+    render(<EditBlogPostPage />);
+
+    const update = await screen.findByRole("radio", { name: "Club update" });
+    expect(update).toBeChecked();
+    // Each choice says what it does to where the post sits on the blog.
+    expect(screen.getByRole("radio", { name: "Article" })).toHaveAccessibleDescription(
+      /Kept at the top of the blog/,
+    );
+
+    await user.click(screen.getByRole("radio", { name: "Article" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateBlogPost).toHaveBeenCalledTimes(1));
+    const sent = updateBlogPost.mock.calls[0][0] as { data: { kind: string } };
+    expect(sent.data.kind).toBe("article");
+  });
+
+  it("opens an article as an article", async () => {
+    getBlogPostForEdit.mockResolvedValue({ ...post, kind: "article" });
+    render(<EditBlogPostPage />);
+    expect(await screen.findByRole("radio", { name: "Article" })).toBeChecked();
   });
 
   it("saves a published post straight to draft, with no modal in the way", async () => {

@@ -501,7 +501,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("33");
+    expect(AGENT_MANIFEST.version).toBe("34");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -550,6 +550,25 @@ describe("AGENT_MANIFEST", () => {
     // The merge is the thing a caller would otherwise get wrong: turning the
     // banner off must not look like it needs the message sent again.
     expect(notes).toMatch(/keeps its stored value/);
+  });
+
+  it("announces the blog post kind", () => {
+    const entry = AGENT_MANIFEST.changes.find((c) => c.version === "34")!;
+    expect(entry.breaking).toBe(false);
+    const notes = entry.notes.join(" ");
+    for (const action of ["list_blog_posts", "get_blog_post", "save_blog_post"]) {
+      expect(notes).toContain(action);
+    }
+    // What a caller relying on a cached manifest has to know to not demote an
+    // article by leaving the field out.
+    expect(notes).toMatch(/omits it keeps the stored one/);
+  });
+
+  it("documents kind on save_blog_post", () => {
+    const save = AGENT_MANIFEST.actions.find((a) => a.name === "save_blog_post")!;
+    const kind = save.params.find((p) => p.name === "kind");
+    expect(kind?.required).toBe(false);
+    expect(kind?.description).toMatch(/^article \| update\./);
   });
 
   it("announces the calendar actions", () => {
@@ -975,6 +994,7 @@ describe("mergeAgentBlogPostEdit", () => {
     body_md: "Hello, and welcome.",
     cover_image_path: "drafts/cover.jpg",
     status: "published",
+    kind: "update",
     seo_title: "Welcome to the club",
     seo_description: "What to expect at your first class.",
   };
@@ -1040,6 +1060,18 @@ describe("mergeAgentBlogPostEdit", () => {
     expect(changed.seo_title).toBe("First class");
     expect(changed.seo_description).toBe("");
   });
+
+  // The shared writer leaves an omitted kind alone, but this merge is what
+  // the writer is handed, so it has to carry the stored kind through: a typo
+  // fix on an article must not move it down among the club updates.
+  it("keeps an article an article unless kind is sent", () => {
+    const article = { ...stored, kind: "article" };
+    expect(mergeAgentBlogPostEdit(article, { id: stored.id, body_md: "New body." }).kind).toBe(
+      "article",
+    );
+    expect(mergeAgentBlogPostEdit(article, { id: stored.id, kind: "update" }).kind).toBe("update");
+    expect(mergeAgentBlogPostEdit(stored, { id: stored.id, kind: "article" }).kind).toBe("article");
+  });
 });
 
 describe("projectAgentBlogPost", () => {
@@ -1048,10 +1080,16 @@ describe("projectAgentBlogPost", () => {
     slug: "2026-09-01-welcome",
     title: "Welcome",
     status: "published",
+    kind: "update",
     published_at: "2026-09-01T00:00:00Z",
     created_at: "2026-09-01T00:00:00Z",
     updated_at: "2026-09-01T00:00:00Z",
   };
+
+  it("reports whether a post is an article or a club update", () => {
+    expect(projectAgentBlogPost(post).kind).toBe("update");
+    expect(projectAgentBlogPost({ ...post, kind: "article" }).kind).toBe("article");
+  });
 
   it("gives a live post its public address on the real site", () => {
     expect(projectAgentBlogPost(post).url).toBe("https://utsjitsu.com.au/blog/2026-09-01-welcome");

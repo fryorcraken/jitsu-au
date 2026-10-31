@@ -350,6 +350,11 @@ export type _BlogPostSeoColumns = RequireColumns<
   "seo_title" | "seo_description"
 >;
 
+// ---- blog: an article or a club update (20261031180000) ----
+// Read by the public blog list, which keeps articles on top, and by the post
+// page's label; written by the editor and the manager agent API.
+export type _BlogPostKindColumn = RequireColumns<Tables["blog_posts"]["Row"], "kind">;
+
 // ---- knowledge base: versioned pages members read and annotate ----
 export type _KbArticleColumns = RequireColumns<
   Tables["kb_articles"]["Row"],

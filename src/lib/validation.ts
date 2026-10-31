@@ -4245,6 +4245,31 @@ export type ResolveAnnotationInput = z.infer<typeof resolveAnnotationSchema>;
 export const blogPostStatuses = ["draft", "published"] as const;
 export type BlogPostStatus = (typeof blogPostStatuses)[number];
 
+/**
+ * What kind of post it is. An `article` is a timeless piece, kept on top of the
+ * public blog whatever is posted after it; an `update` is club news (a session
+ * log, the week's news), listed newest first under the articles. Every post
+ * written before articles existed is an update. See docs/blog.md, rule 13.
+ */
+export const blogPostKinds = ["article", "update"] as const;
+export type BlogPostKind = (typeof blogPostKinds)[number];
+
+/**
+ * A stored `kind` as the app speaks it. The column's CHECK allows only the two,
+ * so anything else means a schema this code does not know about; reading it as
+ * an update keeps the post where every post was before articles existed,
+ * rather than promoting it to the top of the blog.
+ */
+export function asBlogPostKind(kind: string | null | undefined): BlogPostKind {
+  return kind === "article" ? "article" : "update";
+}
+
+/** What each kind is called on screen, wherever a post's kind is shown. */
+export const BLOG_POST_KIND_LABELS: Record<BlogPostKind, string> = {
+  article: "Article",
+  update: "Club update",
+};
+
 export const blogCommentStatuses = ["visible", "hidden"] as const;
 export type BlogCommentStatus = (typeof blogCommentStatuses)[number];
 
@@ -4271,6 +4296,10 @@ export const BLOG_SEO_DESCRIPTION_MAX = 300;
  *
  * `seo_title` and `seo_description` are optional too, and a blank one is
  * stored as NULL and means the default (`blogPostSeo` in `src/lib/seo.ts`).
+ *
+ * `kind` is optional so that an editor tab opened before it existed can still
+ * save: a new post without one is an update (the column's default), and an
+ * edit without one keeps what is stored (`kindUpdate`).
  */
 export const blogPostSchema = z.object({
   id: z.string().uuid().optional(),
@@ -4280,6 +4309,7 @@ export const blogPostSchema = z.object({
   body_md: z.string().trim().min(1).max(50000),
   cover_image_path: z.string().trim().max(500).optional().or(z.literal("")),
   status: z.enum(blogPostStatuses).default("draft"),
+  kind: z.enum(blogPostKinds).optional(),
   seo_title: z
     .string()
     .trim()
@@ -4411,6 +4441,7 @@ export const agentSaveBlogPostSchema = z
       "Pass the `path` that upload_blog_image returned, not the image's web address.",
     ),
     status: z.enum(blogPostStatuses).optional(),
+    kind: z.enum(blogPostKinds).optional(),
     // `get_blog_post` reports a post on the defaults as null, so null is
     // accepted here and means the same as "": back to the default. Without
     // this, sending back what was read is a 400.

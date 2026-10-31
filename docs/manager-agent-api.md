@@ -520,6 +520,13 @@ code_of_conduct_not_published` with its `version`, and nothing is made
     so a post on the defaults reads back `null` for both rather than the text
     its page resolves to: an agent that wrote that text back would pin the
     default and stop it following the post's title and excerpt.
+  - **`kind` (`"34"`) is `article` or `update`** (`docs/blog.md`, rule 13), and
+    every blog action reports it. An omitted one keeps what is stored, through
+    `mergeAgentBlogPostEdit`, and a new post without one is an update, the
+    column's default. That keeps a typo fix from moving an article down among
+    the club updates, which is the one thing about this field that is not
+    obvious from its name. Changing it on a published post moves the post
+    between the two sections of `/blog` at once and announces nothing.
   - **Two addresses per post.** `url` is the public one and is null for a draft
     (the public route 404s on one); `edit_url` is the manager's screen.
   - **`upload_blog_image` takes base64 `data` or a public https `url`** the
@@ -820,7 +827,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"33"`.
+test so the bump is a deliberate edit, and the current value is `"34"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

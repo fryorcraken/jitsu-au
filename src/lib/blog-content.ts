@@ -90,6 +90,22 @@ function proseFromMarkdown(markdown: string): string {
 }
 
 /**
+ * A post's prose as one line of plain text: what a reader reads, without
+ * headings, code, tables, images or video lines. The excerpt is cut from it
+ * and the reading time counted from it, so the two always agree on what
+ * counts as the post's words.
+ */
+function postProse(bodyMd: string): string {
+  return splitBlogContent(bodyMd)
+    .filter((block) => block.type === "markdown")
+    .map((block) => proseFromMarkdown(block.text))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * A one-line summary of a post, for when the manager leaves the excerpt blank.
  *
  * Returns "" when there is nothing to summarise — an empty body, or one made
@@ -97,13 +113,7 @@ function proseFromMarkdown(markdown: string): string {
  * rather than storing a blank string.
  */
 export function deriveExcerpt(bodyMd: string, maxLength: number = EXCERPT_MAX_LENGTH): string {
-  const text = splitBlogContent(bodyMd)
-    .filter((block) => block.type === "markdown")
-    .map((block) => proseFromMarkdown(block.text))
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const text = postProse(bodyMd);
   if (text.length <= maxLength) return text;
   const cut = text.slice(0, maxLength);
   const lastSpace = cut.lastIndexOf(" ");
@@ -115,6 +125,22 @@ export function deriveExcerpt(bodyMd: string, maxLength: number = EXCERPT_MAX_LE
     "",
   );
   return `${head}…`;
+}
+
+/** Words a minute an adult reads prose at, for the reading time an article
+ * shows. The usual figure for screen reading is 200 to 250; the middle of it. */
+export const READING_WORDS_PER_MINUTE = 230;
+
+/**
+ * How many minutes a post takes to read, for an article's "12 min read".
+ *
+ * Counts the same prose the excerpt is taken from, so headings, code, tables,
+ * images and video lines do not pad it. Rounded up, and never under a minute:
+ * "0 min read" says the post is empty.
+ */
+export function readingMinutes(bodyMd: string): number {
+  const words = postProse(bodyMd).split(" ").filter(Boolean).length;
+  return Math.max(1, Math.ceil(words / READING_WORDS_PER_MINUTE));
 }
 
 /**

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import {
+  kindUpdate,
   resolveExcerpt,
   resolvePostSlug,
   resolvePublishedAt,
@@ -138,5 +139,19 @@ describe("seoUpdate", () => {
       seo_title: null,
       seo_description: null,
     });
+  });
+});
+
+describe("kindUpdate", () => {
+  // Same reason as seoUpdate: an editor tab opened before articles existed
+  // saves without a kind, and writing the default would quietly move an
+  // article back down among the club updates.
+  it("leaves the kind out when the caller did not send one", () => {
+    expect(kindUpdate({})).toEqual({});
+  });
+
+  it("writes the kind the caller sent", () => {
+    expect(kindUpdate({ kind: "article" })).toEqual({ kind: "article" });
+    expect(kindUpdate({ kind: "update" })).toEqual({ kind: "update" });
   });
 });

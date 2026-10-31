@@ -8,7 +8,13 @@
 // Keep AGENT_MANIFEST, managerAgentActions (validation.ts), the route dispatch,
 // and the skill (.claude/skills/uts-manager-agent/) in lockstep. See docs/manager-agent-api.md.
 import { formatCents, isPaperWaiver, sameInstant } from "@/lib/validation";
-import type { AgentSaveBlogPostInput, BlogPostInput, EditInvoiceInput } from "@/lib/validation";
+import {
+  asBlogPostKind,
+  type AgentSaveBlogPostInput,
+  type BlogPostInput,
+  type BlogPostKind,
+  type EditInvoiceInput,
+} from "@/lib/validation";
 import type { MembershipPlanRow, MembershipRow } from "@/lib/membership-types";
 import { versionLabel } from "@/lib/document-versions";
 import { canonicalUrl } from "@/lib/seo";
@@ -225,6 +231,7 @@ export type AgentBlogPost = {
   slug: string;
   title: string;
   status: string;
+  kind: string;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -244,6 +251,7 @@ export function projectAgentBlogPost(post: AgentBlogPost) {
     slug: post.slug,
     title: post.title,
     status: post.status,
+    kind: asBlogPostKind(post.kind),
     published_at: post.published_at,
     created_at: post.created_at,
     updated_at: post.updated_at,
@@ -261,6 +269,7 @@ export type AgentBlogPostStored = {
   body_md: string;
   cover_image_path: string | null;
   status: string;
+  kind: string;
   seo_title: string | null;
   seo_description: string | null;
 };
@@ -277,7 +286,7 @@ export type AgentBlogPostStored = {
 export function mergeAgentBlogPostEdit(
   stored: AgentBlogPostStored,
   input: AgentSaveBlogPostInput,
-): BlogPostInput & { id: string } {
+): BlogPostInput & { id: string; kind: BlogPostKind } {
   return {
     id: stored.id,
     title: input.title ?? stored.title,
@@ -286,6 +295,7 @@ export function mergeAgentBlogPostEdit(
     body_md: input.body_md ?? stored.body_md,
     cover_image_path: input.cover_image_path ?? stored.cover_image_path ?? "",
     status: input.status ?? (stored.status === "published" ? "published" : "draft"),
+    kind: input.kind ?? asBlogPostKind(stored.kind),
     seo_title: input.seo_title ?? stored.seo_title ?? "",
     seo_description: input.seo_description ?? stored.seo_description ?? "",
   };
@@ -370,7 +380,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "33",
+  version: "34",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -383,6 +393,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "34",
+      // One new optional param and one new response field. Nothing that
+      // worked before changes: a post saved without kind keeps its kind, and
+      // a new one without it is a club update, which is what every post was.
+      breaking: false,
+      notes: [
+        "Blog posts have a kind: article (a timeless piece, kept at the top of the public blog above the club updates, whatever is posted after it) or update (club news, listed newest first under the articles). Every post written before this is an update.",
+        "list_blog_posts, get_blog_post and save_blog_post report kind. save_blog_post takes kind: a new post without it is an update, and a change that omits it keeps the stored one.",
+      ],
+    },
     {
       version: "33",
       // Two new optional params and two new response fields. Nothing that
@@ -1620,7 +1641,7 @@ export const AGENT_MANIFEST: {
       name: "list_blog_posts",
       method: "POST",
       summary:
-        "List every blog post, drafts included, newest first: id, slug, title, status (draft | published), published_at, and two addresses. url is where the public reads it, and is null for a draft, which has no public address. edit_url is the manager's own screen for the post, which works whatever its status. No bodies: get_blog_post reads one.",
+        "List every blog post, drafts included, newest first: id, slug, title, status (draft | published), kind (article | update), published_at, and two addresses. url is where the public reads it, and is null for a draft, which has no public address. edit_url is the manager's own screen for the post, which works whatever its status. No bodies: get_blog_post reads one.",
       params: [],
     },
     {
@@ -1641,7 +1662,7 @@ export const AGENT_MANIFEST: {
       name: "save_blog_post",
       method: "POST",
       summary:
-        "Create a post (no id) or change one (id). The same save as the manager's blog editor: a blank slug is made from the title and today's date, a blank excerpt is taken from the opening of the body, and published_at is set the first time a post goes live and never moves after that. On a change, every field you leave out keeps its stored value, so publishing a draft is {id, status: \"published\"} and fixing a typo is {id, body_md}. PUBLISHING IS PUBLIC AND ANNOUNCED: the first time a post goes live it is on the public blog at once, and every member who has opted in to announcements hears about it in their daily summary email. Taking it back to draft hides it again but cannot take the announcement back. Saving a post that is already live announces nothing. The result says whether this save announced it (announced), with the post's url and edit_url. 404 not_found for an id with no post. 409 slug_taken when a new post's address (the slug you sent, or the one made from today's date and the title) already belongs to a post, whose id and slug are in error.details: after a create you never heard back from, that is the post you made, so read it rather than creating again; for a genuinely different post, send a slug of your own. 409 post_changed when somebody saved the post after this change was read: nothing was written, so read it again and redo the change.",
+        "Create a post (no id) or change one (id). The same save as the manager's blog editor. A post is an article (a timeless piece, kept at the top of the public blog) or a club update (news, listed newest first under the articles); see kind. A blank slug is made from the title and today's date, a blank excerpt is taken from the opening of the body, and published_at is set the first time a post goes live and never moves after that. On a change, every field you leave out keeps its stored value, so publishing a draft is {id, status: \"published\"} and fixing a typo is {id, body_md}. PUBLISHING IS PUBLIC AND ANNOUNCED: the first time a post goes live it is on the public blog at once, and every member who has opted in to announcements hears about it in their daily summary email. Taking it back to draft hides it again but cannot take the announcement back. Saving a post that is already live announces nothing. The result says whether this save announced it (announced), with the post's url and edit_url. 404 not_found for an id with no post. 409 slug_taken when a new post's address (the slug you sent, or the one made from today's date and the title) already belongs to a post, whose id and slug are in error.details: after a create you never heard back from, that is the post you made, so read it rather than creating again; for a genuinely different post, send a slug of your own. 409 post_changed when somebody saved the post after this change was read: nothing was written, so read it again and redo the change.",
       params: [
         {
           name: "id",
@@ -1664,6 +1685,12 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "draft | published. A new post is a draft unless you say otherwise. Omit on a change to leave it as it is. See the summary for what publishing does.",
+        },
+        {
+          name: "kind",
+          required: false,
+          description:
+            "article | update. An article is a timeless piece (training, self-defence, the club's approach): the public blog keeps every published article at the top, above the club updates, whatever is posted after it, and shows its reading time rather than leading with its date. An update is club news that dates (a session log, a grading, the week), listed newest first under the articles. A new post is an update unless you say otherwise. Omit on a change to keep the stored kind. Changing it moves a published post between the two sections of the blog at once, and announces nothing.",
         },
         {
           name: "slug",
