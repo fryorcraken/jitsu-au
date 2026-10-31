@@ -66,7 +66,8 @@
                 "get_club_settings",
                 "get_site_banner",
                 "list_blog_posts",
-                "get_blog_post"
+                "get_blog_post",
+                "list_contact_messages"
               ],
               "description": "The read-only action to run."
             },
@@ -124,7 +125,9 @@
                 "save_blog_post",
                 "delete_blog_post",
                 "upload_blog_image",
-                "start_blog_image_upload"
+                "start_blog_image_upload",
+                "mark_contact_messages_seen",
+                "delete_contact_message"
               ],
               "description": "The action to run."
             },

@@ -22,7 +22,8 @@ description: >-
   window's start/end dates (and email every member about a plan), or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
   and review the feedback left on them, or write, edit, publish or delete a
-  blog post at /blog/<slug> and upload its pictures. Requires the
+  blog post at /blog/<slug> and upload its pictures, or read, mark seen and
+  delete the messages sent through the contact form. Requires the
   UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
 ---
 
@@ -1343,6 +1344,61 @@ blog and keep it, save it with `"status":"draft"` instead.
 
 ```bash
 scripts/agent.sh delete_blog_post '{"id":"<id>"}'
+```
+
+### The contact inbox
+
+The messages people send through the public contact form, as
+`/manager/contact-messages` shows them. Each one's `email` is the address the
+sender typed, so unlike `list_users` it is always their own.
+
+### `list_contact_messages` — read the inbox
+
+`params`: `limit` (optional, 1 to 500, default 200). Newest first, each message
+with `unread`, plus `unread_count`, `seen_at` (where the inbox was last marked
+seen) and `newest_at`.
+
+```bash
+scripts/agent.sh list_contact_messages '{}'
+```
+
+> **Reading marks nothing seen.** The screen marks the inbox seen as soon as a
+> manager opens it; this action does not, on purpose. The seen marker is
+> shared by every manager and is what clears their "needs attention" item, so
+> you reading the inbox (to summarise it, or to draft replies) must not tell
+> the other managers that somebody has dealt with it.
+
+### `mark_contact_messages_seen` — acknowledge the inbox
+
+`params`: `seen_at` (**required**): the `newest_at` from the list you showed the
+manager, **never the current time**. Everything up to and including it counts
+as seen, for every manager.
+
+```bash
+scripts/agent.sh mark_contact_messages_seen '{"seen_at":"<newest_at from the list>"}'
+```
+
+- **Only when the manager asks.** Show them the messages first, then mark them
+  seen if they tell you to. Never as a side effect of reading.
+- `newest_at` is `null` when `truncated` is true: the list stopped short of the
+  inbox, and marking it would also mark messages nobody was shown. Read again
+  with a larger `limit` (up to 500) first.
+- `422 not_a_message`: `seen_at` is not a message's arrival time. Send the
+  list's `newest_at` as it came back.
+- `marked: false` means the inbox was already marked seen at least that far.
+  The marker never moves backwards.
+- `503 settings_unreadable` (with `Retry-After`): nothing was marked. Retry.
+
+### `delete_contact_message` — delete one message for good
+
+`params`: `id` (**required**). There is no undo and no copy anywhere else.
+Deleting is how the club stops holding somebody's details once their enquiry
+has been dealt with (docs/erasing-personal-data.md). **Ask the manager first,
+naming who sent it and when.** It does not mark anything seen. `404 not_found`
+when it is already gone.
+
+```bash
+scripts/agent.sh delete_contact_message '{"id":"<id>"}'
 ```
 
 ## Guidance

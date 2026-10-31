@@ -3149,8 +3149,21 @@ export const managerAgentActions = [
   "delete_blog_post",
   "upload_blog_image",
   "start_blog_image_upload",
+  "list_contact_messages",
+  "mark_contact_messages_seen",
+  "delete_contact_message",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
+
+/**
+ * The contact inbox over the agent API: the screen's own schemas, made strict
+ * so a misspelt param is refused rather than stripped. Reading the list never
+ * marks anything seen; `mark_contact_messages_seen` is the only thing that does,
+ * because an agent reading the inbox is not a manager having seen it, and the
+ * marker is club-wide. Deleting takes `deleteContactMessageSchema` as it is.
+ */
+export const agentListContactMessagesSchema = listContactMessagesSchema.strict();
+export const agentMarkContactMessagesSeenSchema = markContactMessagesSeenSchema.strict();
 
 /** Which email to resend, for which record (`docs/emails.md`, "Resending"). */
 export const resendPreviewSchema = z

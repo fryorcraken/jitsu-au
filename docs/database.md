@@ -1183,7 +1183,7 @@ manager-only. Keys in use:
 | `site_banner`                    | **JSON.** The notice across the top of every public page: `enabled`, a one-line `message`, and an optional `link_label` + `link_href`. Unset or invalid reads as off. The one key visitors see: `getSiteBanner` reads it through the service role and returns only the parsed banner, so the table itself stays manager-only. Set on `/manager/site-banner` and by `save_site_banner` on the agent API. See `docs/site-banner.md`. |
 | `email_resend:<kind>:<record>`   | `<ISO instant>\|<click id>`: when a manager last resent that email for that record, and from which click. Enforces once a minute per email per record (`src/lib/email-resend.ts`), claimed by compare-and-swap. One row per record ever resent; nothing else reads them. Not a history of sends. See `docs/emails.md`, "Resending".                                                                                                |
 | `invoice_payment_instructions`   | **Legacy.** The free-text markdown that `invoice_payment_details` replaced. Nothing member-facing reads it; `/manager/settings` shows it read-only while the account fields are still empty. Pending deletion.                                                                                                                                                                                                                     |
-| `contact_messages_seen_at`       | ISO instant a manager last opened `/manager/contact-messages`. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread.                                                                                                                                                                                                                                                                            |
+| `contact_messages_seen_at`       | ISO instant a manager last opened `/manager/contact-messages`, or last marked it seen over the agent API. Club-wide, not per manager. Unset means nobody ever has, so every message counts unread.                                                                                                                                                                                                                                 |
 | `interest_registrations_seen_at` | ISO instant of the newest interest registration on file when a manager last opened `/manager/users`. Same club-wide watermark shape; anything newer counts as a new sign-up on `/notifications`.                                                                                                                                                                                                                                   |
 
 Being key/value is what let the contact-message unread count, and later the
@@ -1740,7 +1740,9 @@ a message reached nobody at all.
 
 Which messages are "unread" is a single club-wide marker, not a column here:
 `club_settings.contact_messages_seen_at`, stamped when a manager opens the
-inbox. Anything newer than it is counted onto the manager dashboard. A
+inbox, or when a manager's agent explicitly marks it seen
+(`mark_contact_messages_seen`; reading it over the agent API never does, see
+`docs/manager-agent-api.md`). Anything newer than it is counted onto the manager dashboard. A
 per-manager count would need a table of its own; the club shares one inbox and
 every manager is emailed every message, so it does not have one.
 

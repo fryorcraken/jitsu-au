@@ -2685,3 +2685,197 @@ describe("save_membership_plan with announce", () => {
     expect(body.error.message).toMatch(/error\.details\.id/);
   });
 });
+
+// The contact inbox. What the route owns, beyond the shared read and delete
+// (pinned in contact-messages.functions.test.ts), is the one place it departs
+// from the screen: reading never moves the club-wide seen marker, and moving it
+// is a separate call that only accepts a boundary a manager could have been
+// shown. A fake that ignored filters would pass with that guard deleted, so the
+// one below evaluates them against a store.
+describe("contact inbox actions", () => {
+  const OLDER_ID = "aaaaaaaa-0000-4000-8000-000000000001";
+  const NEWER_ID = "aaaaaaaa-0000-4000-8000-000000000002";
+  const OLDER_AT = "2026-10-01T09:00:00+00:00";
+  const NEWER_AT = "2026-10-03T09:00:00.123456+00:00";
+  const message = (id: string, created_at: string) => ({
+    id,
+    name: "Sample Person",
+    email: "sample@example.com",
+    subject: "Classes",
+    message: "When do beginners start?",
+    created_at,
+  });
+
+  function fakeInbox(opts: { marker: string | null; markerFails?: boolean }) {
+    const state = {
+      rows: [message(NEWER_ID, NEWER_AT), message(OLDER_ID, OLDER_AT)],
+      marker: opts.marker,
+      upserts: [] as Record<string, unknown>[],
+    };
+    const sameInstant = (a: unknown, b: unknown) =>
+      new Date(String(a)).getTime() === new Date(String(b)).getTime();
+    const db = {
+      from: (table: string) => {
+        if (table === "club_settings") {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: () =>
+                  Promise.resolve(
+                    opts.markerFails
+                      ? { data: null, error: { message: "settings unavailable" } }
+                      : ok(state.marker ? { value: state.marker } : null),
+                  ),
+              }),
+            }),
+            upsert: (row: Record<string, unknown>) => {
+              state.upserts.push(row);
+              state.marker = String(row.value);
+              return Promise.resolve(ok(null));
+            },
+          };
+        }
+        if (table === "contact_messages") {
+          const filters: [string, unknown][] = [];
+          let deleting = false;
+          const matching = () =>
+            state.rows.filter((r) =>
+              filters.every(([col, val]) =>
+                col === "created_at"
+                  ? sameInstant(r.created_at, val)
+                  : (r as Record<string, unknown>)[col] === val,
+              ),
+            );
+          const chain = {
+            select: (_cols?: string, sel?: { count?: string }) => {
+              if (deleting) {
+                const gone = matching();
+                state.rows = state.rows.filter((r) => !gone.includes(r));
+                return Promise.resolve(ok(gone.map((r) => ({ id: r.id }))));
+              }
+              if (sel?.count) {
+                return {
+                  order: () => ({
+                    limit: (n: number) =>
+                      Promise.resolve({
+                        ...ok(state.rows.slice(0, n)),
+                        count: state.rows.length,
+                      }),
+                  }),
+                };
+              }
+              return chain;
+            },
+            delete: () => {
+              deleting = true;
+              return chain;
+            },
+            eq: (col: string, val: unknown) => {
+              filters.push([col, val]);
+              return chain;
+            },
+            limit: (n: number) => Promise.resolve(ok(matching().slice(0, n))),
+          };
+          return chain;
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+    return { db, state };
+  }
+
+  it("lists the inbox with what is unread, and moves no marker doing it", async () => {
+    const fake = fakeInbox({ marker: "2026-10-02T00:00:00Z" });
+    currentAdmin = fake.db;
+    const res = await post({ action: "list_contact_messages", params: {} });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({
+      count: 2,
+      total: 2,
+      truncated: false,
+      unread_count: 1,
+      seen_at: "2026-10-02T00:00:00Z",
+      newest_at: NEWER_AT,
+    });
+    expect(result.messages.map((m: { id: string; unread: boolean }) => [m.id, m.unread])).toEqual([
+      [NEWER_ID, true],
+      [OLDER_ID, false],
+    ]);
+    expect(fake.state.upserts).toEqual([]);
+  });
+
+  it("offers no boundary to acknowledge when the list is cut short", async () => {
+    currentAdmin = fakeInbox({ marker: null }).db;
+    const res = await post({ action: "list_contact_messages", params: { limit: 1 } });
+    const { result } = await res.json();
+    expect(result.truncated).toBe(true);
+    expect(result.newest_at).toBeNull();
+  });
+
+  it("refuses a misspelt param rather than ignoring it", async () => {
+    currentAdmin = fakeInbox({ marker: null }).db;
+    const res = await post({ action: "list_contact_messages", params: { limt: 5 } });
+    expect(res.status).toBe(400);
+  });
+
+  it("marks the inbox seen up to the list's boundary, as the token's owner", async () => {
+    const fake = fakeInbox({ marker: null });
+    currentAdmin = fake.db;
+    const res = await post({ action: "mark_contact_messages_seen", params: { seen_at: NEWER_AT } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({ marked: true, seen_at: NEWER_AT });
+    expect(fake.state.upserts).toHaveLength(1);
+    expect(fake.state.upserts[0]).toMatchObject({
+      key: "contact_messages_seen_at",
+      value: NEWER_AT,
+      updated_by: TOKEN_OWNER,
+    });
+  });
+
+  it("refuses a boundary that is no message's arrival time, such as now", async () => {
+    const fake = fakeInbox({ marker: null });
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "mark_contact_messages_seen",
+      params: { seen_at: "2026-10-30T00:00:00Z" },
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("not_a_message");
+    expect(fake.state.upserts).toEqual([]);
+  });
+
+  it("never moves the marker backwards", async () => {
+    const fake = fakeInbox({ marker: NEWER_AT });
+    currentAdmin = fake.db;
+    const res = await post({ action: "mark_contact_messages_seen", params: { seen_at: OLDER_AT } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({ marked: false, seen_at: NEWER_AT });
+    expect(fake.state.upserts).toEqual([]);
+  });
+
+  it("says nothing was marked when the current marker cannot be read", async () => {
+    const fake = fakeInbox({ marker: null, markerFails: true });
+    currentAdmin = fake.db;
+    const res = await post({ action: "mark_contact_messages_seen", params: { seen_at: NEWER_AT } });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe("30");
+    expect((await res.json()).error.code).toBe("settings_unreadable");
+    expect(fake.state.upserts).toEqual([]);
+  });
+
+  it("deletes one message by id, and reports one already gone as not_found", async () => {
+    const fake = fakeInbox({ marker: null });
+    currentAdmin = fake.db;
+    const res = await post({ action: "delete_contact_message", params: { id: OLDER_ID } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({ deleted: true, id: OLDER_ID });
+    expect(fake.state.rows.map((r) => r.id)).toEqual([NEWER_ID]);
+    // An erasure is not an acknowledgement: the marker stays where it was.
+    expect(fake.state.upserts).toEqual([]);
+
+    const again = await post({ action: "delete_contact_message", params: { id: OLDER_ID } });
+    expect(again.status).toBe(404);
+    expect((await again.json()).error.code).toBe("not_found");
+  });
+});

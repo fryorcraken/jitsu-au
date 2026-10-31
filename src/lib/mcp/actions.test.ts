@@ -25,6 +25,8 @@ describe("MCP action split", () => {
       "save_blog_post",
       "delete_blog_post",
       "upload_blog_image",
+      "mark_contact_messages_seen",
+      "delete_contact_message",
     ]) {
       expect(READ_ACTIONS).not.toContain(action);
       expect(CHANGE_ACTIONS).toContain(action);
@@ -36,6 +38,7 @@ describe("MCP action split", () => {
     expect(READ_ACTIONS).toContain("get_club_settings");
     expect(READ_ACTIONS).toContain("list_blog_posts");
     expect(READ_ACTIONS).toContain("get_blog_post");
+    expect(READ_ACTIONS).toContain("list_contact_messages");
     expect(isReadAction("save_item")).toBe(false);
   });
 });

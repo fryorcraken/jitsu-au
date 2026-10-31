@@ -309,7 +309,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "31",
+  version: "32",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -322,6 +322,14 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "32",
+      // Purely additive: three new actions.
+      breaking: false,
+      notes: [
+        "New actions for the contact inbox (/manager/contact-messages): list_contact_messages reads it, mark_contact_messages_seen marks it seen up to the list's newest_at, and delete_contact_message deletes one message for good. Reading never marks anything seen; the seen marker is shared by every manager, so it only moves when mark_contact_messages_seen is called.",
+      ],
+    },
     {
       version: "31",
       // Purely additive: one new action and one new endpoint.
@@ -1667,6 +1675,46 @@ export const AGENT_MANIFEST: {
           required: false,
           description:
             "The post it is for, which only decides the folder it is filed in. Omit for a post not saved yet.",
+        },
+      ],
+    },
+    {
+      name: "list_contact_messages",
+      method: "POST",
+      summary:
+        "Read the messages people sent through the public contact form, newest first (200 unless you ask for up to 500): each one's id, name, email (the address the sender typed, always their own), subject, message, created_at and unread. unread_count says how many no manager has seen yet. Reading marks nothing seen: the inbox's seen marker is shared by every manager and clears their \"needs attention\" item, so it only moves when you call mark_contact_messages_seen. newest_at is the boundary to give that call, and is null when truncated is true, because the list stops short of the whole inbox and acknowledging it would mark messages nobody was shown.",
+      params: [
+        {
+          name: "limit",
+          required: false,
+          description: "How many of the newest messages to return, 1 to 500. Defaults to 200.",
+        },
+      ],
+    },
+    {
+      name: "mark_contact_messages_seen",
+      method: "POST",
+      summary:
+        'Mark the contact inbox seen up to a message, for every manager: it clears the "needs attention" item and the unread badge for everybody, not just for you. Call it only when the manager asks you to, after they have been shown the messages; reading the inbox on their behalf is not them having seen it. Everything that arrived up to and including seen_at counts as seen, anything later stays unread, and the marker never moves backwards, so an older seen_at changes nothing (marked false). 422 not_a_message when seen_at is not a message\'s arrival time; 503 settings_unreadable (with Retry-After) when nothing could be marked just now.',
+      params: [
+        {
+          name: "seen_at",
+          required: true,
+          description:
+            "newest_at from list_contact_messages: the arrival time of the newest message the manager was shown. Never the current time.",
+        },
+      ],
+    },
+    {
+      name: "delete_contact_message",
+      method: "POST",
+      summary:
+        "Delete one contact message for good. There is no undo and no copy anywhere else, so ask the manager first and name the message (who sent it, and when). Deleting is how the club stops holding somebody's name, address and words once their enquiry has been dealt with. It does not move the seen marker. 404 not_found when it is already gone.",
+      params: [
+        {
+          name: "id",
+          required: true,
+          description: "The message's id, from list_contact_messages.",
         },
       ],
     },

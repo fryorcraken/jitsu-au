@@ -47,6 +47,9 @@ import {
   MAX_BLOG_IMAGE_BYTES,
   agentSaveSiteBannerSchema,
   siteBannerSchema,
+  agentListContactMessagesSchema,
+  agentMarkContactMessagesSeenSchema,
+  deleteContactMessageSchema,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
@@ -187,6 +190,12 @@ import {
   type BlogImageTicket,
 } from "@/lib/blog-image-ticket";
 import { isLoopbackHost, linkOrigin } from "@/lib/site-origin";
+import {
+  MESSAGE_ALREADY_GONE,
+  deleteContactMessageRow,
+  loadContactMessages,
+} from "@/lib/contact-messages.functions";
+import { CONTACT_SEEN_KEY, stampSeenMarker } from "@/lib/seen-markers";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
 /**
@@ -2340,6 +2349,98 @@ export async function uploadBlogImageWithTicket(request: Request) {
   }
 }
 
+// ---- actions: list_contact_messages, mark_contact_messages_seen, delete_contact_message ----
+//
+// The inbox `/manager/contact-messages` shows, through the same read, the same
+// marker and the same delete. One thing differs on purpose: the screen marks
+// what it showed as seen the moment it loads, and the list action never does.
+// The marker is club-wide and is what clears every manager's "needs attention"
+// item, so an agent reading the inbox for its own reasons must not clear it for
+// them. Acknowledging is its own call, made when the manager says so.
+
+async function handleListContactMessages(params: unknown) {
+  const input = agentListContactMessagesSchema.parse(params);
+  let inbox: Awaited<ReturnType<typeof loadContactMessages>>;
+  try {
+    inbox = await loadContactMessages(await adminClient(), input.limit);
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+  const unread = new Set(inbox.unreadIds);
+  return {
+    count: inbox.messages.length,
+    total: inbox.total,
+    truncated: inbox.truncated,
+    unread_count: unread.size,
+    seen_at: inbox.seenAt,
+    newest_at: inbox.newestAt,
+    messages: inbox.messages.map((m) => ({ ...m, unread: unread.has(m.id) })),
+  };
+}
+
+async function handleMarkContactMessagesSeen(params: unknown, actingAs: string) {
+  const input = agentMarkContactMessagesSeenSchema.parse(params);
+  const db = await adminClient();
+  // The boundary has to be a message somebody was shown, which is what the
+  // list's `newest_at` is. A made-up instant such as "now" would mark seen any
+  // message that arrived after the list was read, which nobody has looked at.
+  // The screen cannot send one; an agent improvising could, so it is refused.
+  const { data: atBoundary, error } = await db
+    .from("contact_messages")
+    .select("id")
+    .eq("created_at", input.seen_at)
+    .limit(1);
+  if (error) throw new AgentError(500, "db_error", error.message);
+  if (!atBoundary || atBoundary.length === 0) {
+    throw new AgentError(
+      422,
+      "not_a_message",
+      "seen_at must be the newest_at from list_contact_messages, the arrival time of the newest message the manager was shown. Read the list again and send that.",
+    );
+  }
+  let stamped: { marker: string | null; skipped: boolean };
+  try {
+    stamped = await stampSeenMarker(db, CONTACT_SEEN_KEY, input.seen_at, actingAs);
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+  // Skipped with no marker means the current one could not be read, so there
+  // was nothing to compare against and nothing was written (`stampSeenMarker`).
+  if (stamped.skipped && stamped.marker === null) {
+    throw new AgentError(
+      503,
+      "settings_unreadable",
+      "Could not read where the inbox was last marked seen, so nothing was marked. Try again shortly.",
+      undefined,
+      30,
+    );
+  }
+  console.info(
+    "[agent.mark_contact_messages_seen] audit",
+    JSON.stringify({ seenAt: stamped.marker, moved: !stamped.skipped, actor: actingAs }),
+  );
+  return { marked: !stamped.skipped, seen_at: stamped.marker };
+}
+
+async function handleDeleteContactMessage(params: unknown, actingAs: string) {
+  const input = deleteContactMessageSchema.parse(params);
+  try {
+    await deleteContactMessageRow(await adminClient(), input.id);
+  } catch (e) {
+    if (e instanceof Error && e.message === MESSAGE_ALREADY_GONE) {
+      throw new AgentError(404, "not_found", MESSAGE_ALREADY_GONE);
+    }
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
+  }
+  // console.info, as for delete_blog_post: an erasure is a normal event, and
+  // it has to be findable as one.
+  console.info(
+    "[agent.delete_contact_message] audit",
+    JSON.stringify({ messageId: input.id, actor: actingAs }),
+  );
+  return { deleted: true as const, id: input.id };
+}
+
 /**
  * Run one action. `requestOrigin` is the address the request came in on, where
  * a front door knows it; only links an action hands out read it.
@@ -2437,5 +2538,11 @@ export async function dispatch(
       return handleUploadBlogImage(params);
     case "start_blog_image_upload":
       return handleStartBlogImageUpload(params, actingAs, requestOrigin);
+    case "list_contact_messages":
+      return handleListContactMessages(params);
+    case "mark_contact_messages_seen":
+      return handleMarkContactMessagesSeen(params, actingAs);
+    case "delete_contact_message":
+      return handleDeleteContactMessage(params, actingAs);
   }
 }

@@ -575,6 +575,28 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
     caller's job to ask the manager first. It removes the post's comments with
     it (`ON DELETE CASCADE`), and writes an audit line to the server log.
 
+- `list_contact_messages` / `mark_contact_messages_seen` /
+  `delete_contact_message` (`"32"`) — the contact inbox, the agent's equivalent
+  of `/manager/contact-messages`. The read is `loadContactMessages`, the
+  acknowledgement `stampSeenMarker` and the delete `deleteContactMessageRow`,
+  the same three calls the screen makes. One difference, on purpose:
+  - **Reading marks nothing seen.** The screen stamps the club-wide seen marker
+    as soon as it loads; the list action never does. That marker clears every
+    manager's "needs attention" item, so an agent reading the inbox for its
+    own reasons (a summary, a draft reply) must not clear it for them.
+    Acknowledging is `mark_contact_messages_seen`, made when the manager asks.
+  - **Its `seen_at` must be a message's arrival time** (`422 not_a_message`
+    otherwise), which is what the list's `newest_at` is. The screen can only
+    send the boundary it rendered; an agent could improvise "now", which would
+    mark seen whatever arrived after the list was read. `newest_at` is null on
+    a truncated list for the same reason as on the screen. A marker that cannot
+    be read is `503 settings_unreadable` with nothing written, since the
+    only-moves-forward guard needs it (`src/lib/seen-markers.ts`).
+  - **The delete has no confirm flag**, like `delete_blog_post`: asking the
+    manager is the caller's job, and the skill says so. It is part of the
+    club's erasure path (`docs/erasing-personal-data.md`), writes an audit line
+    to the server log, and `404 not_found` when the message is already gone.
+
 ### `file_waiver`: the parts that have bitten us
 
 - **The address is taken in parts (`address_parts`), and the API also takes
@@ -691,7 +713,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"31"`.
+test so the bump is a deliberate edit, and the current value is `"32"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call
