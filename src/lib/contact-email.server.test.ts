@@ -9,6 +9,18 @@ const { sendLovableEmail, getManagerEmails } = vi.hoisted(() => ({
 }));
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
 vi.mock("@/lib/manager-recipients.server", () => ({ getManagerEmails }));
+const { claimVisitorEmail, claimManagerNotice, releaseVisitorEmail } = vi.hoisted(() => ({
+  claimVisitorEmail: vi.fn(),
+  claimManagerNotice: vi.fn(),
+  releaseVisitorEmail: vi.fn(),
+}));
+// The caps (#52). Open by default, so every other test here sees the sends
+// they always did; the cap tests below close one or the other.
+vi.mock("@/lib/rate-limit.server", () => ({
+  claimVisitorEmail,
+  claimManagerNotice,
+  releaseVisitorEmail,
+}));
 
 describe("sendContactEmails", () => {
   const original = process.env.LOVABLE_API_KEY;
@@ -18,6 +30,8 @@ describe("sendContactEmails", () => {
     // calls and resolved values unless cleared here.
     vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    claimVisitorEmail.mockResolvedValue(true);
+    claimManagerNotice.mockResolvedValue("send");
   });
   afterEach(() => {
     if (original === undefined) delete process.env.LOVABLE_API_KEY;
@@ -78,6 +92,80 @@ describe("sendContactEmails", () => {
     expect(ack.reply_to).toBeUndefined();
     expect(toManagers).toHaveLength(2);
     for (const p of toManagers) expect(p.reply_to).toBe("sam@example.com");
+  });
+
+  it("holds back the acknowledgement once that address is capped, and still tells managers", async () => {
+    // The acknowledgement is the one email the site sends to an address nobody
+    // has verified, so it is the one a bot would aim at a stranger (#52).
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockResolvedValue({ success: true });
+    getManagerEmails.mockResolvedValue(["manager-a@example.com"]);
+    claimVisitorEmail.mockResolvedValue(false);
+    const admin = {
+      from: () => ({
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      }),
+    } as unknown as SupabaseClient<Database>;
+
+    await sendContactEmails({
+      messageId: "m3",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      subject: null,
+      message: "Do I need a gi?",
+      admin,
+    });
+
+    expect(claimVisitorEmail).toHaveBeenCalledWith(admin, "ada@example.com", "contact-sender-m3");
+    expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).toEqual(["manager-a@example.com"]);
+  });
+
+  it("sends the managers nothing once the day's new-message emails are paused", async () => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockResolvedValue({ success: true });
+    getManagerEmails.mockResolvedValue(["manager-a@example.com"]);
+    claimManagerNotice.mockResolvedValue("paused");
+
+    await sendContactEmails({
+      messageId: "m4",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      subject: null,
+      message: "Do I need a gi?",
+      admin: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+          }),
+        }),
+      } as unknown as SupabaseClient<Database>,
+    });
+
+    expect(claimManagerNotice).toHaveBeenCalledWith(expect.anything(), "message", "m4");
+    expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).toEqual(["ada@example.com"]);
+  });
+  it("gives the sender's slots back when the acknowledgement fails to send", async () => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    getManagerEmails.mockResolvedValue([]);
+    sendLovableEmail.mockRejectedValue(new Error("provider down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await sendContactEmails({
+      messageId: "m5",
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      subject: null,
+      message: "Do I need a gi?",
+      admin: {
+        from: () => ({
+          select: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+          }),
+        }),
+      } as unknown as SupabaseClient<Database>,
+    });
+
+    expect(releaseVisitorEmail).toHaveBeenCalledWith(expect.anything(), "contact-sender-m5");
   });
 
   it("points managers at the inbox screen that can actually show the message", () => {

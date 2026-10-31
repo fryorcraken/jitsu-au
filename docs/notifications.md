@@ -844,7 +844,11 @@ way back means we genuinely do not know.
   the manager queue further is separate work.
 - **Signing up notifies managers by email at the moment it happens** (a new-lead
   email on registration, a copy of the waiver on signing), and none of that is
-  changed by the attention items. Neither item claims a copy was emailed: those
+  changed by the attention items. Those emails are capped at 20 of each kind a
+  day, after which managers get one "we've paused these" note and the attention
+  items are the only signal (`docs/emails.md`, "Caps on what the public forms
+  send"). They are deliberately not folded into the daily summary: a real lead
+  or question should reach a manager when it arrives, not the next morning. Neither item claims a copy was emailed: those
   sends are best-effort, and on the day this shipped the club's whole existing
   backlog counted as new without anybody having been emailed about it.
 - **Neither sign-up item is per person.** Ten registrations are one line saying

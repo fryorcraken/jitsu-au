@@ -29,13 +29,25 @@ export const Route = createFileRoute("/register-interest")({
   component: RegisterInterest,
 });
 
-type Captured = { firstName: string; lastName: string; email: string; phone: string };
+type Captured = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  /**
+   * Whether the confirmation with the waiver link actually went out. It can be
+   * held back by a cap (#52), or fail, and the screen must not then promise it.
+   */
+  emailed: boolean;
+};
 
 function RegisterInterest() {
   const submit = useServerFn(submitInterest);
   const [done, setDone] = useState<Captured | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
-  const send = useResilientSubmit<{ ok: true; duplicate: boolean }>(INTAKE_SUBMIT);
+  const send = useResilientSubmit<{ ok: true; duplicate: boolean; emailed: boolean }>(
+    INTAKE_SUBMIT,
+  );
 
   /**
    * Read the form and send it, retrying through a bad connection.
@@ -81,7 +93,7 @@ function RegisterInterest() {
       },
     });
 
-    if (outcome.ok) setDone({ firstName, lastName, email, phone });
+    if (outcome.ok) setDone({ firstName, lastName, email, phone, emailed: outcome.value.emailed });
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -129,9 +141,11 @@ function RegisterInterest() {
           <div className="mt-6 rounded-2xl border bg-muted/30 p-6">
             <p className="text-sm font-medium">Not ready? No problem.</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              We'll email you the link and you can sign before you come, or we'll sort it at the
-              gym. Either way, just turn up to any beginners class ({beginnerDaysShort}). Your first
-              two are free.
+              {done.emailed
+                ? "We'll email you the link and you can sign before you come, or we'll sort it at the gym."
+                : "Sign now with the button above, or later from the Sign waiver link at the bottom of any page, or we'll sort it at the gym."}{" "}
+              Either way, just turn up to any beginners class ({beginnerDaysShort}). Your first two
+              are free.
             </p>
           </div>
 

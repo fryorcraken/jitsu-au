@@ -1781,6 +1781,63 @@ Nullable on purpose: a client cached from before this shipped sends nothing and
 must still be able to submit. It simply gets no dedupe protection, which is the
 behaviour it already had.
 
+The same id is also what keeps a retry from counting twice against the rate
+limit below.
+
+### `rate_limit_hits` — how often the public forms, and their emails, were used
+
+`id` PK (identity), `bucket`, `subject`, `dedupe_key` (nullable), `created_at`.
+Added by `20261030120000_rate_limits.sql` (#52). **Service role only:**
+`REVOKE ALL ... FROM PUBLIC, anon, authenticated`, RLS on with no policies, so
+nothing in the browser can read or write it and it adds nothing to
+`client-grants-expected.txt`. Indexes: `(bucket, subject, created_at)` for the
+counts, a **partial unique** `(bucket, dedupe_key) WHERE dedupe_key IS NOT NULL`,
+and `created_at` for the clean-up.
+
+One row is one counted use of something limited:
+
+| `bucket`                                            | `subject`                                    | `dedupe_key`                                          | Counts                                         |
+| --------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------- |
+| `form:<interest\|contact\|waiver\|code_of_conduct>` | the network: an IPv4 address, or an IPv6 /64 | `client_submission_id` (none for the code of conduct) | submissions of that form from that network     |
+| `email:recipient`                                   | SHA-256 of the normalized address            | the email's idempotency key                           | confirmations to one typed-in address          |
+| `email:visitor-network`                             | the network the submission came from         | the email's idempotency key                           | confirmations caused from one network          |
+| `email:visitor-total`                               | `club`                                       | the email's idempotency key                           | confirmations to typed-in addresses altogether |
+| `email:manager:<lead\|message\|waiver>`             | `club`                                       | the submission's id                                   | managers' per-submission copies of that kind   |
+| `email:manager-paused:<kind>`                       | `club`                                       | none                                                  | "we've paused these" notes, at most one a day  |
+
+Only ever written through **`public.claim_rate_limit(_bucket, _subject,
+_dedupe_key, _hour_max, _day_max) → (allowed, retry_after_seconds)`**, which
+the service role alone may execute. It takes a transaction-scoped advisory lock
+on the counter, deletes every row older than a day (the longest window, so the
+table never holds more than the last day, which is also all the club keeps of
+which network submitted what), and then:
+
+- **A `dedupe_key` already in the bucket is let through without counting.**
+  That is `useResilientSubmit` resending one form fill, from any network: a
+  phone that drops off the wifi and retries on mobile data is still one
+  submission. The unique index catches the same retry racing in from two
+  networks at once.
+- Otherwise it counts the subject's rows in the last rolling hour and day. Over
+  either limit it returns `allowed = false` and how long until the row holding
+  the limit ages out, **recording nothing**, so trying again while refused does
+  not push the wait further out.
+- Under both, it inserts the row and returns `allowed = true`.
+
+A NULL (or omitted) limit means none over that window; the optional arguments
+carry `DEFAULT NULL` so the generated types print them as optional.
+
+**`public.release_rate_limit(_bucket, _dedupe_key)`** (service role only)
+deletes the one row that key claimed in that bucket, and nothing else; a key
+that claimed nothing is a no-op. An email counts against two or three caps
+before it is sent, and this is how the ones already claimed are given back
+when a later cap refuses it or the send fails, so an address never loses its
+allowance to an email that did not go. The limits
+themselves and what a refused person is told are app code, in
+`src/lib/rate-limit.ts`; the calls, and the rule that every one of them fails
+open, are `src/lib/rate-limit.server.ts`. What this promises is checked against
+the replayed schema by `supabase/lint/rate-limit-claims.sql` in
+`supabase-lint.yml`, since the unit suite cannot see SQL.
+
 ---
 
 ## `auth.users` (Supabase-managed)
