@@ -3426,6 +3426,20 @@ describe("the blog through the manager agent API", () => {
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_description: "" }).success).toBe(true);
   });
 
+  // get_blog_post reports a post on the defaults as null, so sending back what
+  // was read must work, and mean the default.
+  it("takes null for a search field, as clearing it", () => {
+    const r = agentSaveBlogPostSchema.safeParse({
+      id: ID,
+      body_md: "New body.",
+      seo_title: null,
+      seo_description: null,
+    });
+    expect(r.success).toBe(true);
+    expect(r.data).toMatchObject({ seo_title: "", seo_description: "" });
+    expect(agentSaveBlogPostSchema.parse({ id: ID, body_md: "x" }).seo_title).toBeUndefined();
+  });
+
   it("holds the search fields to the editor's limits", () => {
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_title: "x".repeat(101) }).success).toBe(
       false,

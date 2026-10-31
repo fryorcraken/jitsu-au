@@ -141,6 +141,25 @@ export function resolveSeoField(value: string | undefined): string | null {
   return value?.trim() || null;
 }
 
+/**
+ * The search fields an update writes: only the ones the caller sent. "" is
+ * sent, and clears one; a field left out keeps what is stored. That matters
+ * for an editor tab opened before these fields existed, which saves without
+ * them: written as NULL, its save would quietly erase a search title somebody
+ * else had set. Exported for its test.
+ */
+export function seoUpdate(data: { seo_title?: string; seo_description?: string }): {
+  seo_title?: string | null;
+  seo_description?: string | null;
+} {
+  return {
+    ...(data.seo_title !== undefined && { seo_title: resolveSeoField(data.seo_title) }),
+    ...(data.seo_description !== undefined && {
+      seo_description: resolveSeoField(data.seo_description),
+    }),
+  };
+}
+
 // ---- Public: published posts ----
 
 export const listPublishedBlogPosts = createServerFn({ method: "GET" })
@@ -405,8 +424,7 @@ export async function updateBlogPostRow(
       cover_image_path: data.cover_image_path || null,
       status: data.status,
       published_at: publishedAt,
-      seo_title: resolveSeoField(data.seo_title),
-      seo_description: resolveSeoField(data.seo_description),
+      ...seoUpdate(data),
       updated_at: new Date().toISOString(),
     })
     .eq("id", data.id);

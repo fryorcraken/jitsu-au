@@ -4193,7 +4193,7 @@ export const blogPostSchema = z.object({
   seo_title: z
     .string()
     .trim()
-    .max(BLOG_SEO_TITLE_MAX, `Keep the search title under ${BLOG_SEO_TITLE_MAX} characters.`)
+    .max(BLOG_SEO_TITLE_MAX, `Keep the search title to ${BLOG_SEO_TITLE_MAX} characters or fewer.`)
     .optional()
     .or(z.literal("")),
   seo_description: z
@@ -4201,7 +4201,7 @@ export const blogPostSchema = z.object({
     .trim()
     .max(
       BLOG_SEO_DESCRIPTION_MAX,
-      `Keep the search description under ${BLOG_SEO_DESCRIPTION_MAX} characters.`,
+      `Keep the search description to ${BLOG_SEO_DESCRIPTION_MAX} characters or fewer.`,
     )
     .optional()
     .or(z.literal("")),
@@ -4302,7 +4302,8 @@ export type AgentGetBlogPostInput = z.infer<typeof agentGetBlogPostSchema>;
  * - `slug` cannot be blanked on a change: the composer re-derives a blank one,
  *   which would move a live post to a new address and break every link to it.
  * - `excerpt: ""`, `cover_image_path: ""`, `seo_title: ""` and
- *   `seo_description: ""` clear those, as on the form.
+ *   `seo_description: ""` clear those, as on the form. The two search fields
+ *   also take null for that, since that is how they are read back.
  * - `cover_image_path` is a storage path from `upload_blog_image`, not an
  *   address. An address stored there would render as a broken image.
  */
@@ -4320,8 +4321,14 @@ export const agentSaveBlogPostSchema = z
       "Pass the `path` that upload_blog_image returned, not the image's web address.",
     ),
     status: z.enum(blogPostStatuses).optional(),
-    seo_title: blogPostSchema.shape.seo_title,
-    seo_description: blogPostSchema.shape.seo_description,
+    // `get_blog_post` reports a post on the defaults as null, so null is
+    // accepted here and means the same as "": back to the default. Without
+    // this, sending back what was read is a 400.
+    seo_title: z.preprocess((v) => (v === null ? "" : v), blogPostSchema.shape.seo_title),
+    seo_description: z.preprocess(
+      (v) => (v === null ? "" : v),
+      blogPostSchema.shape.seo_description,
+    ),
   })
   .strict()
   .superRefine((value, ctx) => {

@@ -106,7 +106,9 @@ function SeoLengthHint({ id, length, shown }: { id: string; length: number; show
       id={id}
       className={cn(
         "mt-1 text-xs",
-        length > shown ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground",
+        // Theme tokens, so the contrast test covers both: the warning is the
+        // line on this form that most needs to be readable.
+        length > shown ? "font-medium text-foreground" : "text-muted-foreground",
       )}
     >
       {length > shown
@@ -399,12 +401,13 @@ export function BlogPostEditor({
   // What a search result will show, through the same function the public page
   // uses. The excerpt a blank one falls back to is the one the server will
   // store, so a blank excerpt is previewed as the derived one.
-  const searchResult = blogPostSeo({
+  const searchInputs = {
     title: title.trim() || "Your post title",
     excerpt: excerpt.trim() || derivedExcerpt || null,
     seo_title: seoTitle,
     seo_description: seoDescription,
-  });
+  };
+  const searchResult = blogPostSeo(searchInputs);
 
   const formFields = (
     <div className="space-y-4">
@@ -581,7 +584,7 @@ export function BlogPostEditor({
             value={seoTitle}
             onChange={(e) => setSeoTitle(e.target.value)}
             maxLength={BLOG_SEO_TITLE_MAX}
-            placeholder={`${title.trim() || "Post title"} | UTS Jitsu Blog`}
+            placeholder={blogPostSeo({ ...searchInputs, seo_title: null }).title}
             aria-describedby="post-seo-title-count"
             className="mt-1.5"
           />

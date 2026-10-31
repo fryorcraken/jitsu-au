@@ -50,7 +50,9 @@ export const Route = createFileRoute("/blog/$slug")({
             "@type": "BlogPosting",
             headline: post.title,
             datePublished: post.published_at,
-            description: seo.description,
+            // The post's own words or nothing: the site-wide fallback in
+            // seo.description is a tagline, not a description of this article.
+            description: post.seo_description || post.excerpt || undefined,
             image: post.cover_image_url || undefined,
             mainEntityOfPage: canonicalUrl(path),
           }),
