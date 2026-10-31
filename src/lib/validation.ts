@@ -3738,9 +3738,9 @@ export const calendarRepeatWeeklySchema = z
  * because a discriminated union's options must be plain objects.
  *
  * Every calendar schema is `.strict()`, because the manager agent API parses
- * with them too: a misspelt `invite_only` would otherwise be stripped and
- * default to false, and the entry would go on the calendar for everybody to see.
- * The screen sends exactly these keys, so it never notices.
+ * with them too: a misspelt `visibility` would otherwise be stripped and
+ * default to public, and a members-only entry would go on the calendar for
+ * everybody to see. The screen sends exactly these keys, so it never notices.
  */
 export const createCalendarEntrySchema = z
   .object({

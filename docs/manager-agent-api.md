@@ -596,8 +596,6 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   `CalendarEntryError`'s `reason` as the error code: `404 not_found` (no such
   date or repeat), `422 not_repeating` (`scope: "series"` on a one-off),
   `422 no_dates` (a weekly entry that would put no date on the calendar),
-  `422 invite_only_on_entry` (opening one date of an invite-only weekly entry
-  with `scope: "event"`, `series_id` in `error.details`),
   `409 repeating_date` (deleting one date of a weekly entry, `series_id` in
   `error.details`), `409 checked_in` (deleting a class people were checked in
   to, the count in `error.details`) and `409 already_on_calendar`. Anything
@@ -627,12 +625,12 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
     The shared function answers an empty change with success, which the screen
     cannot reach (its form sends every field). From an agent it is a misspelt or
     misplaced field, and success would tell the manager it was done. The same
-    worry is why every calendar schema is `.strict()`: a misspelt `invite_only`
-    would otherwise be stripped, default to false, and put the entry in front
-    of everybody. It is also why `list_calendar_events`, which takes nothing,
-    refuses any param (`agentListCalendarEventsSchema`, `400 invalid_params`):
-    a `from` / `to` an agent hoped would narrow the list would otherwise come
-    back as the whole list, read as filtered.
+    worry is why every calendar schema is `.strict()`: a misspelt `visibility`
+    would otherwise be stripped, default to `public`, and put a members-only
+    entry in front of everybody. It is also why `list_calendar_events`, which
+    takes nothing, refuses any param (`agentListCalendarEventsSchema`,
+    `400 invalid_params`): a `from` / `to` an agent hoped would narrow the list
+    would otherwise come back as the whole list, read as filtered.
   - **`create_calendar_entry` returns `event_id` and `series_id`**, one of them
     null, where the screen's function returns one `id` that is the date for a
     one-off and the weekly rule for a repeat. Every other calendar action tells
@@ -687,24 +685,15 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   same moment, so re-adding a class straight after stopping it does not double
   tonight's class that the stop kept.
 
-  There is **no action that invites somebody to an invite-only date**, because
-  the screen has none either: an invitation is an RSVP row, and nothing on
-  `/manager/calendar` writes one. An agent can mark a date invite only, but not
-  choose who sees it. Who can see a date is its own `invite_only` **or** its
-  weekly entry's (the read policies and `withoutHiddenInviteOnly` both ask
-  both). `listManagerEventRows` reports the two apart, the date's own column as
-  `invite_only` and its entry's as `series_invite_only`, because an edit of one
-  date writes only its own and the screen's edit form must not copy the
-  entry's setting onto the date; `projectAgentCalendarEvent` puts them
-  together, so an agent reads `invite_only` as whether the date is hidden. Two
-  consequences the manifest spells out for `edit_calendar_entry`:
-  `scope: "series"` with `invite_only: true` hides every date of the entry,
-  earlier ones included, although it rewrites only the date named and later
-  ones; and `scope: "event"` cannot make one date of an invite-only weekly
-  entry visible again, since the entry's flag still hides it, so it is refused
-  as `422 invite_only_on_entry` (screen and API alike) rather than saved as a
-  change that changes nothing. Only `scope: "series"` with
-  `invite_only: false` can.
+  **`invite_only` is a badge and hides nothing** (`docs/calendar.md`, "Two
+  settings that are easy to confuse"). It puts "invite only" on the date, on
+  the calendar page and in calendar apps, and everybody the date's
+  `visibility` admits still sees it and can reply. `visibility: "members"`
+  (paid members and managers) is the one way to limit who sees an entry, so
+  that, never `invite_only`, is the answer to a manager who wants a class kept
+  off the public calendar. `list_calendar_events` reports each date's own
+  `invite_only`, and an edit changes it like any other detail, on one date or
+  that date and every later one.
 
 ### `file_waiver`: the parts that have bitten us
 

@@ -275,43 +275,38 @@ describe("cancelEventRows", () => {
 });
 
 describe("updateCalendarEntryRow", () => {
-  describe("opening one date of an invite-only weekly entry", () => {
-    /** One date of a weekly entry, and whether that entry is invite only. */
-    function club(entryInviteOnly: boolean) {
-      return fakeClient((op) => {
-        if (op.table === "calendar_events" && op.verb === "select")
-          return ok({ series_id: "series-1" });
+  // Invite only is a badge (docs/calendar.md), so one date's badge is that
+  // date's business: turning it off on one date of a weekly entry that carries
+  // it is an ordinary edit, not something the entry's setting can veto.
+  describe("invite only on one date of a weekly entry", () => {
+    it("takes the badge off that date alone, without asking the entry", async () => {
+      // The entry still says invite only, and the edit goes through anyway: the
+      // entry's setting has no say over one date's badge.
+      const { admin, calls } = fakeClient((op) => {
         if (op.table === "calendar_series" && op.verb === "select")
-          return ok({ invite_only: entryInviteOnly });
+          return ok({ invite_only: true });
+        if (op.table === "calendar_events" && op.verb === "select")
+          return ok({ series_id: "series-1", starts_at: NEXT_CLASS });
         if (op.verb === "update") return ok([{ id: "evt-1" }]);
         return ok(null);
       });
-    }
 
-    // Saved, it would say "saved" and leave the date exactly as hidden.
-    it("refuses it, naming the entry, and writes nothing", async () => {
-      const { admin, calls } = club(true);
-
-      const e = await refusal(
-        updateCalendarEntryRow(admin, { scope: "event", id: "evt-1", invite_only: false }),
-      );
-      expect(e.reason).toBe("invite_only_on_entry");
-      expect(e.details).toEqual({ series_id: "series-1" });
-      expect(e.message).toMatch(/all future ones/);
-      expect(writes(calls)).toHaveLength(0);
-    });
-
-    it("opens a date whose entry is not invite only", async () => {
-      const { admin, calls } = club(false);
-
-      await updateCalendarEntryRow(admin, { scope: "event", id: "evt-1", invite_only: false });
-      expect(ofTable(calls, "calendar_events", "update")[0].patch).toMatchObject({
+      const result = await updateCalendarEntryRow(admin, {
+        scope: "event",
+        id: "evt-1",
         invite_only: false,
       });
+      expect(result).toEqual({ ok: true, id: "evt-1", updated: 1 });
+
+      const updates = ofTable(calls, "calendar_events", "update");
+      expect(updates).toHaveLength(1);
+      expect(updates[0].patch).toMatchObject({ invite_only: false });
+      expect(filterValue(updates[0], "id")).toBe("evt-1");
+      // Nothing about the weekly entry is read or written.
+      expect(calls.filter((c) => c.table === "calendar_series")).toEqual([]);
     });
 
-    // The way that does work: the entry's own setting, from this date on.
-    it("lets the whole entry be opened from this date on", async () => {
+    it("takes it off the whole entry from this date on", async () => {
       const { admin, calls } = fakeClient((op) => {
         if (op.table === "calendar_events" && op.verb === "select")
           return ok({ series_id: "series-1", starts_at: NEXT_CLASS });
@@ -934,55 +929,39 @@ describe("listManagerEventRows", () => {
     invite_only,
   });
 
-  /**
-   * The listed dates, and the answer to "which weekly entries are invite
-   * only". The horizon top-up runs first and reads every active entry; it is
-   * told there are none, so it adds nothing and stays out of the way.
-   */
-  function club(dates: unknown[], inviteOnly: Result) {
-    return fakeClient((op) => {
+  // Invite only is a badge and hides nothing (docs/calendar.md), so a date's
+  // weekly entry has no say in how the date is listed: what the list reports is
+  // the date's own flag, the one an edit of that date writes and the calendar
+  // page and calendar apps show.
+  it("reports each date's own invite only flag, and nothing about its weekly entry", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      // Asked which entries are invite only, the answer would be this one. The
+      // horizon top-up asks only for active entries and is told there are
+      // none, so it adds nothing and stays out of the way.
       if (op.table === "calendar_series" && op.verb === "select")
-        return filterValue(op, "invite_only") === true ? inviteOnly : ok([]);
-      if (op.table === "calendar_events" && op.verb === "select") return ok(dates);
+        return filterValue(op, "invite_only") === true ? ok([{ id: "series-invite" }]) : ok([]);
+      if (op.table === "calendar_events" && op.verb === "select")
+        return ok([
+          date("evt-of-invite-entry", "series-invite", false),
+          date("evt-badged", "series-invite", true),
+          date("evt-one-off", null, false),
+        ]);
       if (op.table === "event_rsvps") return ok([]);
       return ok(null);
     });
-  }
-
-  // An entry made invite only "from this date on" leaves the flag false on
-  // its earlier dates, but the series flag hides them all the same. The two
-  // are reported apart: an edit of one date writes only its own.
-  it("reports apart whether a date's weekly entry hides it and what its own flag says", async () => {
-    const { admin } = club(
-      [
-        date("evt-hidden", "series-invite", false),
-        date("evt-open", "series-open", false),
-        date("evt-one-off", null, false),
-        date("evt-own-flag", null, true),
-      ],
-      ok([{ id: "series-invite" }]),
-    );
 
     const rows = await listManagerEventRows(admin);
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.invite_only]))).toEqual({
+      "evt-of-invite-entry": false,
+      "evt-badged": true,
+      "evt-one-off": false,
+    });
+    for (const row of rows) expect(row).not.toHaveProperty("series_invite_only");
     expect(
-      Object.fromEntries(rows.map((r) => [r.id, [r.invite_only, r.series_invite_only]])),
-    ).toEqual({
-      "evt-hidden": [false, true],
-      "evt-open": [false, false],
-      "evt-one-off": [false, false],
-      "evt-own-flag": [true, false],
-    });
-  });
-
-  // Reported false instead, every date of an invite-only entry would read as
-  // visible to everybody.
-  it("fails rather than guess when it cannot read which entries are invite only", async () => {
-    const { admin } = club([date("evt-hidden", "series-invite", false)], {
-      data: null,
-      error: { message: "permission denied for table calendar_series" },
-    });
-
-    await expect(listManagerEventRows(admin)).rejects.toThrow(/permission denied/);
+      ofTable(calls, "calendar_series", "select").filter((op) =>
+        op.filters.some(([col]) => col === "invite_only"),
+      ),
+    ).toEqual([]);
   });
 });
 

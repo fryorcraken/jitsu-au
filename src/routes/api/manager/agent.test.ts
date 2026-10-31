@@ -3040,10 +3040,41 @@ describe("manager agent route: the calendar", () => {
     });
   });
 
+  describe("list_calendar_events", () => {
+    // Invite only is a badge on a date and hides nothing (docs/calendar.md), so
+    // what an agent is told is the date's own flag, the one edit_calendar_entry
+    // writes and the calendar shows.
+    it("reports each date's own invite only badge, whatever its weekly entry says", async () => {
+      const BADGED = "a6666666-6666-4666-8666-666666666666";
+      const fake = fakeCalendar({
+        // Not active, so the horizon top-up has nothing to add.
+        calendar_series: [{ id: SERIES, invite_only: true, is_active: false }],
+        calendar_events: [
+          event(WEEKLY_DATE, { series_id: SERIES, title: "Evening class" }),
+          event(BADGED, { series_id: SERIES, title: "Evening class", invite_only: true }),
+          event(ONE_OFF),
+        ],
+        event_rsvps: [],
+      });
+      currentAdmin = fake.db;
+      const res = await post({ action: "list_calendar_events", params: {} });
+      expect(res.status).toBe(200);
+      const { events } = (await res.json()).result as { events: Row[] };
+      expect(Object.fromEntries(events.map((e) => [e.id, e.invite_only]))).toEqual({
+        [WEEKLY_DATE]: false,
+        [BADGED]: true,
+        [ONE_OFF]: false,
+      });
+      for (const e of events) expect(e).not.toHaveProperty("series_invite_only");
+    });
+  });
+
   // Every calendar schema is strict because the screen's would otherwise drop a
-  // misspelt `invite_only` and put the entry up for everybody to see; and
-  // list_calendar_events takes nothing, so a `from` an agent hoped would narrow
-  // the list must not come back as the whole list, read as filtered.
+  // misspelt field and answer 200 for a change it never made (a misspelt
+  // `visibility` puts an entry meant for members up for everybody to see, a
+  // misspelt `invite_only` leaves its badge off); and list_calendar_events
+  // takes nothing, so a `from` an agent hoped would narrow the list must not
+  // come back as the whole list, read as filtered.
   it.each([
     [
       "a misspelt field on create_calendar_entry",

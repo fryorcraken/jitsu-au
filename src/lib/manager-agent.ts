@@ -304,8 +304,6 @@ export type AgentCalendarEvent = {
   status: string;
   visibility: string;
   invite_only: boolean;
-  /** Set on the manager list's rows: the date's weekly entry is invite only. */
-  series_invite_only?: boolean;
   rsvps?: { going: number; maybe: number; declined: number };
 };
 
@@ -322,9 +320,6 @@ export type AgentCalendarEvent = {
  *   date falls on will sometimes answer wrong with complete confidence.
  * - `repeats` says whether `series_id` is set, which decides whether a "this and
  *   every later date" scope applies and whether the date can be deleted.
- * - `invite_only` is whether the date is hidden: its own setting OR its weekly
- *   entry's. The read carries the two apart because an edit of one date writes
- *   only its own; a caller deciding who can see a date needs them together.
  */
 export function projectAgentCalendarEvent(e: AgentCalendarEvent) {
   const startsLocal = clubLocalDateTime(new Date(e.starts_at));
@@ -340,7 +335,7 @@ export function projectAgentCalendarEvent(e: AgentCalendarEvent) {
     weekday: WEEKDAY_LABELS[new Date(`${startsLocal.slice(0, 10)}T00:00:00Z`).getUTCDay()],
     status: e.status,
     visibility: e.visibility,
-    invite_only: e.invite_only || Boolean(e.series_invite_only),
+    invite_only: e.invite_only,
     instructor_name: e.instructor_name,
     location: e.location,
     description: e.description,
@@ -392,7 +387,7 @@ export const AGENT_MANIFEST: {
         "The club calendar, the agent's equivalent of the manager's Calendar screen, through the same functions that screen calls. New read actions: list_calendar_events (every date from 30 days ago to 180 days ahead, with its id, series_id and repeats, UTC starts_at/ends_at, club-time starts_local/ends_local and weekday, status, visibility, invite_only and an rsvps tally) and list_calendar_rsvps (who replied to one date).",
         "New change actions: create_calendar_entry (a one-off, or a weekly entry), edit_calendar_entry (details only, for one date or that date and every later one), cancel_calendar_entry (cancel or restore, the date is kept), stop_calendar_repeat (take a weekly entry's dates still to come off the calendar) and delete_calendar_entry (a one-off made by mistake). Each date's id is what they take, except stop_calendar_repeat, which takes series_id. A calendar change is public at once, on the site and in every subscriber's calendar app, and emails nobody.",
         "create_calendar_entry takes a one-off's times as club time with no offset (2026-11-05T18:00), as the screen reads its pickers, or as an ISO time with an offset. A location left out is the club's gym, as the screen's form pre-fills. Adding the same entry again is 409 already_on_calendar rather than a second copy, so a create you never heard back from can be sent again.",
-        "Refusals: 404 not_found (no such date or repeat), 422 not_repeating (scope series on a one-off), 422 no_dates (a weekly entry that would put no date on the calendar), 422 invite_only_on_entry (opening one date of an invite-only weekly entry with scope event), 409 repeating_date (deleting one date of a weekly entry), 409 checked_in (deleting a class people were checked in to), 409 already_on_calendar. Details, where there are any, are in error.details.",
+        "Refusals: 404 not_found (no such date or repeat), 422 not_repeating (scope series on a one-off), 422 no_dates (a weekly entry that would put no date on the calendar), 409 repeating_date (deleting one date of a weekly entry), 409 checked_in (deleting a class people were checked in to), 409 already_on_calendar. Details, where there are any, are in error.details.",
         "list_calendar_events takes no params, and refuses any (400 invalid_params) rather than return the whole list as if it had been filtered.",
       ],
     },
@@ -1748,7 +1743,7 @@ export const AGENT_MANIFEST: {
       name: "list_calendar_events",
       method: "POST",
       summary:
-        "Every date on the club calendar from 30 days ago to 180 days ahead, oldest first: the list on the manager's Calendar screen, from the same read. One-offs and every date a weekly entry has generated, cancelled ones included. Each date has id (what the other calendar actions take), series_id and repeats (set when it is one week of a weekly entry; series_id is what stop_calendar_repeat takes), title, starts_at and ends_at (UTC), starts_local and ends_local (the same times in club time, Australia/Sydney, as YYYY-MM-DDTHH:MM, the shape create_calendar_entry takes), weekday (the club-time day it starts on), status (scheduled | cancelled), visibility (public | members, where members means paid members and managers only), invite_only (true when the date or the weekly entry it belongs to is invite only, which is what hides it), instructor_name, location, description, and rsvps { going, maybe, declined }. A weekly entry keeps between six and twelve weeks of dates listed (it is topped up once its furthest date is within six weeks), so a week more than six weeks out may not be listed yet: it is not missing, it cannot be edited or cancelled until it appears, and it is no reason to add a one-off for it. Who replied: list_calendar_rsvps. time_zone names the club's zone.",
+        "Every date on the club calendar from 30 days ago to 180 days ahead, oldest first: the list on the manager's Calendar screen, from the same read. One-offs and every date a weekly entry has generated, cancelled ones included. Each date has id (what the other calendar actions take), series_id and repeats (set when it is one week of a weekly entry; series_id is what stop_calendar_repeat takes), title, starts_at and ends_at (UTC), starts_local and ends_local (the same times in club time, Australia/Sydney, as YYYY-MM-DDTHH:MM, the shape create_calendar_entry takes), weekday (the club-time day it starts on), status (scheduled | cancelled), visibility (public | members, where members means paid members and managers only), invite_only (a badge: it hides the date from nobody), instructor_name, location, description, and rsvps { going, maybe, declined }. A weekly entry keeps between six and twelve weeks of dates listed (it is topped up once its furthest date is within six weeks), so a week more than six weeks out may not be listed yet: it is not missing, it cannot be edited or cancelled until it appears, and it is no reason to add a one-off for it. Who replied: list_calendar_rsvps. time_zone names the club's zone.",
       params: [],
     },
     {
@@ -1808,7 +1803,7 @@ export const AGENT_MANIFEST: {
           name: "invite_only",
           required: false,
           description:
-            "true shows each date only to the people invited to it (those with a reply on it) and to managers; everybody else never sees it. Default false. There is no action that invites anybody.",
+            'true puts an "invite only" badge on each date, on the calendar page and in calendar apps. It is a label and hides nothing: everybody who can see the date (see visibility) still sees it and can reply. Default false. To limit who sees an entry, use visibility members.',
         },
       ],
     },
@@ -1816,7 +1811,7 @@ export const AGENT_MANIFEST: {
       name: "edit_calendar_entry",
       method: "POST",
       summary:
-        "Change an entry's details: Edit on the manager's Calendar screen. id is always a date from list_calendar_events. scope event changes that date only. scope series, only on a date of a weekly entry, changes that date and every later one, and the weekly rule, so dates still to be generated carry the change too; dates before the one you name are never rewritten, because they record what happened. Only the fields you send change. An empty string (or null) clears description, instructor_name or location; title cannot be cleared. A date's day, time and length cannot be changed: cancel it and add a one-off, or for a weekly entry stop it and add it again. Visible at once on the site and in subscribers' calendar apps; nobody is emailed. Who can see a date is its own invite_only or its weekly entry's: so invite_only true with scope series hides every date of the entry, earlier ones included, and scope event cannot make one date of an invite-only weekly entry visible again: invite_only false with scope event on such a date is refused with 422 invite_only_on_entry (series_id in error.details), and scope series with invite_only false is the way. Returns updated, the number of dates changed. 404 not_found when there is no such date; 422 not_repeating for scope series on a one-off; 400 invalid_params when no field to change was sent.",
+        "Change an entry's details: Edit on the manager's Calendar screen. id is always a date from list_calendar_events. scope event changes that date only. scope series, only on a date of a weekly entry, changes that date and every later one, and the weekly rule, so dates still to be generated carry the change too; dates before the one you name are never rewritten, because they record what happened. Only the fields you send change. An empty string (or null) clears description, instructor_name or location; title cannot be cleared. A date's day, time and length cannot be changed: cancel it and add a one-off, or for a weekly entry stop it and add it again. Visible at once on the site and in subscribers' calendar apps; nobody is emailed. Returns updated, the number of dates changed. 404 not_found when there is no such date; 422 not_repeating for scope series on a one-off; 400 invalid_params when no field to change was sent.",
       params: [
         {
           name: "scope",

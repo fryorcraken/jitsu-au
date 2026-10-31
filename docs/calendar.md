@@ -70,41 +70,29 @@ date actually has, so an entry with no location keeps having none.
 
 ## Two settings that are easy to confuse
 
-| Setting                           | What it is                         | Effect                                                                                                                          |
-| --------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **Who can see it** (`visibility`) | **Access.** `public` or `members`. | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member.                           |
-| **Invite only** (`invite_only`)   | **Access, and a badge.**           | Enforced. Only people invited to that date (they have an RSVP row) and managers can see it. Everyone else never sees the entry. |
+| Setting                           | What it is                         | Effect                                                                                                |
+| --------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Who can see it** (`visibility`) | **Access.** `public` or `members`. | Enforced. `members` entries are hidden from the public site and from anyone who is not a paid member. |
+| **Invite only** (`invite_only`)   | **A badge.** Nothing else.         | Restricts nothing. Everybody the entry's `visibility` admits still sees it and can RSVP.              |
 
-Invite only is enforced in the database, not just in the interface: the
-`calendar_events` read policies hide an invite-only date from the public feed and
-from ordinary members. Marking a repeating entry invite only hides every date it
-generates the same way, so the series and its dates can never disagree. To let
-someone see an invite-only date, a manager creates their RSVP for it.
+`visibility` is the one setting that decides who sees an entry. Invite only
+labels it, on the calendar page and in calendar apps ("(invite only)" after the
+title, "Invite only." in the description), and leaves the rest to the people
+reading it: the site checks nothing. To keep an entry away from people, make it
+_Paid members only_. The manager form says the same under the box.
 
-A date is hidden when **it or its repeating entry** is invite only, and the
-manager's list shows a date as invite only on exactly that rule, not just the
-date's own setting. Two things follow for a repeating entry. Making it invite
-only for "this and all future dates" hides **every** date of it, earlier ones
-included, because the entry itself is now invite only, even though only the
-date clicked and the ones after it are rewritten. And while the entry is invite
-only, one date of it cannot be made visible on its own ("this date only"): the
-entry's setting still hides it, so the server refuses the change rather than
-report it saved, and the edit form says so under the box. Turning invite only
-off for "this and all future dates" is the way back. The edit form opens with
-the box showing whether the date is hidden, and only sends it when the manager
-changes it, so saving a title on a date its entry hides does not copy the
-entry's setting onto that date for good.
+Until `20261031000000` it was enforced. The `calendar_events` read policies, and
+the calendar page and calendar links in code, hid an invite-only date from
+everybody but managers and people with an RSVP row for it. Nothing in the
+product ever wrote that row for somebody else, so there was no way to invite
+anyone: ticking the box hid the class from every member, while the form beside
+it said it was only a label. The club decided on 2026-10-30 that it is only a
+label, which made the form right and removed the rule.
 
-The calendar page and the personal calendar link read through the service role,
-which skips those policies, so both apply the same rule in code through one
-shared helper (`withoutHiddenInviteOnly` in `src/lib/calendar.ts`). If it cannot
-work out who is invited, the calendar page fails to load rather than showing
-everything.
-
-An entry can be public and invite-only (only invitees see it), members-only and
-not invite-only, or any other combination. Both settings apply to repeating
-entries too, which is what the old two-form design made impossible: every date a
-repeat generated was forced to be public.
+An entry can be public and invite only (everybody sees it, with the badge),
+members-only and not invite only, or any other combination. Both settings apply
+to repeating entries too, which is what the old two-form design made
+impossible: every date a repeat generated was forced to be public.
 
 ## Repeating: start and end dates
 

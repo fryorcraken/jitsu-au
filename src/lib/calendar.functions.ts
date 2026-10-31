@@ -27,7 +27,6 @@ import {
   firstDateToCome,
   generateOccurrences,
   weeklyRunsShareADate,
-  withoutHiddenInviteOnly,
 } from "@/lib/calendar";
 import { generateRawToken, hashToken, tokenPreview } from "@/lib/manager-api-tokens";
 import type {
@@ -93,9 +92,6 @@ async function requireManager(context: { supabase: CalendarClient; userId: strin
  * - `already_on_calendar`: asked to add something that is already there.
  * - `no_dates`: asked to add a weekly entry that would never put a date on the
  *   calendar (its last date has passed, or no date in it is on that weekday).
- * - `invite_only_on_entry`: asked to open one date of a weekly entry that is
- *   invite only. The entry's setting hides every one of its dates, so the
- *   date's own setting cannot open it.
  */
 export type CalendarRefusal =
   | "not_found"
@@ -103,8 +99,7 @@ export type CalendarRefusal =
   | "repeating_date"
   | "checked_in"
   | "already_on_calendar"
-  | "no_dates"
-  | "invite_only_on_entry";
+  | "no_dates";
 
 export class CalendarEntryError extends Error {
   reason: CalendarRefusal;
@@ -135,16 +130,15 @@ function dateFromNow(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
-type Viewer = { userId: string | null; canSeeMembersOnly: boolean; isManager: boolean };
+type Viewer = { userId: string | null; canSeeMembersOnly: boolean };
 
 /**
- * Resolve the caller from the request bearer token, if any, whether they may
- * see members-only events (a PAID member, or a manager), and whether they are a
- * manager (who also sees every invite-only date). Anonymous callers get
- * `{ userId: null, canSeeMembersOnly: false, isManager: false }`.
+ * Resolve the caller from the request bearer token, if any, and whether they
+ * may see members-only events (a PAID member, or a manager). Anonymous callers
+ * get `{ userId: null, canSeeMembersOnly: false }`.
  */
 async function resolveViewer(): Promise<Viewer> {
-  const anonymous: Viewer = { userId: null, canSeeMembersOnly: false, isManager: false };
+  const anonymous: Viewer = { userId: null, canSeeMembersOnly: false };
   let bearer: string | null = null;
   try {
     const { getRequestHeader } = await import("@tanstack/react-start/server");
@@ -159,11 +153,7 @@ async function resolveViewer(): Promise<Viewer> {
   const userId = data.user?.id ?? null;
   if (!userId) return anonymous;
   const access = await calendarAccess(userId);
-  return {
-    userId,
-    canSeeMembersOnly: access.paid || access.isManager,
-    isManager: access.isManager,
-  };
+  return { userId, canSeeMembersOnly: access.paid || access.isManager };
 }
 
 /** Whether a person holds a paid membership, and whether they are a manager. */
@@ -180,34 +170,6 @@ async function calendarAccess(userId: string): Promise<{ paid: boolean; isManage
 async function canSeeMembersOnly(userId: string): Promise<boolean> {
   const { paid, isManager } = await calendarAccess(userId);
   return paid || isManager;
-}
-
-/**
- * The invite-only dates this viewer may see: managers see all of them, a
- * signed-in person sees the ones they are invited to (an RSVP row), and
- * anybody not signed in sees none. Mirrors the `calendar_events` read policies,
- * which the service role skips.
- */
-async function hideInviteOnlyFor<
-  E extends { id: string; series_id: string | null; invite_only: boolean },
->(admin: CalendarClient, viewer: Viewer, events: E[]): Promise<E[]> {
-  if (viewer.isManager) return events;
-  const [rsvps, inviteSeries] = await Promise.all([
-    viewer.userId
-      ? admin.from("event_rsvps").select("event_id").eq("user_id", viewer.userId)
-      : Promise.resolve({ data: [] as { event_id: string }[], error: null }),
-    admin.from("calendar_series").select("id").eq("invite_only", true),
-  ]);
-  // Fail closed: without these answers there is no telling which dates are
-  // hidden, and showing an invite-only date to the wrong person is worse than
-  // a calendar that does not load.
-  if (rsvps.error) throw new Error(rsvps.error.message);
-  if (inviteSeries.error) throw new Error(inviteSeries.error.message);
-  return withoutHiddenInviteOnly(events, {
-    isManager: false,
-    invitedEventIds: new Set((rsvps.data ?? []).map((r) => r.event_id)),
-    inviteOnlySeriesIds: new Set((inviteSeries.data ?? []).map((s) => s.id)),
-  });
 }
 
 async function requestOrigin(): Promise<string> {
@@ -238,6 +200,7 @@ function projectEvent(e: CalendarEventSelection) {
 // ---- Public / member: list events in a rolling window ----
 // Everyone sees public events. Members-only events are added for paid members
 // (and managers). Cancelled events are included so the cancellation shows.
+// Invite only is a badge and hides nothing (docs/calendar.md).
 export const getCalendar = createServerFn({ method: "GET" }).handler(async () => {
   const admin = await adminClient();
   // Keeps repeating entries appearing without anyone pressing anything.
@@ -257,14 +220,11 @@ export const getCalendar = createServerFn({ method: "GET" }).handler(async () =>
   if (!seesMembers) query = query.eq("visibility", "public");
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  // The query above applies `visibility` only. Invite-only dates are dropped
-  // here, after it, for anyone who is neither invited nor a manager.
-  const visible = await hideInviteOnlyFor(admin, viewer, data ?? []);
   return {
     // Any signed-in person may RSVP — trial visitors included.
     signed_in: Boolean(userId),
     sees_members_only: seesMembers,
-    events: visible.map(projectEvent),
+    events: (data ?? []).map(projectEvent),
   };
 });
 
@@ -469,29 +429,15 @@ export const replaceMyCalendarFeedUrl = createServerFn({ method: "POST" })
 /** Every date from a month back to six months ahead, each with its RSVP tally. */
 export async function listManagerEventRows(admin: CalendarClient) {
   await topUpHorizon(admin);
-  const [{ data, error }, { data: inviteSeries, error: iErr }] = await Promise.all([
-    admin
-      .from("calendar_events")
-      .select(EVENT_COLUMNS)
-      .gte("starts_at", `${dateFromNow(-30)}T00:00:00.000Z`)
-      .lte("starts_at", `${dateFromNow(180)}T23:59:59.999Z`)
-      .order("starts_at", { ascending: true })
-      .limit(1000),
-    admin.from("calendar_series").select("id").eq("invite_only", true),
-  ]);
+  const { data, error } = await admin
+    .from("calendar_events")
+    .select(EVENT_COLUMNS)
+    .gte("starts_at", `${dateFromNow(-30)}T00:00:00.000Z`)
+    .lte("starts_at", `${dateFromNow(180)}T23:59:59.999Z`)
+    .order("starts_at", { ascending: true })
+    .limit(1000);
   if (error) throw new Error(error.message);
-  if (iErr) throw new Error(iErr.message);
-  // Who can see a date is its own invite-only flag OR its weekly entry's (the
-  // read policies and `withoutHiddenInviteOnly` both ask both), and an entry
-  // made invite only "from this date on" leaves the dates before it with their
-  // own flag false. So each date carries both: `invite_only` is its own
-  // column, the one an edit of that date writes, and `series_invite_only` says
-  // its entry hides it whatever that column holds.
-  const inviteOnlySeries = new Set((inviteSeries ?? []).map((s) => s.id));
-  const events = (data ?? []).map((e) => ({
-    ...projectEvent(e),
-    series_invite_only: e.series_id !== null && inviteOnlySeries.has(e.series_id),
-  }));
+  const events = (data ?? []).map(projectEvent);
 
   // Attach a per-event RSVP tally so the manager sees interest at a glance,
   // in slices (`chunks`). A failure here must surface — silently rendering
@@ -915,10 +861,6 @@ export async function updateCalendarEntryRow(
   if (Object.keys(patch).length === 0) return { ok: true as const, id, updated: 0 };
 
   if (scope === "event") {
-    // Opening one date of an invite-only weekly entry cannot work: the entry
-    // hides every one of its dates, whatever the date's own setting says. Saved
-    // anyway, it would report success and leave the date exactly as hidden.
-    if (patch.invite_only === false) await refuseOpeningOneDateOfHiddenEntry(admin, id);
     const { data: changed, error } = await admin
       .from("calendar_events")
       .update({ ...patch, updated_at: now })
@@ -954,31 +896,6 @@ export async function updateCalendarEntryRow(
     .select("id");
   if (eErr) throw new Error(eErr.message);
   return { ok: true as const, id, updated: changed?.length ?? 0 };
-}
-
-/** Refuse `invite_only: false` on one date when its weekly entry is invite only. */
-async function refuseOpeningOneDateOfHiddenEntry(admin: CalendarClient, eventId: string) {
-  const { data: ev, error } = await admin
-    .from("calendar_events")
-    .select("series_id")
-    .eq("id", eventId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!ev) throw new CalendarEntryError("not_found", NO_SUCH_DATE);
-  if (!ev.series_id) return;
-  const { data: series, error: sErr } = await admin
-    .from("calendar_series")
-    .select("invite_only")
-    .eq("id", ev.series_id)
-    .maybeSingle();
-  if (sErr) throw new Error(sErr.message);
-  if (series?.invite_only) {
-    throw new CalendarEntryError(
-      "invite_only_on_entry",
-      "This weekly entry is invite only, which hides every one of its dates, so one date cannot be opened on its own. Turn invite only off for this date and all future ones instead.",
-      { series_id: ev.series_id },
-    );
-  }
 }
 
 /** Manager: edit an entry's details, for one date or this and every future one. */

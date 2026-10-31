@@ -2491,8 +2491,9 @@ describe("createCalendarEntrySchema", () => {
   });
 
   // The manager agent API parses with this schema too. Stripped rather than
-  // refused, a misspelt invite_only would default to false and put the entry on
-  // the calendar for everybody.
+  // refused, a misspelt visibility would default to public and put a
+  // members-only entry in front of everybody (a misspelt invite_only would
+  // quietly leave its badge off).
   it("refuses an unknown key, at the top level and inside either repeat", () => {
     expect(
       createCalendarEntrySchema.safeParse({ ...details, invite_ony: true, repeat: once }).success,

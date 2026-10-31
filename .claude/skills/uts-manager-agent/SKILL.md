@@ -1403,8 +1403,8 @@ The result is `{ time_zone, count, events }`, and each event has:
   takes back), plus `weekday`, the club-time day it starts on, as a name
   (`"Monday"`). `create_calendar_entry` takes the weekday as a number.
 - `status` (`scheduled | cancelled`), `visibility` (`public | members`) and
-  `invite_only`, which is `true` when the date **or the weekly entry it belongs
-  to** is invite only, since either one hides it.
+  `invite_only`, a badge on the date that hides it from nobody. `visibility`
+  is what decides who sees it.
 - `title`, `instructor_name`, `location` and `description`.
 - `rsvps`: `{ going, maybe, declined }`, how many replied each way.
 
@@ -1437,9 +1437,9 @@ this API has no check-in actions.
 `params`: `title` (**required**, up to 120 characters), `repeat` (**required**,
 a one-off or weekly, below), and optional `instructor_name` (up to 80
 characters), `location` (up to 120), `description` (up to 4000), `visibility`
-(`public`, the default, or `members`) and `invite_only` (default `false`). Any
-other key is refused, inside `repeat` too, so a misspelt `invite_only` is a
-`400` rather than an entry everybody can see.
+(`public`, the default, or `members`) and `invite_only` (default `false`, a
+badge only, below). Any other key is refused, inside `repeat` too, so a
+misspelt `visibility` is a `400` rather than an entry everybody can see.
 
 A one-off:
 
@@ -1495,10 +1495,12 @@ scripts/agent.sh create_calendar_entry '{
   or by a child on their account), plus managers. Somebody on the free trial or
   a casual class does not see it, on the site or in their calendar app.
   `public` is everybody, signed in or not.
-- **`invite_only: true` hides each date from everybody except managers and the
-  people invited to it, and there is no invite action.** Nothing on this API
-  invites anybody, so set it only when the manager asks for it, and tell them
-  that.
+- **`invite_only: true` is a badge and hides nothing.** It shows "invite only"
+  on each date, on the calendar page and in calendar apps, and everybody the
+  entry's `visibility` admits still sees it and can reply. There is no invite
+  list. If the manager wants to limit who sees an entry, that is
+  `visibility: "members"`; say so rather than setting `invite_only` and
+  letting them believe the entry is hidden.
 
 The result is `{ repeats, event_id, series_id, generated, dates }`. `event_id`
 is the one-off's date (`null` for a weekly entry) and `series_id` the weekly
@@ -1570,15 +1572,9 @@ changed. `404 not_found` when there is no such date; `422 not_repeating` for
 > duplicate when the new one-off also ends when it did. To move a weekly class,
 > stop it and add it again.
 >
-> **`invite_only` on a weekly entry reaches further than the other fields.** A
-> date is hidden when it or its weekly entry is invite only. So
-> `invite_only: true` with `scope: "series"` hides every date of the entry,
-> earlier ones included, even though `updated` counts only the date named and
-> later ones. And `invite_only: false` with `scope: "event"` cannot make one
-> date of an invite-only weekly entry visible again, because the entry still
-> hides it, so it is refused as `422 invite_only_on_entry` (`series_id` in
-> `error.details`): only `scope: "series"` with `invite_only: false` can. Tell
-> the manager which of these applies before sending it.
+> **`invite_only` changes the badge and nothing else**, on whichever dates the
+> scope covers, like any other field. To change who can see an entry, change
+> `visibility`.
 
 ### `cancel_calendar_entry` — call off a date, or restore it
 
@@ -1677,11 +1673,12 @@ the manager first is your job. The result is `{ deleted: true, id }`.
   safe; publishing is the step to confirm. The same goes for
   `delete_blog_post`, which cannot be undone.
 - Before any calendar change, read back to the manager what will be on the
-  calendar: the title, the weekday, date and time in club time, and who can see
-  it (everybody, paid members only, or invite only). It is public at once, on
-  the site and in subscribers' calendar apps, and nobody is emailed about it,
-  so there is no later step where a wrong day gets caught. When they say a
-  class is off, cancel it; delete only what should never have been added.
+  calendar: the title, the weekday, date and time in club time, who can see it
+  (everybody, or paid members only), and whether it carries the invite-only
+  badge, which hides it from nobody. It is public at once, on the site and in
+  subscribers' calendar apps, and nobody is emailed about it, so there is no
+  later step where a wrong day gets caught. When they say a class is off,
+  cancel it; delete only what should never have been added.
 - Before a `file_waiver` batch, confirm scope with the manager: how many
   records, whether any should be flagged for review rather than filed
   automatically, and that leaving everything pending (not approved) is what

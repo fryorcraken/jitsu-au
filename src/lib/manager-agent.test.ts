@@ -1053,18 +1053,19 @@ describe("projectAgentCalendarEvent", () => {
     invite_only: false,
   };
 
-  // The manager list reads the date's own flag and its entry's apart; a caller
-  // asking who can see the date needs them together.
-  it("reports a date as invite only when its weekly entry is, whatever its own flag says", () => {
-    const weekly = { ...morning, series_id: "series-1" };
-    expect(projectAgentCalendarEvent({ ...weekly, series_invite_only: true }).invite_only).toBe(
-      true,
-    );
-    expect(projectAgentCalendarEvent({ ...weekly, series_invite_only: false }).invite_only).toBe(
-      false,
-    );
+  // Invite only is a badge on the date (docs/calendar.md). It hides nothing, so
+  // there is no "can anybody see this" answer to work out from the weekly entry,
+  // and what is reported is what the date carries, the flag an edit writes.
+  it("reports the date's own invite only flag, passed through", () => {
     expect(projectAgentCalendarEvent({ ...morning, invite_only: true }).invite_only).toBe(true);
-    expect(projectAgentCalendarEvent(morning)).not.toHaveProperty("series_invite_only");
+    expect(projectAgentCalendarEvent({ ...morning, invite_only: false }).invite_only).toBe(false);
+
+    // A row that also says its weekly entry is invite only still reports the
+    // date's own flag rather than the entry's.
+    const ofInviteOnlyEntry = { ...morning, series_id: "series-1", series_invite_only: true };
+    const projected = projectAgentCalendarEvent(ofInviteOnlyEntry);
+    expect(projected.invite_only).toBe(false);
+    expect(projected).not.toHaveProperty("series_invite_only");
   });
 
   it("reports the club's wall clock and weekday, not UTC's", () => {
