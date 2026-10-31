@@ -713,7 +713,7 @@ export async function profileForCaller(
 
 export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .validator((d: unknown) => householdTargetSchema.parse(d ?? {}))
   .handler(async ({ data: input, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     return profileForCaller(supabaseAdmin, context.userId, input.userId);
@@ -748,7 +748,7 @@ export async function waiversForCaller(
 
 export const listMyWaivers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .validator((d: unknown) => householdTargetSchema.parse(d ?? {}))
   .handler(async ({ data: input, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     return waiversForCaller(supabaseAdmin, context.userId, input.userId);
@@ -756,7 +756,7 @@ export const listMyWaivers = createServerFn({ method: "GET" })
 
 // ---- Submit waiver + generate PDF ----
 export const submitWaiverWithPdf = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => waiverSubmitSchema.parse(data))
+  .validator((data: unknown) => waiverSubmitSchema.parse(data))
   .handler(async ({ data }): Promise<WaiverSubmitResult> => {
     if (data.hp)
       return {
@@ -1463,9 +1463,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 // manager filed it, there is no browser mid-submit to reassure, so answering
 // costs nobody anything and not answering closes the hole.
 export const checkWaiverSubmission = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) =>
-    z.object({ client_submission_id: z.string().uuid() }).parse(data),
-  )
+  .validator((data: unknown) => z.object({ client_submission_id: z.string().uuid() }).parse(data))
   .handler(
     async ({
       data,
@@ -1616,7 +1614,7 @@ export async function promoteWaiverTemplate(
 
 export const setCurrentWaiverTemplate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => setCurrentTemplateSchema.parse(d))
+  .validator((d: unknown) => setCurrentTemplateSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -1690,7 +1688,7 @@ export async function saveWaiverTemplateVersion(
 
 export const saveWaiverTemplate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => saveTemplateSchema.parse(d))
+  .validator((d: unknown) => saveTemplateSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -2405,7 +2403,7 @@ export type UploadPaperWaiverResult =
 
 export const uploadPaperWaiver = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => paperWaiverUploadSchema.parse(d))
+  .validator((d: unknown) => paperWaiverUploadSchema.parse(d))
   .handler(async ({ data, context }): Promise<UploadPaperWaiverResult> => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -2524,7 +2522,7 @@ export async function emailAccountActivated(
 
 export const setWaiverApproval = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => waiverApprovalSchema.parse(d))
+  .validator((d: unknown) => waiverApprovalSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
 
@@ -2741,7 +2739,7 @@ export async function waiverPdfPathForCaller(
 
 export const getWaiverPdfUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const path = await waiverPdfPathForCaller(

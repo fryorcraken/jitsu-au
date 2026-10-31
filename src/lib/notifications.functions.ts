@@ -141,7 +141,7 @@ export const listMyNotifications = createServerFn({ method: "GET" })
  * itself, so naming somebody else's id marks nothing rather than erroring. */
 export const markNotificationsRead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => markNotificationsReadSchema.parse(d))
+  .validator((d: unknown) => markNotificationsReadSchema.parse(d))
   .handler(async ({ data, context }) => {
     const db = await adminClient();
     let query = db
@@ -172,7 +172,7 @@ export const getMyNotificationPreferences = createServerFn({ method: "GET" })
 /** Save the caller's own switches. */
 export const saveMyNotificationPreferences = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => notificationPreferencesSchema.parse(d))
+  .validator((d: unknown) => notificationPreferencesSchema.parse(d))
   .handler(async ({ data, context }) => {
     const db = await adminClient();
     const row = await writePreferences(db, context.userId, data);
@@ -270,7 +270,7 @@ export const getEmailSettingsPreferences = createServerFn({ method: "POST" }).ha
  * which a cross-site POST does not carry: a page on another origin cannot flip
  * somebody's switches on their behalf. */
 export const saveEmailSettingsPreferences = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => notificationPreferencesSchema.parse(d))
+  .validator((d: unknown) => notificationPreferencesSchema.parse(d))
   .handler(async ({ data }): Promise<TokenSettings> => {
     const raw = await settingsCookieToken();
     if (!raw) return { ok: false };

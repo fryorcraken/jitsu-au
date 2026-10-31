@@ -782,7 +782,7 @@ export const listMembershipPlans = createServerFn({ method: "GET" })
 // ---- Member: my memberships + lifecycle ----
 export const getMyMemberships = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .validator((d: unknown) => householdTargetSchema.parse(d ?? {}))
   .handler(async ({ data: input, context }) => {
     const admin = await adminClient();
     const { deriveLifecycleStatus } = await import("@/lib/validation");
@@ -1228,7 +1228,7 @@ export async function enrolMember(
 // ---- Member: start a membership ----
 export const startMembership = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => startMembershipSchema.parse(d))
+  .validator((d: unknown) => startMembershipSchema.parse(d))
   .handler(async ({ data, context }) => {
     if (data.hp) return { ok: true as const, activated: false, reference: null as string | null };
     const admin = await adminClient();
@@ -1334,7 +1334,7 @@ export async function saveMembershipPlanRow(
 // ---- Manager: create / update a plan ----
 export const saveMembershipPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => savePlanSchema.parse(d))
+  .validator((d: unknown) => savePlanSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -1361,7 +1361,7 @@ export const countPlanAnnouncementAudience = createServerFn({ method: "GET" })
 /** Announce one saved plan. Safe to retry with the same `client_submission_id`. */
 export const announcePlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => announcePlanSchema.parse(d))
+  .validator((d: unknown) => announcePlanSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { announceMembershipPlan } = await import("@/lib/plan-announcement.server");
@@ -1627,7 +1627,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
 // ---- Manager: activate / cancel a membership ----
 export const setMembershipStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => setMembershipStatusSchema.parse(d))
+  .validator((d: unknown) => setMembershipStatusSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -1725,7 +1725,7 @@ export class MembershipStartNotChoosableError extends Error {
 // without a hard confirm.
 export const setMembershipStart = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => setMembershipStartSchema.parse(d))
+  .validator((d: unknown) => setMembershipStartSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -1806,7 +1806,7 @@ export async function deleteMembershipRow(
 // ---- Manager: record a payment against a membership ----
 export const markMembershipPaid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => markMembershipPaidSchema.parse(d))
+  .validator((d: unknown) => markMembershipPaidSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -1842,7 +1842,7 @@ export const markMembershipPaid = createServerFn({ method: "POST" })
 // ---- Manager: delete a membership ----
 export const deleteMembership = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => deleteMembershipSchema.parse(d))
+  .validator((d: unknown) => deleteMembershipSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const result = await deleteMembershipRow(await adminClient(), data.id);
@@ -1902,7 +1902,7 @@ export async function createMembershipForUser(
 // ---- Manager: raise a membership for somebody ----
 export const createMembership = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => createMembershipSchema.parse(d))
+  .validator((d: unknown) => createMembershipSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     return createMembershipForUser(await adminClient(), data);
@@ -1911,7 +1911,7 @@ export const createMembership = createServerFn({ method: "POST" })
 // ---- Manager: import a bank statement + auto-reconcile ----
 export const importBankStatement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => importBankStatementSchema.parse(d))
+  .validator((d: unknown) => importBankStatementSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -1973,7 +1973,7 @@ export const listBankTransactions = createServerFn({ method: "GET" })
 // ---- Manager: manually link a transaction to a membership ----
 export const matchTransaction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => matchTransactionSchema.parse(d))
+  .validator((d: unknown) => matchTransactionSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();

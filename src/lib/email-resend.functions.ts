@@ -630,7 +630,7 @@ export async function resendEmail(
 
 export const getResendPreview = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => resendPreviewSchema.parse(d))
+  .validator((d: unknown) => resendPreviewSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     return previewResend(await adminClient(), data.kind, data.record_id);
@@ -638,7 +638,7 @@ export const getResendPreview = createServerFn({ method: "GET" })
 
 export const resendClubEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => resendEmailSchema.parse(d))
+  .validator((d: unknown) => resendEmailSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     return resendEmail(

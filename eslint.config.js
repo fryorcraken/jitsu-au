@@ -53,6 +53,17 @@ export default defineConfig(
           ],
         },
       ],
+      // TanStack Start 1.169 removes `.inputValidator()` with no alias, and a
+      // removed builder method fails only at runtime, so the deprecated name is
+      // refused here, before anything can bring it back.
+      "no-restricted-properties": [
+        "error",
+        {
+          property: "inputValidator",
+          message:
+            "Use `.validator()`. `.inputValidator()` is deprecated in TanStack Start 1.168 and gone in 1.169.",
+        },
+      ],
       // A route file exports `Route = createFileRoute(...)(...)` with its page
       // components beside it, TanStack Router's convention. Naming the route
       // builders here lets the rule count that export as a component, as it

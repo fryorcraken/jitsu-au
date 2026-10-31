@@ -292,7 +292,7 @@ export async function codeOfConductSubject(
  * later is about the caller and must not be rendered as the subject's.
  */
 export const getCodeOfConductSigner = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z
       .object({
         token: z.string().trim().max(120).optional().or(z.literal("")),
@@ -365,7 +365,7 @@ async function subjectNameFor(
  * of what somebody agreed to and when stays intact.
  */
 export const acceptCodeOfConduct = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => codeOfConductAcceptSchema.parse(d))
+  .validator((d: unknown) => codeOfConductAcceptSchema.parse(d))
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, accepted_at: null };
 
@@ -749,7 +749,7 @@ export const listCodeOfConductVersions = createServerFn({ method: "GET" })
 
 export const saveCodeOfConduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => saveCodeOfConductSchema.parse(d))
+  .validator((d: unknown) => saveCodeOfConductSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -759,7 +759,7 @@ export const saveCodeOfConduct = createServerFn({ method: "POST" })
 
 export const setCurrentCodeOfConduct = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => setCurrentTemplateSchema.parse(d))
+  .validator((d: unknown) => setCurrentTemplateSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

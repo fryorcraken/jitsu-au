@@ -134,7 +134,7 @@ export function resolveExcerpt(excerpt: string | undefined, bodyMd: string): str
 // ---- Public: published posts ----
 
 export const listPublishedBlogPosts = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => listBlogPostsSchema.parse(d))
+  .validator((d: unknown) => listBlogPostsSchema.parse(d))
   .handler(async ({ data }) => {
     const supabase = serverSupabase();
     const from = (data.page - 1) * POSTS_PAGE_SIZE;
@@ -162,7 +162,7 @@ export const listPublishedBlogPosts = createServerFn({ method: "GET" })
   });
 
 export const getBlogPostBySlug = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => blogPostSlugSchema.parse(d))
+  .validator((d: unknown) => blogPostSlugSchema.parse(d))
   .handler(async ({ data }) => {
     const supabase = serverSupabase();
     const { data: row, error } = await supabase
@@ -515,7 +515,7 @@ export const listAllBlogPosts = createServerFn({ method: "GET" })
 
 export const getBlogPostForEdit = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => getBlogPostForEditSchema.parse(d))
+  .validator((d: unknown) => getBlogPostForEditSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -524,7 +524,7 @@ export const getBlogPostForEdit = createServerFn({ method: "GET" })
 
 export const createBlogPost = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => blogPostSchema.parse(d))
+  .validator((d: unknown) => blogPostSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -534,7 +534,7 @@ export const createBlogPost = createServerFn({ method: "POST" })
 
 export const updateBlogPost = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => blogPostSchema.parse(d))
+  .validator((d: unknown) => blogPostSchema.parse(d))
   .handler(async ({ data, context }) => {
     if (!data.id) throw new Error("Missing post id.");
     await requireManager(context);
@@ -549,7 +549,7 @@ export const updateBlogPost = createServerFn({ method: "POST" })
 
 export const deleteBlogPost = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => deleteBlogPostSchema.parse(d))
+  .validator((d: unknown) => deleteBlogPostSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -559,7 +559,7 @@ export const deleteBlogPost = createServerFn({ method: "POST" })
 
 export const uploadBlogImage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => uploadBlogImageSchema.parse(d))
+  .validator((d: unknown) => uploadBlogImageSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

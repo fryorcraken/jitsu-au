@@ -114,7 +114,7 @@ export const getSiteBannerSettings = createServerFn({ method: "GET" })
 
 export const saveClubSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => saveClubSettingsSchema.parse(d))
+  .validator((d: unknown) => saveClubSettingsSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     return writeClubSetting(await adminClient(), data, context.userId);

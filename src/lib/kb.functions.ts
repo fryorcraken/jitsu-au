@@ -172,7 +172,7 @@ type KbNavArticleRow = Omit<KbArticleListRow, "annotations_enabled">;
  * been published. See `readKbArticleSchema`.
  */
 export const getKbArticle = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => readKbArticleSchema.parse(d))
+  .validator((d: unknown) => readKbArticleSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
 
@@ -357,7 +357,7 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
  * be the most annoying possible response to a problem they cannot act on.
  */
 export const markKbArticleRead = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => markKbArticleReadSchema.parse(d))
+  .validator((d: unknown) => markKbArticleReadSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     const viewer = await resolveViewer(db);
@@ -410,7 +410,7 @@ export const markKbArticleRead = createServerFn({ method: "POST" })
  * lucky search term.
  */
 export const searchKnowledgeBase = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => searchKnowledgeBaseSchema.parse(d))
+  .validator((d: unknown) => searchKnowledgeBaseSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     const viewer = await resolveViewer(db);
@@ -629,7 +629,7 @@ export async function managerAuthorNames(
  * a later map cannot leak somebody's private notes into the payload.
  */
 export const listAnnotations = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ slug: kbSlugSchema }).parse(d))
+  .validator((d: unknown) => z.object({ slug: kbSlugSchema }).parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     // The viewer lookup and the article row are independent, so they go out
@@ -693,7 +693,7 @@ export const listAnnotations = createServerFn({ method: "POST" })
 
 /** Write an annotation: a private note, a new shared thread, or a reply. */
 export const createAnnotation = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => createAnnotationSchema.parse(d))
+  .validator((d: unknown) => createAnnotationSchema.parse(d))
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, id: null };
 
@@ -806,7 +806,7 @@ export const createAnnotation = createServerFn({ method: "POST" })
 
 /** Edit your own annotation's text. */
 export const updateAnnotation = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => updateAnnotationSchema.parse(d))
+  .validator((d: unknown) => updateAnnotationSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     const viewer = await resolveViewer(db);
@@ -839,7 +839,7 @@ export const updateAnnotation = createServerFn({ method: "POST" })
  * but their author, since nobody else can read them in the first place.
  */
 export const deleteAnnotation = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => deleteAnnotationSchema.parse(d))
+  .validator((d: unknown) => deleteAnnotationSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     const viewer = await resolveViewer(db);
@@ -868,7 +868,7 @@ export const deleteAnnotation = createServerFn({ method: "POST" })
 
 /** Resolve or reopen a shared thread. */
 export const resolveAnnotation = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => resolveAnnotationSchema.parse(d))
+  .validator((d: unknown) => resolveAnnotationSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     const viewer = await resolveViewer(db);
@@ -1033,7 +1033,7 @@ export const listManagerSections = createServerFn({ method: "GET" }).handler(asy
  * the same `saveKbSection` the agent API calls, so an unknown slug creates one.
  */
 export const saveManagerSection = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => saveKbSectionSchema.parse(d))
+  .validator((d: unknown) => saveKbSectionSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);
@@ -1047,7 +1047,7 @@ export const saveManagerSection = createServerFn({ method: "POST" })
  * many moved.
  */
 export const deleteManagerSection = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => deleteKbSectionSchema.parse(d))
+  .validator((d: unknown) => deleteKbSectionSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);
@@ -1057,7 +1057,7 @@ export const deleteManagerSection = createServerFn({ method: "POST" })
 
 /** One article for the editor: the live version, or a named one. Managers only. */
 export const getManagerArticle = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => getKbArticleSchema.parse(d))
+  .validator((d: unknown) => getKbArticleSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);
@@ -1068,7 +1068,7 @@ export const getManagerArticle = createServerFn({ method: "POST" })
 
 /** Every version of an article, newest first. Managers only. */
 export const listArticleVersions = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ slug: kbSlugSchema }).parse(d))
+  .validator((d: unknown) => z.object({ slug: kbSlugSchema }).parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);
@@ -1097,7 +1097,7 @@ export const listArticleVersions = createServerFn({ method: "POST" })
  * agent API calls.
  */
 export const saveManagerArticle = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => saveKbArticleSchema.parse(d))
+  .validator((d: unknown) => saveKbArticleSchema.parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     const viewer = await requireManagerViewer(db);
@@ -1113,7 +1113,7 @@ export const saveManagerArticle = createServerFn({ method: "POST" })
  * retyping the version they want back.
  */
 export const setCurrentArticleVersion = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);
@@ -1132,7 +1132,7 @@ export const setCurrentArticleVersion = createServerFn({ method: "POST" })
  * agent API.
  */
 export const listManagerAnnotations = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) =>
+  .validator((d: unknown) =>
     z.object({ slug: kbSlugSchema, include_resolved: z.boolean().optional() }).parse(d),
   )
   .handler(async ({ data }) => {
