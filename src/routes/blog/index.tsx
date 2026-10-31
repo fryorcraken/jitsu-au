@@ -180,7 +180,7 @@ function BlogIndex() {
                   Articles
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Longer reads on training and self-defence. They stay here.
+                  Longer reads on training and self-defence.
                 </p>
                 <div className={cn("mt-6 grid gap-6", articles.length > 1 && "md:grid-cols-2")}>
                   {articles.map((article) => (
