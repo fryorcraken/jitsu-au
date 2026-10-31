@@ -32,6 +32,7 @@ import {
   normalizeEmail,
   profileFullName,
 } from "@/lib/validation";
+import { requestHeaderGetter } from "@/lib/request-headers";
 import type { SignerMeta } from "@/lib/validation";
 import { householdTargetUserId, resolveSubject } from "@/lib/household";
 import {
@@ -52,32 +53,9 @@ import {
 } from "@/lib/validation";
 import { DocumentVersionError } from "@/lib/document-versions";
 import { promoteDocumentVersion, type VersionedDocument } from "@/lib/document-version-store";
+import { clientIp } from "@/lib/client-ip";
 
 type AdminClient = SupabaseClient<Database>;
-
-/**
- * Best-effort real client IP from the proxy headers, kept on the acceptance as
- * the same forensic record a waiver keeps. Mirrors `clientIp` in
- * `waiver.functions.ts`.
- */
-function clientIp(getHeader: (name: string) => string | undefined): string | null {
-  const fwd = getHeader("x-forwarded-for");
-  if (fwd) {
-    const first = fwd.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return getHeader("cf-connecting-ip") || getHeader("x-real-ip") || null;
-}
-
-/** Request headers, when the server runtime exposes them. Never throws. */
-async function headerGetter(): Promise<(name: string) => string | undefined> {
-  try {
-    const { getRequestHeader } = await import("@tanstack/react-start/server");
-    return (name: string) => getRequestHeader(name);
-  } catch {
-    return () => undefined;
-  }
-}
 
 /** The person a signing session belongs to, resolved server-side. */
 export type CodeOfConductSigner = {
@@ -103,7 +81,7 @@ async function resolveSigner(
   admin: AdminClient,
   token: string | undefined,
 ): Promise<CodeOfConductSigner | null> {
-  const getHeader = await headerGetter();
+  const getHeader = await requestHeaderGetter();
   const bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
 
   let userId: string | null = null;
@@ -410,7 +388,20 @@ export const acceptCodeOfConduct = createServerFn({ method: "POST" })
       );
     }
 
-    const getHeader = await headerGetter();
+    // Public in the sense that matters (#52): a link from any waiver
+    // confirmation is enough, no login, and every agreement is a new row. So
+    // somebody who is NOT signed in is limited per network, like the other
+    // public forms. Counted only here, after the stale-version and who-are-you
+    // refusals, so a press that was going to be turned away anyway (or a bot
+    // sending junk tokens) spends nothing of the network's allowance; and a
+    // signed-in member is not counted at all. The page does not retry by
+    // itself, so there is no submission id to pass: each press is a press.
+    if (!signer.signedIn) {
+      const { limitPublicForm } = await import("@/lib/rate-limit.server");
+      await limitPublicForm("code_of_conduct", null);
+    }
+
+    const getHeader = await requestHeaderGetter();
     const signer_ip = clientIp(getHeader);
     const signer_meta: SignerMeta = buildSignerMeta(getHeader, data.client_meta);
 

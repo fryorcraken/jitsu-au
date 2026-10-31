@@ -151,7 +151,8 @@ instead — every duplicate is a future contradiction.
 - **Data / auth:** Supabase (Postgres + Auth + Storage), `@tanstack/react-query`.
 - **Build:** Vite 8 + Nitro (default deploy target **Cloudflare**), configured
   through `@lovable.dev/vite-tanstack-config`.
-- **Forms/validation:** react-hook-form + Zod. **PDF:** `pdf-lib`. **Signatures:**
+- **Forms/validation:** Zod, with every form that writes going through
+  `useResilientSubmit` (see "The UX bar"). **PDF:** `pdf-lib`. **Signatures:**
   `signature_pad`. **Email:** `@react-email/*` + `@lovable.dev/email-js`.
 - **Package manager:** **Bun** (`bun.lock`, `bunfig.toml`).
 
@@ -207,7 +208,9 @@ src/
     sitemap[.]xml.ts        /sitemap.xml
     routeTree.gen.ts      AUTO-GENERATED route tree — never edit by hand
   components/
-    ui/                   shadcn/ui primitives (generated; avoid hand-editing)
+    ui/                   shadcn/ui primitives (generated; avoid hand-editing). The
+                          unused ones were removed on 2026-10-30: add one back
+                          through shadcn, with its package, when a screen needs it
     site/                 App chrome + shared UX: SiteLayout/MemberLayout/KbLayout,
                           SiteHeader, SiteFooter, SignaturePad, AuthPending,
                           SubmitStatus, StatusPill, Loading, LoadFailure,
@@ -274,6 +277,17 @@ Read `src/routes/README.md` before touching routes. Key points:
     tab order with `tabIndex={-1}`, whose value is read into the payload. A
     `type="hidden"` input, or a payload that hardcodes `hp: ""`, is a honeypot
     that can never catch anything. `register-interest.tsx` is the pattern.
+- **Every write path that accepts a caller who is not signed in is rate
+  limited per network** (#52): `submitInterest`, `submitContact`,
+  `submitWaiverWithPdf` and `acceptCodeOfConduct` each call `limitPublicForm`
+  (`src/lib/rate-limit.server.ts`) before they write anything, passing their
+  `client_submission_id` so a retry is not counted twice. The first three do it
+  right after the honeypot; the code of conduct only once it knows the signer,
+  and only for one who is not signed in. A new public write
+  path does the same, with a `FORM_LIMITS` entry in `src/lib/rate-limit.ts`;
+  any email it sends to a typed-in address goes through `claimVisitorEmail`,
+  and gives its slots back with `releaseVisitorEmail` if the send fails.
+  Both fail open. `src/lib/public-write-limits.test.ts` holds each path to it.
 
 ## Supabase clients — pick the right one
 

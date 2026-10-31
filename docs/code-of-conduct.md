@@ -123,6 +123,17 @@ The waiver's success screen offers the code of conduct under the PDF download:
 one paragraph saying what it is, that they can train before doing it, and a
 button. The button carries the token, so it works even though they cannot log in.
 
+The paragraph says the same link is in their confirmation email only when that
+email actually went: it can be held back by the caps on what the public forms
+send (`docs/emails.md`), and then the screen does not promise it.
+
+Signing from a link with no login is a public write, so it is limited per
+network like the other public forms (#52, `FORM_LIMITS` in
+`src/lib/rate-limit.ts`: 50 an hour, 150 a day). It is counted only after the
+"updated while you had this page open" and "we couldn't tell who you are"
+refusals, so a press that was going to be turned away spends nothing, and a
+signed-in member is never counted at all.
+
 ### From the confirmation email
 
 The waiver confirmation email carries the same link, for the very likely case

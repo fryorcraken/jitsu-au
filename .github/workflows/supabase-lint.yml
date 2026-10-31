@@ -144,6 +144,14 @@ jobs:
           python3 supabase/lint/check-client-grants.py "$RUNNER_TEMP/grants.csv" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The public forms' rate limit counts in SQL, so its promises (a retry is
+      # not a second submission, a refusal records nothing, the wait is right)
+      # can only be checked against a real database. Runs in a transaction it
+      # rolls back; a broken promise raises and ON_ERROR_STOP fails the step.
+      - name: Rate limit claims behave
+        if: ${{ !cancelled() }}
+        run: psql "$DB_URL" -v ON_ERROR_STOP=1 --quiet -f supabase/lint/rate-limit-claims.sql
+
       # (4) in the header. The query and its reasoning live in the file, so the
       # by-hand live run in supabase/lint/README.md uses the same one.
       - name: Nothing lets a client write profiles

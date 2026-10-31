@@ -5,6 +5,18 @@ import { sendWaiverEmails } from "./waiver-email.server";
 
 const { sendLovableEmail } = vi.hoisted(() => ({ sendLovableEmail: vi.fn() }));
 vi.mock("@lovable.dev/email-js", () => ({ sendLovableEmail }));
+const { claimVisitorEmail, claimManagerNotice, releaseVisitorEmail } = vi.hoisted(() => ({
+  claimVisitorEmail: vi.fn(),
+  claimManagerNotice: vi.fn(),
+  releaseVisitorEmail: vi.fn(),
+}));
+// The caps (#52). Open by default, so every other test here sees the sends
+// they always did; the cap tests below close one or the other.
+vi.mock("@/lib/rate-limit.server", () => ({
+  claimVisitorEmail,
+  claimManagerNotice,
+  releaseVisitorEmail,
+}));
 
 // Build a minimal fake service-role client good enough for the code paths under
 // test: `.from("user_roles").select().eq()` and `.auth.admin.getUserById()`.
@@ -43,6 +55,8 @@ describe("sendWaiverEmails", () => {
 
   beforeEach(() => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    claimVisitorEmail.mockReset().mockResolvedValue(true);
+    claimManagerNotice.mockReset().mockResolvedValue("send");
   });
   afterEach(() => {
     if (original === undefined) delete process.env.LOVABLE_API_KEY;
@@ -64,7 +78,7 @@ describe("sendWaiverEmails", () => {
       admin,
     });
 
-    expect(result).toEqual({ sent: [], skipped: true, memberReplyTo: null });
+    expect(result).toEqual({ sent: [], skipped: true, memberReplyTo: null, memberEmailed: false });
     expect(from).not.toHaveBeenCalled();
   });
 
@@ -193,5 +207,71 @@ describe("sendWaiverEmails", () => {
       .map(([p]) => p)
       .find((p) => p.to === "manager-a@example.com");
     expect(toManager.reply_to).toBe("ada@example.com");
+  });
+
+  it("holds back the member's confirmation once that address is capped, and says so", async () => {
+    // Signing is public, so the address is whatever was typed in (#52). The
+    // waiver is saved and the managers still get their review prompt.
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue({ success: true });
+    claimVisitorEmail.mockResolvedValue(false);
+    const admin = fakeAdmin({
+      roles: [{ user_id: "a" }],
+      users: { a: "manager-a@example.com" },
+    });
+
+    const result = await sendWaiverEmails({
+      waiverId: "w9",
+      memberName: "Ada Lovelace",
+      memberGreetingName: "Addy",
+      memberEmail: "ada@example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin,
+    });
+
+    expect(claimVisitorEmail).toHaveBeenCalledWith(admin, "ada@example.com", "waiver-member-w9");
+    expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).toEqual(["manager-a@example.com"]);
+    expect(result).toMatchObject({ memberEmailed: false, memberReplyTo: null });
+  });
+
+  it("sends the managers nothing once the day's new-waiver emails are paused", async () => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockResolvedValue({ success: true });
+    claimManagerNotice.mockResolvedValue("paused");
+    const admin = fakeAdmin({
+      roles: [{ user_id: "a" }],
+      users: { a: "manager-a@example.com" },
+    });
+
+    const result = await sendWaiverEmails({
+      waiverId: "w10",
+      memberName: "Ada Lovelace",
+      memberGreetingName: "Addy",
+      memberEmail: "ada@example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin,
+    });
+
+    expect(claimManagerNotice).toHaveBeenCalledWith(admin, "waiver", "w10");
+    expect(sendLovableEmail.mock.calls.map(([p]) => p.to)).toEqual(["ada@example.com"]);
+    expect(result.memberEmailed).toBe(true);
+  });
+  it("gives the member's slots back when their confirmation fails to send", async () => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockRejectedValue(new Error("provider down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const admin = fakeAdmin({ roles: [] });
+
+    const result = await sendWaiverEmails({
+      waiverId: "w11",
+      memberName: "Ada Lovelace",
+      memberGreetingName: "Addy",
+      memberEmail: "ada@example.com",
+      pdfUrl: "https://example.com/waiver.pdf",
+      admin,
+    });
+
+    expect(releaseVisitorEmail).toHaveBeenCalledWith(admin, "waiver-member-w11");
+    expect(result.memberEmailed).toBe(false);
   });
 });
