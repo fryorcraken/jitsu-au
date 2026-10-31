@@ -140,6 +140,36 @@ export function buildPageMeta({
   ];
 }
 
+/** Roughly how much of a title a search result shows before cutting it off. */
+export const BLOG_SEO_TITLE_SHOWN = 60;
+/** Roughly how much of a description a search result shows. */
+export const BLOG_SEO_DESCRIPTION_SHOWN = 155;
+
+/** What a post's page says when it has neither a search description nor an excerpt. */
+export const BLOG_DEFAULT_DESCRIPTION = "News, tips and updates from UTS Jitsu.";
+
+/**
+ * The title and description a post's page gives search engines and link
+ * previews: the manager's own when they set one, otherwise the defaults every
+ * post had before those fields existed (the post title with the blog's name,
+ * and the excerpt). Resolved at read time rather than stored, so a post left on
+ * the defaults follows a later edit to its title or excerpt by itself.
+ *
+ * The public page and the editor's search preview both call this, so what the
+ * manager is shown is what gets served.
+ */
+export function blogPostSeo(post: {
+  title: string;
+  excerpt: string | null;
+  seo_title: string | null;
+  seo_description: string | null;
+}): { title: string; description: string } {
+  return {
+    title: post.seo_title?.trim() || `${post.title} | UTS Jitsu Blog`,
+    description: post.seo_description?.trim() || post.excerpt?.trim() || BLOG_DEFAULT_DESCRIPTION,
+  };
+}
+
 /**
  * robots.txt body for the host the request came in on.
  *

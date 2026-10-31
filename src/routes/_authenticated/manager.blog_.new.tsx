@@ -46,6 +46,8 @@ function NewBlogPostPage() {
       cover_image_path: "",
       cover_image_url: null,
       status: "draft",
+      seo_title: "",
+      seo_description: "",
     }),
     [],
   );
@@ -61,6 +63,8 @@ function NewBlogPostPage() {
           body_md: value.body_md,
           cover_image_path: value.cover_image_path,
           status: value.status,
+          seo_title: value.seo_title,
+          seo_description: value.seo_description,
         },
       });
       toast.success(value.status === "published" ? "Post published" : "Draft saved");

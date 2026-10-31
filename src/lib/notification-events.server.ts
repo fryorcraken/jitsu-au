@@ -31,7 +31,7 @@ async function managerIds(db: AdminClient): Promise<string[]> {
 }
 
 /** The commenter's public display name. Never the legal name: this is quoted
- * into an email that goes to other members (see docs/blog.md rule 10). */
+ * into an email that goes to other members (see docs/blog.md rule 12). */
 async function displayNameFor(db: AdminClient, userId: string): Promise<string> {
   const { data } = await db
     .from("profiles")

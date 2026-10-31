@@ -76,6 +76,8 @@ function EditBlogPostPage() {
           body_md: value.body_md,
           cover_image_path: value.cover_image_path,
           status: value.status,
+          seo_title: value.seo_title,
+          seo_description: value.seo_description,
         },
       });
       toast.success(value.status === "published" ? "Post published" : "Draft saved");
@@ -95,6 +97,8 @@ function EditBlogPostPage() {
               cover_image_path: value.cover_image_path || null,
               cover_image_url: value.cover_image_url,
               status: value.status,
+              seo_title: value.seo_title || null,
+              seo_description: value.seo_description || null,
             }
           : prev,
       );
@@ -124,6 +128,8 @@ function EditBlogPostPage() {
         cover_image_path: post.cover_image_path ?? "",
         cover_image_url: post.cover_image_url,
         status: post.status === "published" ? "published" : "draft",
+        seo_title: post.seo_title ?? "",
+        seo_description: post.seo_description ?? "",
       },
     [post],
   );

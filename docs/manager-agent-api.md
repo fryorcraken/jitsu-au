@@ -515,6 +515,11 @@ code_of_conduct_not_published` with its `version`, and nothing is made
   - **A blank `slug` is refused** rather than re-derived. On the screen a blank
     slug makes a new one from the title, which on a live post moves it to a new
     address and breaks every link already shared.
+  - **`seo_title` / `seo_description` (`"33"`) are stored as given, and blank
+    means the default** (`docs/blog.md`, rule 9). They are reported as stored,
+    so a post on the defaults reads back `null` for both rather than the text
+    its page resolves to: an agent that wrote that text back would pin the
+    default and stop it following the post's title and excerpt.
   - **Two addresses per post.** `url` is the public one and is null for a draft
     (the public route 404s on one); `edit_url` is the manager's screen.
   - **`upload_blog_image` takes base64 `data` or a public https `url`** the
@@ -815,7 +820,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"32"`.
+test so the bump is a deliberate edit, and the current value is `"33"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

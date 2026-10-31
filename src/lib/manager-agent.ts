@@ -261,6 +261,8 @@ export type AgentBlogPostStored = {
   body_md: string;
   cover_image_path: string | null;
   status: string;
+  seo_title: string | null;
+  seo_description: string | null;
 };
 
 /**
@@ -284,6 +286,8 @@ export function mergeAgentBlogPostEdit(
     body_md: input.body_md ?? stored.body_md,
     cover_image_path: input.cover_image_path ?? stored.cover_image_path ?? "",
     status: input.status ?? (stored.status === "published" ? "published" : "draft"),
+    seo_title: input.seo_title ?? stored.seo_title ?? "",
+    seo_description: input.seo_description ?? stored.seo_description ?? "",
   };
 }
 
@@ -366,7 +370,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "32",
+  version: "33",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -379,6 +383,16 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "33",
+      // Two new optional params and two new response fields. Nothing that
+      // worked before changes.
+      breaking: false,
+      notes: [
+        'save_blog_post takes seo_title (up to 100 characters) and seo_description (up to 300): the title and description a post gives search engines and link previews, set separately from the post title and the excerpt. An empty string clears one back to the default, which is "<title> | UTS Jitsu Blog" for the title and the excerpt for the description. Omit on a change to keep what is stored.',
+        "get_blog_post and save_blog_post report seo_title and seo_description as stored, null when the post uses the default.",
+      ],
+    },
     {
       version: "32",
       // New actions, and nothing that worked before changes.
@@ -1613,7 +1627,7 @@ export const AGENT_MANIFEST: {
       name: "get_blog_post",
       method: "POST",
       summary:
-        "Read one post, any status, in full: everything list_blog_posts reports plus excerpt, body_md (Markdown), cover_image_path and cover_image_url. Pass id, or the slug from the post's address (/blog/<slug>). 404 not_found when there is no such post.",
+        "Read one post, any status, in full: everything list_blog_posts reports plus excerpt, body_md (Markdown), cover_image_path, cover_image_url, seo_title and seo_description (null when the post uses the default). Pass id, or the slug from the post's address (/blog/<slug>). 404 not_found when there is no such post.",
       params: [
         { name: "id", required: false, description: "The post's id. Send this or slug." },
         {
@@ -1661,13 +1675,25 @@ export const AGENT_MANIFEST: {
           name: "excerpt",
           required: false,
           description:
-            "The line under the title on the blog list, and the description search engines show. Up to 500 characters. An empty string takes it from the opening of the body. Omit on a change to keep the stored one, which does not follow a rewritten body by itself: send an empty string with the new body to have it taken afresh.",
+            "The line under the title on the blog list, and the description search engines show unless seo_description is set. Up to 500 characters. An empty string takes it from the opening of the body. Omit on a change to keep the stored one, which does not follow a rewritten body by itself: send an empty string with the new body to have it taken afresh.",
         },
         {
           name: "cover_image_path",
           required: false,
           description:
             "The picture at the top of the post and on the blog list: the path that upload_blog_image returned, not its url. An empty string removes it.",
+        },
+        {
+          name: "seo_title",
+          required: false,
+          description:
+            'The title search engines and link previews show, used exactly as written, up to 100 characters. Search results usually show about 60. Leave it unset to use "<title> | UTS Jitsu Blog", which follows the post title when that changes. An empty string clears it back to that default. Omit on a change to keep the stored one.',
+        },
+        {
+          name: "seo_description",
+          required: false,
+          description:
+            "The description search engines and link previews show, up to 300 characters. Search results usually show about 155. Leave it unset to use the excerpt. An empty string clears it back to that default. Omit on a change to keep the stored one.",
         },
       ],
     },

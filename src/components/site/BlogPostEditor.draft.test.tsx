@@ -31,6 +31,8 @@ const EMPTY: BlogPostEditorValue = {
   cover_image_path: "",
   cover_image_url: null,
   status: "draft",
+  seo_title: "",
+  seo_description: "",
 };
 
 function hidePage() {
@@ -59,8 +61,10 @@ describe("BlogPostEditor draft recovery", () => {
 
     render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
 
-    const banner = await screen.findByRole("status");
-    expect(banner).toHaveTextContent(/unsaved post on this device/i);
+    // The search fields' live regions are statuses too, so find the banner by
+    // what it says.
+    const banner = await screen.findByText(/unsaved post on this device/i);
+    expect(banner.closest('[role="status"]')).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: /bring it back/i }));
 
@@ -68,6 +72,23 @@ describe("BlogPostEditor draft recovery", () => {
     expect(screen.getByLabelText(/Body/)).toHaveValue("Everyone did well.");
     // The offer is answered, so it does not linger over the restored form.
     expect(screen.queryByRole("button", { name: /bring it back/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the search title and description in the draft too", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Search title"), "Grading day results");
+    await user.type(screen.getByLabelText("Search description"), "Who graded, and to what.");
+    hidePage();
+    first.unmount();
+
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+    await user.click(await screen.findByRole("button", { name: /bring it back/i }));
+
+    expect(screen.getByLabelText("Search title")).toHaveValue("Grading day results");
+    expect(screen.getByLabelText("Search description")).toHaveValue("Who graded, and to what.");
   });
 
   it("never restores on its own — the offer has to be accepted", async () => {
@@ -281,6 +302,84 @@ describe("BlogPostEditor draft recovery", () => {
     );
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /bring it back/i })).not.toBeInTheDocument(),
+    );
+  });
+});
+
+describe("BlogPostEditor search preview", () => {
+  function preview() {
+    return screen.getByRole("group", { name: "How the post may look in search results" });
+  }
+
+  it("shows the defaults a blank search title and description fall back to", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText(/Body/), "Everyone did well.");
+
+    // The excerpt is blank too, so the description is the one the server will
+    // derive from the body: the preview must show what will be served.
+    expect(preview()).toHaveTextContent("Grading day | UTS Jitsu Blog");
+    expect(preview()).toHaveTextContent("Everyone did well.");
+  });
+
+  it("shows the manager's own search title and description once typed", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText("Search title"), "Spring grading results");
+    await user.type(screen.getByLabelText("Search description"), "Who graded, and to what.");
+
+    expect(preview()).toHaveTextContent("Spring grading results");
+    expect(preview()).not.toHaveTextContent("| UTS Jitsu Blog");
+    expect(preview()).toHaveTextContent("Who graded, and to what.");
+  });
+
+  it("says when a search title runs past what a result usually shows", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    const field = screen.getByLabelText("Search title");
+    expect(field).toHaveAccessibleDescription(/0 of about 60 characters/);
+    await user.type(field, "x".repeat(61));
+    expect(field).toHaveAccessibleDescription(/61 characters\. .*may be cut off/);
+    // Announced, not only shown: the count changes silently on every keystroke,
+    // but the warning sits in a live region of its own.
+    expect(
+      screen.getAllByRole("status").some((s) => /may be cut off/.test(s.textContent ?? "")),
+    ).toBe(true);
+  });
+
+  // A length cap on the input would silently drop the end of a pasted
+  // paragraph. The text stays, and the field says it cannot be saved yet.
+  it("keeps a pasted description that is too long, and says so", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    const field = screen.getByLabelText("Search description");
+    await user.click(field);
+    await user.paste("x".repeat(320));
+
+    expect(field).toHaveValue("x".repeat(320));
+    expect(field).toHaveAccessibleDescription(/20 over the 300 that can be saved/);
+  });
+
+  it("shows the defaults a blank field falls back to as its placeholder", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText(/Excerpt/), "Everyone passed.");
+
+    expect(screen.getByLabelText("Search title")).toHaveAttribute(
+      "placeholder",
+      "Grading day | UTS Jitsu Blog",
+    );
+    expect(screen.getByLabelText("Search description")).toHaveAttribute(
+      "placeholder",
+      "Everyone passed.",
     );
   });
 });

@@ -2029,6 +2029,8 @@ async function handleGetBlogPost(params: unknown) {
         body_md: row.body_md,
         cover_image_path: row.cover_image_path,
         cover_image_url: row.cover_image_url,
+        seo_title: row.seo_title,
+        seo_description: row.seo_description,
       },
     };
   } catch (e) {
@@ -2058,6 +2060,8 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
           excerpt: input.excerpt,
           cover_image_path: input.cover_image_path,
           status: input.status ?? "draft",
+          seo_title: input.seo_title,
+          seo_description: input.seo_description,
         },
         actingAs,
         { refuseTakenSlug: true },
@@ -2080,6 +2084,8 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
           excerpt: row.excerpt,
           cover_image_path: row.cover_image_path,
           cover_image_url: row.cover_image_url,
+          seo_title: row.seo_title,
+          seo_description: row.seo_description,
         }
       : { id: saved.id, slug: saved.slug, status: saved.status, published_at: saved.published_at },
   };
