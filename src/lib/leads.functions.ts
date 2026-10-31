@@ -269,7 +269,7 @@ export async function deleteLeadRegistrations(
  */
 export const deleteLead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => deleteLeadSchema.parse(d))
+  .validator((d: unknown) => deleteLeadSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { deleted } = await deleteLeadRegistrations(await adminClient(), data.email);

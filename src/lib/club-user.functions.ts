@@ -586,7 +586,7 @@ export type ClubUserRead = Awaited<ReturnType<typeof loadClubUser>>;
 
 export const getClubUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
 
@@ -739,7 +739,7 @@ export async function changeClubUserEmail(
 
 export const setClubUserEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => managerEmailChangeSchema.parse(d))
+  .validator((d: unknown) => managerEmailChangeSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
 
@@ -762,7 +762,7 @@ export const setClubUserEmail = createServerFn({ method: "POST" })
 // than replaced with a guess.
 export const setClubUserKitSizes = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => managerKitSizesSchema.parse(d))
+  .validator((d: unknown) => managerKitSizesSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
 

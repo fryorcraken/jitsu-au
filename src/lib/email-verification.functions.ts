@@ -24,7 +24,7 @@ const tokenSchema = z.object({ token: z.string().trim().min(1).max(120) });
  * reported it would be a way to test which addresses the club holds.
  */
 export const redeemWaiverEmailVerification = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => tokenSchema.parse(d))
+  .validator((d: unknown) => tokenSchema.parse(d))
   .handler(async ({ data }) => {
     try {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

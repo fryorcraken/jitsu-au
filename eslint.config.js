@@ -53,6 +53,20 @@ export default defineConfig(
           ],
         },
       ],
+      // TanStack Start 1.169 removes `.inputValidator()` (from server functions
+      // and middleware) with no alias. On the 1.168 line it still type-checks,
+      // being only deprecated, and the build does not type-check at all, so
+      // until the upgrade lint is the one check that refuses it. Once on 1.169
+      // typecheck rejects it too, and this rule can go (CLAUDE.md, "The
+      // TanStack versions are pinned exactly").
+      "no-restricted-properties": [
+        "error",
+        {
+          property: "inputValidator",
+          message:
+            "Use `.validator()`. `.inputValidator()` is deprecated in TanStack Start 1.168 and gone in 1.169.",
+        },
+      ],
       // A route file exports `Route = createFileRoute(...)(...)` with its page
       // components beside it, TanStack Router's convention. Naming the route
       // builders here lets the rule count that export as a component, as it

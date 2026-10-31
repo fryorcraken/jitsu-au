@@ -50,7 +50,7 @@ export const listApiTokens = createServerFn({ method: "GET" })
 // ---- Manager: mint a new token (raw value returned ONCE) ----
 export const createApiToken = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => createApiTokenSchema.parse(d))
+  .validator((d: unknown) => createApiTokenSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();
@@ -79,7 +79,7 @@ export const createApiToken = createServerFn({ method: "POST" })
 // ---- Manager: revoke a token ----
 export const revokeApiToken = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => revokeApiTokenSchema.parse(d))
+  .validator((d: unknown) => revokeApiTokenSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
     const admin = await adminClient();

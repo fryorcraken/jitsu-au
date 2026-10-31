@@ -29,7 +29,7 @@ async function requireManager(ctx: AuthCtx) {
 // ---- Start OAuth: return authorizationUrl for the popup ----
 export const startGoogleDriveConnect = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((targetOrigin: unknown) => z.string().url().parse(targetOrigin))
+  .validator((targetOrigin: unknown) => z.string().url().parse(targetOrigin))
   .handler(async ({ data: targetOrigin, context }) => {
     await requireManager(context);
     const clientKey = process.env.GOOGLE_DRIVE_APP_USER_CONNECTOR_CLIENT_API_KEY;
@@ -51,7 +51,7 @@ export const startGoogleDriveConnect = createServerFn({ method: "POST" })
 // ---- Save the resulting connection key ----
 export const saveGoogleDriveConnection = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ connectionAPIKey: z.string().min(1) }).parse(d))
+  .validator((d: unknown) => z.object({ connectionAPIKey: z.string().min(1) }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { saveConnectionForUser } = await import("./app-user-connections.server");
@@ -105,9 +105,7 @@ export const getGoogleDriveStatus = createServerFn({ method: "GET" })
 // waiver save. `uploadWaiverToDrive` then just reuses the cached folder id.
 export const setGoogleDriveFolder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) =>
-    z.object({ folderName: z.string().trim().min(1).max(200) }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ folderName: z.string().trim().min(1).max(200) }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { getConnectionForUser, updateConnectionMetadata } =
@@ -155,9 +153,7 @@ export async function resolvePickedFolder(
 // ---- Set the manager's Drive destination folder from a Google Picker pick ----
 export const setGoogleDriveFolderFromPicker = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) =>
-    z.object({ folderId: z.string().trim().min(1).max(200) }).parse(d),
-  )
+  .validator((d: unknown) => z.object({ folderId: z.string().trim().min(1).max(200) }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { getConnectionForUser, updateConnectionMetadata } =
@@ -349,7 +345,7 @@ async function uploadPdfToDrive(params: {
 // ---- Upload a waiver PDF to the manager's Drive ----
 export const uploadWaiverToDrive = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ waiverId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ waiverId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

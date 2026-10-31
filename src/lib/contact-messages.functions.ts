@@ -54,7 +54,7 @@ async function adminClient(): Promise<AdminClient> {
  */
 export const listContactMessages = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => listContactMessagesSchema.parse(d))
+  .validator((d: unknown) => listContactMessagesSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -92,7 +92,7 @@ export const listContactMessages = createServerFn({ method: "GET" })
  */
 export const markContactMessagesSeen = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => markContactMessagesSeenSchema.parse(d))
+  .validator((d: unknown) => markContactMessagesSeenSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -153,7 +153,7 @@ export async function deleteContactMessageRow(
 
 export const deleteContactMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => deleteContactMessageSchema.parse(d))
+  .validator((d: unknown) => deleteContactMessageSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     await deleteContactMessageRow(await adminClient(), data.id);

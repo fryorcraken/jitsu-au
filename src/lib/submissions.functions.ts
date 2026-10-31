@@ -41,7 +41,7 @@ async function limit(form: "interest" | "contact", submissionId: string | null) 
 }
 
 export const submitInterest = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => interestSchema.parse(data))
+  .validator((data: unknown) => interestSchema.parse(data))
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, duplicate: false, emailed: true };
     await limit("interest", data.client_submission_id || null);
@@ -112,7 +112,7 @@ export const submitInterest = createServerFn({ method: "POST" })
   });
 
 export const submitContact = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => contactSchema.parse(data))
+  .validator((data: unknown) => contactSchema.parse(data))
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, duplicate: false };
     const submissionId = data.client_submission_id || null;

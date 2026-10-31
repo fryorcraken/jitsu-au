@@ -95,7 +95,7 @@ export async function updateProfileForCaller(
 
 export const updateMyProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => updateMyProfileSchema.parse(d))
+  .validator((d: unknown) => updateMyProfileSchema.parse(d))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     return updateProfileForCaller(supabaseAdmin, context.userId, data);

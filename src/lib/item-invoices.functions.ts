@@ -155,7 +155,7 @@ export const listChargeItems = createServerFn({ method: "GET" })
 
 export const saveChargeItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => saveChargeItemSchema.parse(d))
+  .validator((d: unknown) => saveChargeItemSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     return saveChargeItemRow(await adminClient(), data);
@@ -163,7 +163,7 @@ export const saveChargeItem = createServerFn({ method: "POST" })
 
 export const deleteChargeItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => recordIdSchema.parse(d))
+  .validator((d: unknown) => recordIdSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     await deleteChargeItemRow(await adminClient(), data.id);
@@ -587,7 +587,7 @@ export async function deleteItemInvoiceRow(admin: MembershipClient, id: string):
 
 export const listItemInvoices = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => listItemInvoicesSchema.parse(d ?? {}))
+  .validator((d: unknown) => listItemInvoicesSchema.parse(d ?? {}))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     return listItemInvoiceRows(await adminClient(), data);
@@ -595,7 +595,7 @@ export const listItemInvoices = createServerFn({ method: "GET" })
 
 export const createItemInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => createItemInvoiceSchema.parse(d))
+  .validator((d: unknown) => createItemInvoiceSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     return createItemInvoiceForUser(await adminClient(), data, context.userId);
@@ -603,7 +603,7 @@ export const createItemInvoice = createServerFn({ method: "POST" })
 
 export const markItemInvoicePaid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => markItemInvoicePaidSchema.parse(d))
+  .validator((d: unknown) => markItemInvoicePaidSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const admin = await adminClient();
@@ -619,7 +619,7 @@ export const markItemInvoicePaid = createServerFn({ method: "POST" })
 
 export const cancelItemInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => recordIdSchema.parse(d))
+  .validator((d: unknown) => recordIdSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     await cancelItemInvoiceRow(await adminClient(), data.id);
@@ -628,7 +628,7 @@ export const cancelItemInvoice = createServerFn({ method: "POST" })
 
 export const deleteItemInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => recordIdSchema.parse(d))
+  .validator((d: unknown) => recordIdSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     await deleteItemInvoiceRow(await adminClient(), data.id);
@@ -647,7 +647,7 @@ export const deleteItemInvoice = createServerFn({ method: "POST" })
  */
 export const getMyItemInvoices = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => householdTargetSchema.parse(d ?? {}))
+  .validator((d: unknown) => householdTargetSchema.parse(d ?? {}))
   .handler(async ({ data, context }): Promise<ItemInvoiceView[]> => {
     const admin = await adminClient();
     const subjectId = await resolveSubject(admin, context.userId, data.userId);
@@ -887,7 +887,7 @@ export async function matchTransactionToItemInvoice(
 
 export const matchTransactionToItem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => matchTransactionToItemInvoiceSchema.parse(d))
+  .validator((d: unknown) => matchTransactionToItemInvoiceSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     await matchTransactionToItemInvoice(await adminClient(), {

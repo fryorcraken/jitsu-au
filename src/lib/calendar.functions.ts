@@ -240,7 +240,7 @@ export const getMyRsvps = createServerFn({ method: "GET" })
 // events are refused for non-members so RSVP can't leak their existence.
 export const setRsvp = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => rsvpSchema.parse(d))
+  .validator((d: unknown) => rsvpSchema.parse(d))
   .handler(async ({ data, context }) => {
     const admin = await adminClient();
     const { data: event, error: evErr } = await admin
@@ -522,7 +522,7 @@ export async function listEventRsvpRows(admin: CalendarClient, data: EventRsvpsI
 /** Manager: who responded to one event, with names and emails. */
 export const listEventRsvps = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => eventRsvpsSchema.parse(d))
+  .validator((d: unknown) => eventRsvpsSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     return listEventRsvpRows(await adminClient(), data);
@@ -854,7 +854,7 @@ export async function createCalendarEntryRow(
 /** Manager: put something on the calendar. */
 export const createCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => createCalendarEntrySchema.parse(d))
+  .validator((d: unknown) => createCalendarEntrySchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     return createCalendarEntryRow(await adminClient(), data, context.userId);
@@ -933,7 +933,7 @@ export async function updateCalendarEntryRow(
 /** Manager: edit an entry's details, for one date or this and every future one. */
 export const updateCalendarEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => updateCalendarEntrySchema.parse(d))
+  .validator((d: unknown) => updateCalendarEntrySchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     return updateCalendarEntryRow(await adminClient(), data);
@@ -994,7 +994,7 @@ export async function stopRepeatingSeries(admin: CalendarClient, data: StopRepea
 /** Manager: stop a repeating entry. */
 export const stopRepeating = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => stopRepeatingSchema.parse(d))
+  .validator((d: unknown) => stopRepeatingSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     return stopRepeatingSeries(await adminClient(), data);
@@ -1046,7 +1046,7 @@ export async function cancelEventRows(admin: CalendarClient, data: CancelEventIn
 
 export const cancelEvent = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => cancelEventSchema.parse(d))
+  .validator((d: unknown) => cancelEventSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     return cancelEventRows(await adminClient(), data);
@@ -1107,7 +1107,7 @@ export async function deleteEventRow(admin: CalendarClient, data: DeleteEventInp
 
 export const deleteEvent = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => deleteEventSchema.parse(d))
+  .validator((d: unknown) => deleteEventSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CalendarClient; userId: string });
     return deleteEventRow(await adminClient(), data);

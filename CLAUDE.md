@@ -255,9 +255,8 @@ Read `src/routes/README.md` before touching routes. Key points:
 - **Server functions** live in `src/lib/*.functions.ts` and use
   `createServerFn()` from `@tanstack/react-start`. Client code calls them via
   `useServerFn(fn)` (see `src/routes/register-interest.tsx`). Validate every
-  input with a Zod `.inputValidator(...)`, the name every server function uses
-  today (it is deprecated and goes in TanStack Start 1.169; see "The TanStack
-  versions are pinned exactly").
+  input with a Zod `.validator(...)`, never `.inputValidator(...)` (see "The
+  TanStack versions are pinned exactly").
 - ⚠️ **`*.functions.ts` and route files are bundled to the client.** Do **not**
   top-level `import` `client.server.ts` (service-role key) from them. Instead
   lazy-load inside the handler:
@@ -680,13 +679,22 @@ So upgrade the three together, to versions that agree, and keep them exact.
 `bun run typecheck` is the check that proves it — a duplicated router is
 invisible to `bun run build`.
 
-⚠️ **`@tanstack/react-start` 1.169 removes `.inputValidator()`** from server
-functions, with no alias. Its replacement, `.validator()`, already exists on
-1.168.x, where `.inputValidator()` is only marked deprecated. So the way past
-1.169 is two steps: rename every call to `.validator()` while still on 1.168
-(`typecheck` proves each one), then bump. Check first that Lovable's editor
-writes the new name too, or its next edit reintroduces the old one. Until then,
-stay on 1.168.x.
+`@tanstack/react-start` 1.169 removes `.inputValidator()`, with no alias, from
+both builders that have it: `createServerFn()` and `createMiddleware()`. Every
+server function here uses `.validator()` since 2026-10-31 (no middleware here
+validates input), and a `no-restricted-properties` lint rule refuses the old
+name on any object. So moving past 1.168 is an upgrade of the three together,
+with one thing to check first:
+
+- **Lovable's editor is the likely way back in.** Its project knowledge (in
+  Lovable, not in this repo) was told on 2026-10-31 to write `.validator()`.
+  Lovable pushes straight to `main` without running lint, so if it slips, the
+  first sign is `main` red on that rule. That is the rule doing its job: rename
+  the call in a follow-up commit, and do not bump past 1.168 while it is red,
+  because on 1.169 the same call breaks its server function at runtime and the
+  build would not say so.
+- **Once on 1.169 the rule is redundant.** The method is gone from the types,
+  so `bun run typecheck` rejects it on its own; the rule can then be deleted.
 
 ## Conventions & style
 

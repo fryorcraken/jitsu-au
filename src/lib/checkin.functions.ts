@@ -436,7 +436,7 @@ export const listCheckInEvents = createServerFn({ method: "GET" })
  */
 export const getCheckInBoard = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => checkInBoardSchema.parse(d))
+  .validator((d: unknown) => checkInBoardSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CheckinClient; userId: string });
     const admin = await adminClient();
@@ -599,7 +599,7 @@ export const listUncoveredCheckIns = createServerFn({ method: "GET" })
  */
 export const checkInPerson = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => checkInSchema.parse(d))
+  .validator((d: unknown) => checkInSchema.parse(d))
   .handler(async ({ data, context }) => {
     const ctx = context as { supabase: CheckinClient; userId: string };
     await requireManager(ctx);
@@ -657,7 +657,7 @@ export const checkInPerson = createServerFn({ method: "POST" })
  */
 export const attachCheckInCoverage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => attachCheckInSchema.parse(d))
+  .validator((d: unknown) => attachCheckInSchema.parse(d))
   .handler(async ({ data, context }) => {
     const ctx = context as { supabase: CheckinClient; userId: string };
     await requireManager(ctx);
@@ -713,7 +713,7 @@ export const attachCheckInCoverage = createServerFn({ method: "POST" })
  */
 export const transferCheckInCoverage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => transferCheckInSchema.parse(d))
+  .validator((d: unknown) => transferCheckInSchema.parse(d))
   .handler(async ({ data, context }) => {
     const ctx = context as { supabase: CheckinClient; userId: string };
     await requireManager(ctx);
@@ -792,7 +792,7 @@ export const transferCheckInCoverage = createServerFn({ method: "POST" })
  */
 export const undoCheckIn = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => undoCheckInSchema.parse(d))
+  .validator((d: unknown) => undoCheckInSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CheckinClient; userId: string });
     return undoCheckInRow(await adminClient(), data.id);

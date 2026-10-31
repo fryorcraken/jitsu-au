@@ -149,7 +149,7 @@ export async function toggleCommentUpvoteRow(
 // bypasses RLS.
 
 export const listComments = createServerFn({ method: "GET" })
-  .inputValidator((d: unknown) => listBlogCommentsSchema.parse(d))
+  .validator((d: unknown) => listBlogCommentsSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: post } = await supabaseAdmin
@@ -216,7 +216,7 @@ export const getMyCommentUpvotes = createServerFn({ method: "GET" })
 
 export const postComment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => blogCommentSchema.parse(d))
+  .validator((d: unknown) => blogCommentSchema.parse(d))
   .handler(async ({ data, context }) => {
     if (data.hp) return { id: "" };
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -249,7 +249,7 @@ export const postComment = createServerFn({ method: "POST" })
 
 export const toggleCommentUpvote = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => toggleUpvoteSchema.parse(d))
+  .validator((d: unknown) => toggleUpvoteSchema.parse(d))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     return toggleCommentUpvoteRow(supabaseAdmin, {
@@ -262,7 +262,7 @@ export const toggleCommentUpvote = createServerFn({ method: "POST" })
 
 export const listCommentsForModeration = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => listCommentsForModerationSchema.parse(d))
+  .validator((d: unknown) => listCommentsForModerationSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -309,7 +309,7 @@ export const listCommentsForModeration = createServerFn({ method: "GET" })
 
 export const setCommentVisibility = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => setCommentVisibilitySchema.parse(d))
+  .validator((d: unknown) => setCommentVisibilitySchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -330,7 +330,7 @@ export const setCommentVisibility = createServerFn({ method: "POST" })
 
 export const blockCommenter = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => blockCommenterSchema.parse(d))
+  .validator((d: unknown) => blockCommenterSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -346,7 +346,7 @@ export const blockCommenter = createServerFn({ method: "POST" })
 
 export const unblockCommenter = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => unblockCommenterSchema.parse(d))
+  .validator((d: unknown) => unblockCommenterSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

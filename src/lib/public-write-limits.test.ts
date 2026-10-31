@@ -19,14 +19,14 @@ type Runnable = { run: (data: unknown) => Promise<unknown> };
 vi.mock("@tanstack/react-start", () => {
   const createServerFn = () => {
     const builder = {
-      validator: (d: unknown) => d,
+      validate: (d: unknown) => d,
       middleware: () => builder,
-      inputValidator: (v: (d: unknown) => unknown) => {
-        builder.validator = v;
+      validator: (v: (d: unknown) => unknown) => {
+        builder.validate = v;
         return builder;
       },
       handler: (h: (ctx: { data: unknown; context: unknown }) => unknown) => ({
-        run: async (data: unknown) => h({ data: builder.validator(data), context: {} }),
+        run: async (data: unknown) => h({ data: builder.validate(data), context: {} }),
       }),
     };
     return builder;
