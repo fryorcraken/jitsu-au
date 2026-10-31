@@ -93,7 +93,11 @@ const BLOG_DRAFT_SHAPE: BlogDraftFields = {
   excerpt: "",
   body: "",
   status: "draft",
-  kind: "update",
+  // Blank, not "update": a draft written by a build from before articles
+  // existed has no kind, and reading that as "update" would turn an article
+  // back into a club update the moment the draft was restored. Blank means
+  // "this draft does not say", and restoring it keeps the post's own kind.
+  kind: "",
   coverPath: "",
   coverUrl: "",
   seoTitle: "",
@@ -349,7 +353,7 @@ export function BlogPostEditor({
     setExcerpt(stored.excerpt);
     setBody(stored.body);
     setStatus(stored.status === "published" ? "published" : "draft");
-    setKind(stored.kind === "article" ? "article" : "update");
+    if (stored.kind === "article" || stored.kind === "update") setKind(stored.kind);
     setCoverPath(stored.coverPath);
     setCoverUrl(stored.coverUrl || null);
     setSeoTitle(stored.seoTitle);

@@ -260,7 +260,8 @@ export const getBlogPostBySlug = createServerFn({ method: "GET" })
       seo_title: row.seo_title,
       seo_description: row.seo_description,
       kind: asBlogPostKind(row.kind),
-      reading_minutes: readingMinutes(row.body_md),
+      // Only an article shows one; an update leads with its date instead.
+      reading_minutes: row.kind === "article" ? readingMinutes(row.body_md) : null,
     };
   });
 

@@ -134,7 +134,10 @@ function BlogIndex() {
   const total = result?.total ?? 0;
   const pageSize = result?.pageSize ?? 10;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const pageOutOfRange = !error && total > 0 && page > totalPages;
+  // Past the last page of updates. With no updates at all that is any page
+  // after the first, which would otherwise say the blog is empty while its
+  // articles sit on page one.
+  const pageOutOfRange = !error && page > totalPages;
   const nothingYet = articles.length === 0 && posts.length === 0;
 
   return (

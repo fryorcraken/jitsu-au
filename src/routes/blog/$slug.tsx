@@ -322,7 +322,7 @@ function BlogPostPage() {
           {BLOG_POST_KIND_LABELS[post.kind]}
         </p>
         <h1 className="mt-3 text-balance text-4xl font-bold md:text-5xl">{post.title}</h1>
-        {post.kind === "article" ? (
+        {post.kind === "article" && post.reading_minutes !== null ? (
           // An article is read for what it says, not for when: the reading
           // time leads, and the date is there for whoever wants it.
           <p className="mt-3 text-sm text-muted-foreground">

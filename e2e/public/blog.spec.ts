@@ -39,7 +39,10 @@ test("the blog keeps articles on top of the latest club updates", async ({ page 
 
     await expect(page).toHaveURL(/\/blog\/why-we-train-against-resistance$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(ARTICLE);
-    await expect(page.getByRole("main")).toContainText("Article");
+    // The label above the title, read as one line so a regression to the
+    // wrong label fails rather than passing on some other "Article" on the page.
+    await expect(page.getByText("Blog/Article", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main")).not.toContainText("Club update");
     await expect(page.getByRole("main")).toContainText(/\d+ min read/);
     await expectPageRendered(page);
   });
@@ -53,7 +56,7 @@ test("the blog keeps articles on top of the latest club updates", async ({ page 
 
     await expect(page).toHaveURL(/\/blog\/welcome-to-semester-two$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(UPDATE);
-    await expect(page.getByRole("main")).toContainText("Club update");
+    await expect(page.getByText("Blog/Club update", { exact: true })).toBeVisible();
     await expect(page.getByRole("main")).not.toContainText("min read");
     await expectPageRendered(page);
   });

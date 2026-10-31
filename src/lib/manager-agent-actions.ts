@@ -55,6 +55,7 @@ import {
   stopRepeatingSchema,
   updateCalendarEntrySchema,
 } from "@/lib/validation";
+import { asBlogPostKind, type BlogPostKind } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
 import {
   AGENT_MANIFEST,
@@ -2044,12 +2045,19 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
   const db = await adminClient();
   let created: boolean;
   let saved: Awaited<ReturnType<typeof createBlogPostRow>>;
+  // What was written, for the fallback answer below: the read-back can fail
+  // after the write landed, and the result still has to say what kind of post
+  // this now is, as the manifest promises.
+  let kind: BlogPostKind;
   try {
     if (input.id) {
       const stored = await loadBlogPostRow(db, { id: input.id });
-      saved = await updateBlogPostRow(db, mergeAgentBlogPostEdit(stored, input), actingAs, stored);
+      const merged = mergeAgentBlogPostEdit(stored, input);
+      kind = merged.kind ?? asBlogPostKind(stored.kind);
+      saved = await updateBlogPostRow(db, merged, actingAs, stored);
       created = false;
     } else {
+      kind = input.kind ?? "update";
       // The schema refuses a new post without both; this narrows the types.
       saved = await createBlogPostRow(
         db,
@@ -2088,7 +2096,13 @@ async function handleSaveBlogPost(params: unknown, actingAs: string) {
           seo_title: row.seo_title,
           seo_description: row.seo_description,
         }
-      : { id: saved.id, slug: saved.slug, status: saved.status, published_at: saved.published_at },
+      : {
+          id: saved.id,
+          slug: saved.slug,
+          status: saved.status,
+          kind,
+          published_at: saved.published_at,
+        },
   };
 }
 

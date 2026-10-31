@@ -92,6 +92,61 @@ describe("BlogPostEditor draft recovery", () => {
     expect(screen.getByLabelText("Search description")).toHaveValue("Who graded, and to what.");
   });
 
+  it("keeps the kind of post in the draft", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.click(screen.getByRole("radio", { name: "Article" }));
+    hidePage();
+    first.unmount();
+
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+    await user.click(await screen.findByRole("button", { name: /bring it back/i }));
+
+    expect(screen.getByRole("radio", { name: "Article" })).toBeChecked();
+  });
+
+  // A draft kept by the build before articles existed has no kind. Read as
+  // "update", restoring it on an article would quietly demote the article.
+  it("leaves an article an article when restoring a draft that predates kinds", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    hidePage();
+    first.unmount();
+
+    // Rewrite the stored draft as the older build would have written it.
+    const stripKind = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(stripKind);
+      if (!node || typeof node !== "object") return node;
+      const entries = Object.entries(node).filter(
+        ([key]) => !(key === "kind" && "title" in node && "body" in node),
+      );
+      return Object.fromEntries(entries.map(([key, value]) => [key, stripKind(value)]));
+    };
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i)!;
+      const stored = JSON.parse(window.localStorage.getItem(key)!);
+      window.localStorage.setItem(key, JSON.stringify(stripKind(stored)));
+    }
+    expect(JSON.stringify({ ...window.localStorage })).not.toMatch(/"kind":"update"/);
+
+    render(
+      <BlogPostEditor
+        initial={{ ...EMPTY, kind: "article" }}
+        saving={false}
+        onSave={async () => true}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /bring it back/i }));
+
+    expect(screen.getByLabelText("Title")).toHaveValue("Grading day");
+    expect(screen.getByRole("radio", { name: "Article" })).toBeChecked();
+  });
+
   it("never restores on its own — the offer has to be accepted", async () => {
     const user = userEvent.setup();
     const first = render(
