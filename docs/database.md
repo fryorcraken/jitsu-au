@@ -1054,6 +1054,8 @@ RSVPs — and upvote a comment once (no downvote). Product spec:
 | `excerpt`          | `text`        | yes  | ≤ 500 chars. Shown on the list page. Derived from `body_md` on save when left blank (`deriveExcerpt`).  |
 | `body_md`          | `text`        | no   | 1–50,000 chars. Markdown; a `[[video:<url>]]` line embeds a video.                                      |
 | `cover_image_path` | `text`        | yes  | Object path in the `blog-media` Storage bucket.                                                         |
+| `seo_title`        | `text`        | yes  | 1–100 chars. The page's `<title>` as written; NULL means `<title> \| UTS Jitsu Blog` (`blogPostSeo`).   |
+| `seo_description`  | `text`        | yes  | 1–300 chars. The meta/og description; NULL means the excerpt. Never derived on save, unlike `excerpt`.  |
 | `status`           | `text`        | no   | `draft\|published`. Default `draft`.                                                                    |
 | `author_id`        | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. The writing manager.                                    |
 | `published_at`     | `timestamptz` | yes  | Set the first time `status` moves to `published`; never changed again — including on a later unpublish. |

@@ -131,6 +131,16 @@ export function resolveExcerpt(excerpt: string | undefined, bodyMd: string): str
   return excerpt?.trim() || deriveExcerpt(bodyMd) || null;
 }
 
+/**
+ * A search title or description as stored: what the manager typed, or NULL for
+ * a blank one, which is the "use the default" the page resolves at read time
+ * (`blogPostSeo`). Unlike the excerpt, nothing is derived here, so a post on
+ * the defaults keeps following its title and excerpt. Exported for its test.
+ */
+export function resolveSeoField(value: string | undefined): string | null {
+  return value?.trim() || null;
+}
+
 // ---- Public: published posts ----
 
 export const listPublishedBlogPosts = createServerFn({ method: "GET" })
@@ -167,7 +177,9 @@ export const getBlogPostBySlug = createServerFn({ method: "GET" })
     const supabase = serverSupabase();
     const { data: row, error } = await supabase
       .from("blog_posts")
-      .select("id, slug, title, excerpt, body_md, cover_image_path, published_at")
+      .select(
+        "id, slug, title, excerpt, body_md, cover_image_path, published_at, seo_title, seo_description",
+      )
       .eq("slug", data.slug)
       .eq("status", "published")
       .maybeSingle();
@@ -181,6 +193,8 @@ export const getBlogPostBySlug = createServerFn({ method: "GET" })
       body_md: row.body_md,
       published_at: row.published_at,
       cover_image_url: coverImageUrl(supabase, row.cover_image_path),
+      seo_title: row.seo_title,
+      seo_description: row.seo_description,
     };
   });
 
@@ -304,6 +318,8 @@ export async function createBlogPostRow(
       status: data.status,
       author_id: actorId,
       published_at: publishedAt,
+      seo_title: resolveSeoField(data.seo_title),
+      seo_description: resolveSeoField(data.seo_description),
     })
     .select("id, slug")
     .single();
@@ -389,6 +405,8 @@ export async function updateBlogPostRow(
       cover_image_path: data.cover_image_path || null,
       status: data.status,
       published_at: publishedAt,
+      seo_title: resolveSeoField(data.seo_title),
+      seo_description: resolveSeoField(data.seo_description),
       updated_at: new Date().toISOString(),
     })
     .eq("id", data.id);

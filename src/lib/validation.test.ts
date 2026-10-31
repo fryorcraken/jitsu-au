@@ -221,6 +221,34 @@ describe("blogPostSchema", () => {
       blogPostSchema.parse({ title: "Hello", body_md: "Body", slug: "hello-world" }).slug,
     ).toBe("hello-world");
   });
+
+  it("takes an optional search title and description, blank meaning the default", () => {
+    const base = { title: "Hello", body_md: "Body" };
+    expect(blogPostSchema.parse(base).seo_title).toBeUndefined();
+    expect(blogPostSchema.parse({ ...base, seo_title: "", seo_description: "" })).toMatchObject({
+      seo_title: "",
+      seo_description: "",
+    });
+    expect(blogPostSchema.parse({ ...base, seo_title: "  Grading day  " }).seo_title).toBe(
+      "Grading day",
+    );
+  });
+
+  // The same ceilings as the columns' CHECKs, so an over-long one is refused
+  // with a sentence rather than as a database error.
+  it("refuses a search title over 100 characters or a description over 300", () => {
+    const base = { title: "Hello", body_md: "Body" };
+    expect(blogPostSchema.safeParse({ ...base, seo_title: "x".repeat(100) }).success).toBe(true);
+    const title = blogPostSchema.safeParse({ ...base, seo_title: "x".repeat(101) });
+    expect(title.success).toBe(false);
+    expect(title.error?.issues[0].message).toMatch(/search title/);
+    expect(blogPostSchema.safeParse({ ...base, seo_description: "x".repeat(300) }).success).toBe(
+      true,
+    );
+    expect(blogPostSchema.safeParse({ ...base, seo_description: "x".repeat(301) }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe("blogCommentSchema", () => {
@@ -3394,6 +3422,17 @@ describe("the blog through the manager agent API", () => {
   it("changes a post from any one field", () => {
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, status: "published" }).success).toBe(true);
     expect(agentSaveBlogPostSchema.safeParse({ id: ID, excerpt: "" }).success).toBe(true);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_title: "Grading" }).success).toBe(true);
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_description: "" }).success).toBe(true);
+  });
+
+  it("holds the search fields to the editor's limits", () => {
+    expect(agentSaveBlogPostSchema.safeParse({ id: ID, seo_title: "x".repeat(101) }).success).toBe(
+      false,
+    );
+    expect(
+      agentSaveBlogPostSchema.safeParse({ id: ID, seo_description: "x".repeat(301) }).success,
+    ).toBe(false);
   });
 
   it("refuses a change that names nothing to change", () => {

@@ -1268,6 +1268,23 @@ from the opening of the body; read both back from the result. An excerpt does
 not follow a rewritten body by itself: send `"excerpt": ""` with the new body to
 have it taken afresh.
 
+`seo_title` and `seo_description` are what search engines and link previews
+show for the post, when the headline or the excerpt is not what should appear
+there. Both are optional and `null` means the default: the title becomes
+`<title> | UTS Jitsu Blog` and the description is the excerpt, both following
+the post as it changes. A `seo_title` is used exactly as written, so include
+the club's name in it if it should be there. Search results show about 60
+characters of title and 155 of description (the ceilings are 100 and 300).
+Send `""` to put one back to the default:
+
+```bash
+scripts/agent.sh save_blog_post '{
+  "id": "<id>",
+  "seo_title": "Spring grading results | UTS Jitsu",
+  "seo_description": "Who graded at the spring grading, and what comes next for them."
+}'
+```
+
 > [!IMPORTANT]
 >
 > - **Publishing is public and announced.** The post is on the public blog the

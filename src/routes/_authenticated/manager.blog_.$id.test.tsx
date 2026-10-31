@@ -21,6 +21,8 @@ const post = {
   status: "draft" as const,
   cover_image_path: null,
   cover_image_url: null,
+  seo_title: null,
+  seo_description: "Stored search description",
   published_at: null,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -125,6 +127,29 @@ describe("/manager/blog/:id", () => {
 
     await user.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(screen.getByLabelText("Title")).toHaveValue("Hello world updated");
+  });
+
+  it("loads the stored search fields and sends what the manager typed", async () => {
+    const user = userEvent.setup();
+    render(<EditBlogPostPage />);
+
+    const seoTitle = await screen.findByLabelText("Search title");
+    // A stored null is a blank field, with the default it falls back to shown.
+    expect(seoTitle).toHaveValue("");
+    expect(seoTitle).toHaveAttribute("placeholder", "Hello world | UTS Jitsu Blog");
+    expect(screen.getByLabelText("Search description")).toHaveValue("Stored search description");
+
+    await user.type(seoTitle, "Hello from the mats");
+    await user.clear(screen.getByLabelText("Search description"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateBlogPost).toHaveBeenCalledTimes(1));
+    const sent = updateBlogPost.mock.calls[0][0] as {
+      data: { seo_title: string; seo_description: string };
+    };
+    expect(sent.data.seo_title).toBe("Hello from the mats");
+    // Blank goes as blank, which the server stores as "use the excerpt".
+    expect(sent.data.seo_description).toBe("");
   });
 
   it("saves a published post straight to draft, with no modal in the way", async () => {

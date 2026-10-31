@@ -8,6 +8,8 @@ import {
   CLUB_PHONE_E164,
   CLUB_SOCIAL_URLS,
   SOCIAL_IMAGE,
+  BLOG_DEFAULT_DESCRIPTION,
+  blogPostSeo,
   buildClubJsonLd,
   buildPageMeta,
   buildRobotsTxt,
@@ -149,6 +151,46 @@ describe("root + page head merge (regression guard for the Twitter Card bug)", (
     );
     // No page overrides twitter:card, so the root's shared default survives the merge.
     expect(contentFor("twitter:card")).toBe("summary_large_image");
+  });
+});
+
+describe("blogPostSeo", () => {
+  const post = {
+    title: "Grading day",
+    excerpt: "Everyone passed.",
+    seo_title: null,
+    seo_description: null,
+  };
+
+  // What every post's page said before the search fields existed, so a post
+  // nobody has touched since is told to search engines exactly as before.
+  it("falls back to the post title with the blog's name, and the excerpt", () => {
+    expect(blogPostSeo(post)).toEqual({
+      title: "Grading day | UTS Jitsu Blog",
+      description: "Everyone passed.",
+    });
+  });
+
+  it("uses the manager's own title as written, with nothing added", () => {
+    expect(blogPostSeo({ ...post, seo_title: "Spring grading results" }).title).toBe(
+      "Spring grading results",
+    );
+  });
+
+  it("prefers the search description over the excerpt", () => {
+    expect(blogPostSeo({ ...post, seo_description: "Who graded, and to what." }).description).toBe(
+      "Who graded, and to what.",
+    );
+  });
+
+  it("treats a blank search field as unset", () => {
+    expect(blogPostSeo({ ...post, seo_title: "  ", seo_description: "" })).toEqual(
+      blogPostSeo(post),
+    );
+  });
+
+  it("still says something when there is no excerpt either", () => {
+    expect(blogPostSeo({ ...post, excerpt: null }).description).toBe(BLOG_DEFAULT_DESCRIPTION);
   });
 });
 

@@ -500,7 +500,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("31");
+    expect(AGENT_MANIFEST.version).toBe("32");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -941,6 +941,8 @@ describe("mergeAgentBlogPostEdit", () => {
     body_md: "Hello, and welcome.",
     cover_image_path: "drafts/cover.jpg",
     status: "published",
+    seo_title: "Welcome to the club",
+    seo_description: "What to expect at your first class.",
   };
 
   it("keeps every field the agent left out", () => {
@@ -970,10 +972,39 @@ describe("mergeAgentBlogPostEdit", () => {
 
   it("reads a stored null as empty", () => {
     const merged = mergeAgentBlogPostEdit(
-      { ...stored, excerpt: null, cover_image_path: null, status: "draft" },
+      {
+        ...stored,
+        excerpt: null,
+        cover_image_path: null,
+        status: "draft",
+        seo_title: null,
+        seo_description: null,
+      },
       { id: stored.id, title: "x" },
     );
-    expect(merged).toMatchObject({ excerpt: "", cover_image_path: "", status: "draft" });
+    expect(merged).toMatchObject({
+      excerpt: "",
+      cover_image_path: "",
+      status: "draft",
+      seo_title: "",
+      seo_description: "",
+    });
+  });
+
+  // The shared writer stores a blank search field as "use the default", so a
+  // change that left these out would otherwise wipe what the manager set.
+  it("keeps the search title and description unless they are sent", () => {
+    const kept = mergeAgentBlogPostEdit(stored, { id: stored.id, body_md: "New body." });
+    expect(kept.seo_title).toBe("Welcome to the club");
+    expect(kept.seo_description).toBe("What to expect at your first class.");
+
+    const changed = mergeAgentBlogPostEdit(stored, {
+      id: stored.id,
+      seo_title: "First class",
+      seo_description: "",
+    });
+    expect(changed.seo_title).toBe("First class");
+    expect(changed.seo_description).toBe("");
   });
 });
 

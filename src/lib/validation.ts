@@ -4165,11 +4165,22 @@ const blogSlug = z
   .max(200)
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Use lowercase letters, digits and hyphens only.");
 
+/** The longest a post's own search-engine title may be. Search engines show
+ * about 60 characters (`BLOG_SEO_TITLE_SHOWN`); this is the ceiling, matching
+ * the column's CHECK. */
+export const BLOG_SEO_TITLE_MAX = 100;
+/** The longest a post's own search-engine description may be, matching the
+ * column's CHECK. Search engines show about 155 (`BLOG_SEO_DESCRIPTION_SHOWN`). */
+export const BLOG_SEO_DESCRIPTION_MAX = 300;
+
 /**
  * Manager: create or edit a post. `slug` is optional — when blank, the server
  * derives one from the title prefixed with today's date, `YYYY-MM-DD-...`
  * (`defaultBlogSlug` in `src/lib/slug.ts`) and resolves any collision by
  * appending `-2`, `-3`, etc.
+ *
+ * `seo_title` and `seo_description` are optional too, and a blank one is
+ * stored as NULL and means the default (`blogPostSeo` in `src/lib/seo.ts`).
  */
 export const blogPostSchema = z.object({
   id: z.string().uuid().optional(),
@@ -4179,6 +4190,21 @@ export const blogPostSchema = z.object({
   body_md: z.string().trim().min(1).max(50000),
   cover_image_path: z.string().trim().max(500).optional().or(z.literal("")),
   status: z.enum(blogPostStatuses).default("draft"),
+  seo_title: z
+    .string()
+    .trim()
+    .max(BLOG_SEO_TITLE_MAX, `Keep the search title under ${BLOG_SEO_TITLE_MAX} characters.`)
+    .optional()
+    .or(z.literal("")),
+  seo_description: z
+    .string()
+    .trim()
+    .max(
+      BLOG_SEO_DESCRIPTION_MAX,
+      `Keep the search description under ${BLOG_SEO_DESCRIPTION_MAX} characters.`,
+    )
+    .optional()
+    .or(z.literal("")),
 });
 export type BlogPostInput = z.infer<typeof blogPostSchema>;
 
@@ -4275,7 +4301,8 @@ export type AgentGetBlogPostInput = z.infer<typeof agentGetBlogPostSchema>;
  *   says otherwise.
  * - `slug` cannot be blanked on a change: the composer re-derives a blank one,
  *   which would move a live post to a new address and break every link to it.
- * - `excerpt: ""` and `cover_image_path: ""` clear those, as on the form.
+ * - `excerpt: ""`, `cover_image_path: ""`, `seo_title: ""` and
+ *   `seo_description: ""` clear those, as on the form.
  * - `cover_image_path` is a storage path from `upload_blog_image`, not an
  *   address. An address stored there would render as a broken image.
  */
@@ -4293,6 +4320,8 @@ export const agentSaveBlogPostSchema = z
       "Pass the `path` that upload_blog_image returned, not the image's web address.",
     ),
     status: z.enum(blogPostStatuses).optional(),
+    seo_title: blogPostSchema.shape.seo_title,
+    seo_description: blogPostSchema.shape.seo_description,
   })
   .strict()
   .superRefine((value, ctx) => {

@@ -20,7 +20,7 @@ import {
 import { splitBlogContent } from "@/lib/blog-content";
 import { blogMarkdownComponents } from "@/lib/blog-markdown";
 import { useAuth } from "@/hooks/useAuth";
-import { buildPageMeta, canonicalUrl } from "@/lib/seo";
+import { blogPostSeo, buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
 type BlogPostRow = NonNullable<Awaited<ReturnType<typeof getBlogPostBySlug>>>;
@@ -38,12 +38,9 @@ export const Route = createFileRoute("/blog/$slug")({
   head: ({ loaderData, params }) => {
     const post = loaderData!.post;
     const path = `/blog/${params.slug}`;
+    const seo = blogPostSeo(post);
     return {
-      meta: buildPageMeta({
-        title: `${post.title} | UTS Jitsu Blog`,
-        description: post.excerpt || "News, tips and updates from UTS Jitsu.",
-        path,
-      }),
+      meta: buildPageMeta({ title: seo.title, description: seo.description, path }),
       links: [{ rel: "canonical", href: canonicalUrl(path) }],
       scripts: [
         {
@@ -53,7 +50,7 @@ export const Route = createFileRoute("/blog/$slug")({
             "@type": "BlogPosting",
             headline: post.title,
             datePublished: post.published_at,
-            description: post.excerpt || undefined,
+            description: seo.description,
             image: post.cover_image_url || undefined,
             mainEntityOfPage: canonicalUrl(path),
           }),

@@ -31,6 +31,8 @@ const EMPTY: BlogPostEditorValue = {
   cover_image_path: "",
   cover_image_url: null,
   status: "draft",
+  seo_title: "",
+  seo_description: "",
 };
 
 function hidePage() {
@@ -68,6 +70,23 @@ describe("BlogPostEditor draft recovery", () => {
     expect(screen.getByLabelText(/Body/)).toHaveValue("Everyone did well.");
     // The offer is answered, so it does not linger over the restored form.
     expect(screen.queryByRole("button", { name: /bring it back/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the search title and description in the draft too", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />,
+    );
+    await user.type(screen.getByLabelText("Search title"), "Grading day results");
+    await user.type(screen.getByLabelText("Search description"), "Who graded, and to what.");
+    hidePage();
+    first.unmount();
+
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+    await user.click(await screen.findByRole("button", { name: /bring it back/i }));
+
+    expect(screen.getByLabelText("Search title")).toHaveValue("Grading day results");
+    expect(screen.getByLabelText("Search description")).toHaveValue("Who graded, and to what.");
   });
 
   it("never restores on its own — the offer has to be accepted", async () => {
@@ -282,5 +301,47 @@ describe("BlogPostEditor draft recovery", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /bring it back/i })).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("BlogPostEditor search preview", () => {
+  function preview() {
+    return screen.getByRole("group", { name: "How the post may look in search results" });
+  }
+
+  it("shows the defaults a blank search title and description fall back to", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText(/Body/), "Everyone did well.");
+
+    // The excerpt is blank too, so the description is the one the server will
+    // derive from the body: the preview must show what will be served.
+    expect(preview()).toHaveTextContent("Grading day | UTS Jitsu Blog");
+    expect(preview()).toHaveTextContent("Everyone did well.");
+  });
+
+  it("shows the manager's own search title and description once typed", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    await user.type(screen.getByLabelText("Title"), "Grading day");
+    await user.type(screen.getByLabelText("Search title"), "Spring grading results");
+    await user.type(screen.getByLabelText("Search description"), "Who graded, and to what.");
+
+    expect(preview()).toHaveTextContent("Spring grading results");
+    expect(preview()).not.toHaveTextContent("| UTS Jitsu Blog");
+    expect(preview()).toHaveTextContent("Who graded, and to what.");
+  });
+
+  it("says when a search title runs past what a result usually shows", async () => {
+    const user = userEvent.setup();
+    render(<BlogPostEditor initial={EMPTY} saving={false} onSave={async () => true} />);
+
+    const field = screen.getByLabelText("Search title");
+    expect(field).toHaveAccessibleDescription(/0 of about 60 characters/);
+    await user.type(field, "x".repeat(61));
+    expect(field).toHaveAccessibleDescription(/61 characters\. .*may be cut off/);
   });
 });
