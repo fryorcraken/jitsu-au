@@ -342,6 +342,14 @@ export type _WaiverSubmissionIdIsNullable = Expect<
   Equals<Tables["waivers"]["Row"]["client_submission_id"], string | null>
 >;
 
+// ---- blog: a post's own search title and description (20261031000000) ----
+// Read by the public post page's head() and written by the editor and the
+// manager agent API; NULL means the default (`blogPostSeo`).
+export type _BlogPostSeoColumns = RequireColumns<
+  Tables["blog_posts"]["Row"],
+  "seo_title" | "seo_description"
+>;
+
 // ---- knowledge base: versioned pages members read and annotate ----
 export type _KbArticleColumns = RequireColumns<
   Tables["kb_articles"]["Row"],
