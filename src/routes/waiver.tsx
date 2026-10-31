@@ -158,6 +158,8 @@ function Waiver() {
     codeOfConductUrl: string | null;
     /** Did the confirmation email go out with a reply-to, so replying to it works? */
     replyToConfirmation: boolean;
+    /** Did the confirmation email go out at all? A capped one is held back (#52). */
+    confirmationEmailed: boolean;
   } | null>(null);
   /** True once a draft from this browser session has been put back on screen. */
   const [restored, setRestored] = useState(false);
@@ -634,6 +636,7 @@ function Waiver() {
           pdfReady: Boolean(res.pdf_url),
           codeOfConductUrl: null,
           replyToConfirmation: false,
+          confirmationEmailed: false,
         });
         clearDraft();
       })
@@ -1016,8 +1019,10 @@ function Waiver() {
           // which answers only "did it land" and carries no token; the original
           // attempt's confirmation email already has the working link.
           code_of_conduct_url: null,
-          // Nothing was sent by this check, so it cannot vouch for a reply-to.
+          // Nothing was sent by this check, so it cannot vouch for a reply-to,
+          // or for an email at all.
           reply_to_confirmation: false,
+          confirmation_emailed: false,
         };
       },
     });
@@ -1028,6 +1033,7 @@ function Waiver() {
         pdfReady: outcome.value.pdf_ready,
         codeOfConductUrl: outcome.value.code_of_conduct_url,
         replyToConfirmation: outcome.value.reply_to_confirmation,
+        confirmationEmailed: outcome.value.confirmation_emailed,
       });
       // Signed and recorded: the draft has done its job, and it holds health
       // answers and a signature that should not outlive it.
@@ -1144,7 +1150,10 @@ function Waiver() {
               <p className="mt-2 text-sm text-muted-foreground">
                 Please read our code of conduct and agree to it. It covers how we train together:
                 hygiene, mat etiquette, gear, and keeping each other safe. You can train before you
-                do this, and we have emailed you the same link so you can come back to it.
+                do this
+                {result.confirmationEmailed
+                  ? ", and we have emailed you the same link so you can come back to it."
+                  : "."}
               </p>
               <Button asChild className="mt-4">
                 <a href={result.codeOfConductUrl}>Read the code of conduct</a>

@@ -150,8 +150,13 @@ system. (The contact form stores a message, not a person.)
    refuses to delete the `media` item so a routine reword cannot silently stop
    the capture.
 
-4. **Waivers are accepted at any time, without limit.** Resubmitting after a
-   mistake is never blocked, before or after approval.
+4. **Waivers are accepted at any time.** Resubmitting after a mistake is never
+   blocked, before or after approval. The one limit is per network, 50 an hour
+   and 150 a day (#52, `FORM_LIMITS` in `src/lib/rate-limit.ts`), set so a
+   first class night on campus wifi never meets it. Over it, the signer is told
+   the network is paused, for how long, and to switch to mobile data, with the
+   form still filled in; nothing is created. The confirmation email is capped
+   too (`docs/emails.md`, "Caps on what the public forms send").
 5. **The active waiver is the latest approved one.** Older approved waivers are
    superseded. An unapproved one stays pending only while it is the person's
    newest signature: once they have signed again and the club has approved
@@ -422,7 +427,9 @@ phone, often at the gym. The page is built so that ends in a definite answer.
   original reply was lost.
 - **Retrying is safe** because every attempt carries the same
   `client_submission_id`, which the server looks up before doing any work. One
-  signed waiver, one set of emails, however many times it is sent.
+  signed waiver, one set of emails, however many times it is sent. The rate
+  limit reads the same id, so a retry never counts as a second waiver against
+  it, even from another network.
 - **The id alone never unlocks a waiver.** Signing needs no login, and the
   answer to a retry is a link to the signed PDF, so the server only treats a
   resent id as "already signed" when the saved row is an online signing (never a

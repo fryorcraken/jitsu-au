@@ -29,10 +29,22 @@ function serverSupabase() {
  */
 const UNIQUE_VIOLATION = "23505";
 
+/**
+ * Turn somebody away once their network has sent too many (#52). First thing
+ * each handler does after the honeypot, before anything is written or sent.
+ * The submission id is passed so an automatic retry of one form fill is not
+ * counted as a second submission. Throws the message the person sees.
+ */
+async function limit(form: "interest" | "contact", submissionId: string | null) {
+  const { limitPublicForm } = await import("@/lib/rate-limit.server");
+  await limitPublicForm(form, submissionId);
+}
+
 export const submitInterest = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => interestSchema.parse(data))
   .handler(async ({ data }) => {
-    if (data.hp) return { ok: true as const, duplicate: false };
+    if (data.hp) return { ok: true as const, duplicate: false, emailed: true };
+    await limit("interest", data.client_submission_id || null);
     const supabase = serverSupabase();
     // Providing a phone number here is implicit consent to SMS/WhatsApp contact
     // (the phone field carries a consent note). Record it so later forms can
@@ -58,18 +70,27 @@ export const submitInterest = createServerFn({ method: "POST" })
     });
     if (error) {
       // This exact registration is already filed. Report success (it IS
-      // recorded) and, crucially, do not send the emails a second time.
-      if (error.code === UNIQUE_VIOLATION) return { ok: true as const, duplicate: true };
+      // recorded) and, crucially, do not send the emails a second time. Nor
+      // promise one: this call sent nothing and cannot tell whether the first
+      // attempt's confirmation went or was held back by a cap (#52), so the
+      // page points at its own button instead.
+      if (error.code === UNIQUE_VIOLATION)
+        return { ok: true as const, duplicate: true, emailed: false };
       throw new Error(error.message);
     }
 
     // Best-effort transactional emails: confirm to the applicant (nudging them
     // to sign their prefilled waiver next) and notify managers of the new lead.
     // Never let an email hiccup fail the registration the visitor just made.
+    //
+    // `emailed` is whether the applicant's confirmation went, so the next
+    // screen only says "we'll email you the link" when we did (#52: a capped
+    // email is held back, and a failed one never arrives either).
+    let emailed = false;
     try {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const { sendInterestEmails } = await import("@/lib/interest-email.server");
-      await sendInterestEmails({
+      const result = await sendInterestEmails({
         // Unique per submission: keeps the email provider's idempotency keys
         // distinct across separate registrations (the anon insert can't return
         // a row id, and this table has no natural key — leads are unlimited).
@@ -82,19 +103,21 @@ export const submitInterest = createServerFn({ method: "POST" })
         message: data.message || null,
         admin: supabaseAdmin,
       });
+      emailed = result.applicantEmailed;
     } catch (e) {
       console.error("[submitInterest] failed to send interest emails:", e);
     }
 
-    return { ok: true as const, duplicate: false };
+    return { ok: true as const, duplicate: false, emailed };
   });
 
 export const submitContact = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => contactSchema.parse(data))
   .handler(async ({ data }) => {
     if (data.hp) return { ok: true as const, duplicate: false };
-    const supabase = serverSupabase();
     const submissionId = data.client_submission_id || null;
+    await limit("contact", submissionId);
+    const supabase = serverSupabase();
 
     const { error } = await supabase.from("contact_messages").insert({
       name: data.name,

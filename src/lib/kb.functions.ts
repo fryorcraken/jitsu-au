@@ -22,6 +22,7 @@ import {
   likePattern,
   matchArticleText,
 } from "@/lib/kb";
+import { requestHeaderGetter } from "@/lib/request-headers";
 import type { AnnotationVisibility, Viewer } from "@/lib/kb";
 import {
   listKbSections,
@@ -49,16 +50,6 @@ import {
   updateAnnotationSchema,
 } from "@/lib/validation";
 
-/** Request headers, when the server runtime exposes them. Never throws. */
-async function headerGetter(): Promise<(name: string) => string | undefined> {
-  try {
-    const { getRequestHeader } = await import("@tanstack/react-start/server");
-    return (name: string) => getRequestHeader(name);
-  } catch {
-    return () => undefined;
-  }
-}
-
 async function adminClient(): Promise<KbClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
@@ -85,7 +76,7 @@ async function adminClient(): Promise<KbClient> {
  * identity or role lookup is raised as itself.
  */
 async function resolveViewer(db: KbClient, opts: { strict?: boolean } = {}): Promise<Viewer> {
-  const getHeader = await headerGetter();
+  const getHeader = await requestHeaderGetter();
   const bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
   if (!bearer) return { userId: null, isManager: false };
 

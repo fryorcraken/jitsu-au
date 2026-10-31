@@ -48,9 +48,83 @@ from `email-sender.ts`. The handler can set a Reply-To (`replyTo`, since
 never thrown into the flow that triggered it: a waiver is saved, a payment is
 recorded, a membership is raised whether or not the email about it lands.
 
+**Capped, where the public can trigger it.** Four forms accept a write from
+somebody who is not signed in, and three of them email the address that was
+typed in plus every manager. So what one flood can make the club send is
+bounded; see "Caps on what the public forms send" below.
+
 **Without `LOVABLE_API_KEY`** each sender logs a skip and sends nothing. Most do
 so before any other work; the daily digest reads its pending rows first, on
 purpose, so it can still report how much was owed.
+
+## Caps on what the public forms send
+
+The interest form, the contact form and the waiver send email to whatever
+address was typed in, and a copy of each to every manager. Before #52 nothing
+bounded that, so a script could make the club email strangers by the thousand,
+and the damage to the sending domain's reputation would land on the sign-in and
+account emails too, with nothing on any screen to say so. Now:
+
+| Cap                                                                                     | Limit (rolling 24 hours) | Past it                                                                  |
+| --------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------ |
+| Interest confirmation, contact acknowledgement, waiver confirmation, to any one address | 6                        | that email is not sent                                                   |
+| The same three, from submissions on any one network                                     | 150                      | that email is not sent                                                   |
+| The same three, to typed-in addresses altogether                                        | 300                      | that email is not sent                                                   |
+| Managers' copy of each kind (new lead, new message, new waiver), counted per submission | 20 of each kind          | one "we've paused these" note to each manager, then nothing of that kind |
+
+The numbers and their reasons are `EMAIL_CAPS` in `src/lib/rate-limit.ts`;
+counting is `public.claim_rate_limit` (`docs/database.md`, `rate_limit_hits`).
+
+- **The submission is never refused for it.** A capped email is held back and
+  the lead, message or waiver is saved exactly as before, listed on its manager
+  screen and counted on `/notifications`.
+- **A screen never promises a held-back email.** The interest form's next
+  screen says "we'll email you the link" only when it went, and the waiver's
+  code-of-conduct panel "we have emailed you the same link" likewise
+  (`applicantEmailed` / `confirmation_emailed`). Otherwise it points at the
+  button on the screen.
+- **Six per address** covers a parent signing for three children and themselves
+  in an evening, with an interest form besides. It stops a bot pointing the
+  club at one stranger. The address is counted by its SHA-256, never stored.
+- **150 per network** covers an O-Week stall of 60 newcomers who each register
+  and sign on one campus network (120 emails).
+- **300 altogether is twice that on purpose.** No single network, however it
+  spends its own form limits, can use up the club-wide allowance and leave
+  every real visitor elsewhere without a confirmation for a day: that takes a
+  flood from several networks at once, which is the case this cap is for, to
+  protect the domain. (It was 100 with no per-network share at first, and one
+  machine inside its own form limits could spend it in an hour.)
+- **The per-address cap is claimed first**, so a flood aimed at one address
+  stops there and spends nothing else.
+- **A slot is only spent on an email that went.** If a later cap refuses, or
+  the send fails, every slot that email claimed is given back
+  (`releaseVisitorEmail`, `public.release_rate_limit`), so a parent signing
+  for their children during a flood, or while the email provider is down, does
+  not lose the day's allowance to emails they never received.
+- **The managers get one note, not silence.** The copy that reaches the cap is
+  replaced by "Lots of new sign-ups today, so we've paused those emails"
+  (`manager-notices-paused.tsx`), saying where the rest are. It does not call
+  them a bot: 20 waivers in a day is also what a good O-Week stall looks like,
+  and every newcomer is somebody a manager does not recognise yet. So it says
+  it could be either, and the waiver one says what approving does (opens an
+  account, emails the person) rather than telling managers to turn strangers
+  away. After it, nothing of that kind until the day's count is back under the
+  cap, and at most one note a day: the note says so, so a second busy spell
+  within the day is not mistaken for the emails having resumed. We chose this
+  over folding
+  these emails into the nightly digest: on a normal day a real lead or a real
+  question should reach a manager now, not at 9am tomorrow.
+- **Retries are free.** Each claim is keyed on the email's idempotency key (and
+  the managers' on the submission id), so a retried send is not counted twice.
+- **Fails open.** If the counter cannot be reached the email goes, as it always
+  did.
+- **Not capped:** a manager's Resend (it goes through `sendWaiverConfirmation`
+  directly, behind the manager gate and its own once-a-minute rule), and every
+  email a signed-in or manager action sends.
+
+The forms themselves are also limited per network (`FORM_LIMITS`, same file),
+which is what a refused visitor sees; that is not an email rule and the copy
+for it lives with the limit.
 
 ## Where a reply goes
 
@@ -242,13 +316,16 @@ design, never proves the mailbox (`mailboxProvingPurposes` in
 
 Each goes to every manager (`getManagerEmails`), one send per manager, and
 carries the person it is about as `Reply-To` (see "Where a reply goes" above).
+The first three are capped at 20 of each kind a day (see "Caps on what the
+public forms send").
 
-| Email                  | Template                      | Sender function              | Trigger                        | `Reply-To`                                                      | `idempotency_key`                  | Rebuildable                 |
-| ---------------------- | ----------------------------- | ---------------------------- | ------------------------------ | --------------------------------------------------------------- | ---------------------------------- | --------------------------- |
-| New contact message    | `contact-notification.tsx`    | `sendContactEmails`          | `/contact` submitted           | Whoever wrote in                                                | `contact-manager-<messageId>-<to>` | Yes                         |
-| New free-trial lead    | `interest-notification.tsx`   | `sendInterestEmails`         | `/register-interest` submitted | The lead                                                        | `interest-manager-<id>-<to>`       | Yes                         |
-| New waiver signed      | `waiver-notification.tsx`     | `sendWaiverEmails`           | `/waiver` signed               | The guardian then the signer, for a minor; the signer otherwise | `waiver-manager-<waiverId>-<to>`   | With a fresh signed PDF URL |
-| New membership pending | `membership-notification.tsx` | `sendMembershipPaymentEmail` | Every membership invoice above | The invoiced address (the guardian's, for a child)              | `membership-pending-<id>-<to>`     | Yes                         |
+| Email                   | Template                      | Sender function                                      | Trigger                                                                                                     | `Reply-To`                                                      | `idempotency_key`                         | Rebuildable                 |
+| ----------------------- | ----------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------- | --------------------------- |
+| New contact message     | `contact-notification.tsx`    | `sendContactEmails`                                  | `/contact` submitted                                                                                        | Whoever wrote in                                                | `contact-manager-<messageId>-<to>`        | Yes                         |
+| New free-trial lead     | `interest-notification.tsx`   | `sendInterestEmails`                                 | `/register-interest` submitted                                                                              | The lead                                                        | `interest-manager-<id>-<to>`              | Yes                         |
+| New waiver signed       | `waiver-notification.tsx`     | `sendWaiverEmails`                                   | `/waiver` signed                                                                                            | The guardian then the signer, for a minor; the signer otherwise | `waiver-manager-<waiverId>-<to>`          | With a fresh signed PDF URL |
+| New membership pending  | `membership-notification.tsx` | `sendMembershipPaymentEmail`                         | Every membership invoice above                                                                              | The invoiced address (the guardian's, for a child)              | `membership-pending-<id>-<to>`            | Yes                         |
+| Those emails are paused | `manager-notices-paused.tsx`  | `mayNotifyManagers` (`manager-notice-cap.server.ts`) | The submission that takes new leads, new messages or new waivers past 20 in a day, in place of its own copy | None: it is about no one                                        | `manager-paused-<kind>-<submission>-<to>` | Yes                         |
 
 ### Supabase Auth emails
 
