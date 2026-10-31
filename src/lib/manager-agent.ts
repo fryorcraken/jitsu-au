@@ -1682,7 +1682,7 @@ export const AGENT_MANIFEST: {
       name: "list_contact_messages",
       method: "POST",
       summary:
-        "Read the messages people sent through the public contact form, newest first (200 unless you ask for up to 500): each one's id, name, email (the address the sender typed, always their own), subject, message, created_at and unread. unread_count says how many no manager has seen yet. Reading marks nothing seen: the inbox's seen marker is shared by every manager and clears their \"needs attention\" item, so it only moves when you call mark_contact_messages_seen. newest_at is the boundary to give that call, and is null when truncated is true, because the list stops short of the whole inbox and acknowledging it would mark messages nobody was shown.",
+        "Read the messages people sent through the public contact form, newest first (200 unless you ask for up to 500): each one's id, name, email (the address the sender typed, always their own), subject, message, created_at and unread. unread_count says how many of the messages returned no manager has seen yet; when truncated is true there may be more further back. Reading marks nothing seen: the inbox's seen marker is shared by every manager and clears their \"needs attention\" item, so it only moves when you call mark_contact_messages_seen. newest_at is the boundary to give that call, and is null when truncated is true, because the list stops short of the whole inbox and acknowledging it would mark messages nobody was shown.",
       params: [
         {
           name: "limit",
@@ -1695,7 +1695,7 @@ export const AGENT_MANIFEST: {
       name: "mark_contact_messages_seen",
       method: "POST",
       summary:
-        'Mark the contact inbox seen up to a message, for every manager: it clears the "needs attention" item and the unread badge for everybody, not just for you. Call it only when the manager asks you to, after they have been shown the messages; reading the inbox on their behalf is not them having seen it. Everything that arrived up to and including seen_at counts as seen, anything later stays unread, and the marker never moves backwards, so an older seen_at changes nothing (marked false). 422 not_a_message when seen_at is not a message\'s arrival time; 503 settings_unreadable (with Retry-After) when nothing could be marked just now.',
+        "Mark the contact inbox seen up to a message, for every manager: it clears the \"needs attention\" item and the unread badge for everybody, not just for you. Call it only when the manager asks you to, after they have been shown the messages; reading the inbox on their behalf is not them having seen it. Everything that arrived up to and including seen_at counts as seen, anything later stays unread, and the marker never moves backwards, so an older seen_at changes nothing (marked false). The server checks that seen_at is a real message's arrival time, not that the manager was shown every message before it, so never send a created_at taken from a list whose truncated was true. 422 not_a_message when seen_at is not a message's arrival time (matched to the millisecond, in any offset); 503 settings_unreadable (with Retry-After) when nothing could be marked just now.",
       params: [
         {
           name: "seen_at",

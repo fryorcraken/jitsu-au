@@ -2736,15 +2736,19 @@ describe("contact inbox actions", () => {
           };
         }
         if (table === "contact_messages") {
-          const filters: [string, unknown][] = [];
+          // Filters compare instants, as Postgres does for TIMESTAMPTZ, so an
+          // offset other than UTC names the same moment here as it does live.
+          const filters: [string, "eq" | "gte" | "lt", unknown][] = [];
           let deleting = false;
+          const instant = (v: unknown) => new Date(String(v)).getTime();
           const matching = () =>
             state.rows.filter((r) =>
-              filters.every(([col, val]) =>
-                col === "created_at"
-                  ? sameInstant(r.created_at, val)
-                  : (r as Record<string, unknown>)[col] === val,
-              ),
+              filters.every(([col, op, val]) => {
+                const have = (r as Record<string, unknown>)[col];
+                if (op === "gte") return instant(have) >= instant(val);
+                if (op === "lt") return instant(have) < instant(val);
+                return col === "created_at" ? sameInstant(have, val) : have === val;
+              }),
             );
           const chain = {
             select: (_cols?: string, sel?: { count?: string }) => {
@@ -2771,9 +2775,19 @@ describe("contact inbox actions", () => {
               return chain;
             },
             eq: (col: string, val: unknown) => {
-              filters.push([col, val]);
+              filters.push([col, "eq", val]);
               return chain;
             },
+            gte: (col: string, val: unknown) => {
+              filters.push([col, "gte", val]);
+              return chain;
+            },
+            lt: (col: string, val: unknown) => {
+              filters.push([col, "lt", val]);
+              return chain;
+            },
+            // Rows are held newest first, which is the only order asked for.
+            order: () => chain,
             limit: (n: number) => Promise.resolve(ok(matching().slice(0, n))),
           };
           return chain;
@@ -2843,6 +2857,41 @@ describe("contact inbox actions", () => {
     expect(res.status).toBe(422);
     expect((await res.json()).error.code).toBe("not_a_message");
     expect(fake.state.upserts).toEqual([]);
+  });
+
+  // The same instant in Sydney time. As text it sorts after "now", so stamping
+  // the caller's string would clamp the marker to the present and mark seen
+  // everything up to it. The message's own timestamp is what gets stored.
+  it("stamps the message's own timestamp when seen_at names it in another offset", async () => {
+    const fake = fakeInbox({ marker: null });
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "mark_contact_messages_seen",
+      params: { seen_at: "2026-10-03T20:00:00.123456+11:00" },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).result).toEqual({ marked: true, seen_at: NEWER_AT });
+    expect(fake.state.upserts[0]).toMatchObject({ value: NEWER_AT });
+  });
+
+  it("accepts a boundary a client re-serialised to milliseconds", async () => {
+    const fake = fakeInbox({ marker: null });
+    currentAdmin = fake.db;
+    const res = await post({
+      action: "mark_contact_messages_seen",
+      params: { seen_at: new Date(NEWER_AT).toISOString() },
+    });
+    expect(res.status).toBe(200);
+    expect(fake.state.upserts[0]).toMatchObject({ value: NEWER_AT });
+  });
+
+  it("refuses to report the inbox when the seen marker cannot be read", async () => {
+    // The screen shows everything as unread here. An agent would tell the
+    // manager the whole inbox had never been opened.
+    currentAdmin = fakeInbox({ marker: null, markerFails: true }).db;
+    const res = await post({ action: "list_contact_messages", params: {} });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("settings_unreadable");
   });
 
   it("never moves the marker backwards", async () => {

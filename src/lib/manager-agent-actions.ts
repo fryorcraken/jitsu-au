@@ -192,10 +192,11 @@ import {
 import { isLoopbackHost, linkOrigin } from "@/lib/site-origin";
 import {
   MESSAGE_ALREADY_GONE,
+  NotAMessageError,
+  acknowledgeContactMessages,
   deleteContactMessageRow,
   loadContactMessages,
 } from "@/lib/contact-messages.functions";
-import { CONTACT_SEEN_KEY, stampSeenMarker } from "@/lib/seen-markers";
 import { decodeBase64 } from "@/lib/waiver-scan";
 
 /**
@@ -2366,6 +2367,10 @@ async function handleListContactMessages(params: unknown) {
   } catch (e) {
     throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
   }
+  // The screen shows every message as unread when the marker cannot be read.
+  // An agent would report that as "nobody has ever opened the inbox", so the
+  // API refuses the half-read, as get_user does.
+  if (inbox.seenFailed) throw seenMarkerUnreadable();
   const unread = new Set(inbox.unreadIds);
   return {
     count: inbox.messages.length,
@@ -2378,43 +2383,34 @@ async function handleListContactMessages(params: unknown) {
   };
 }
 
+function seenMarkerUnreadable(): AgentError {
+  return new AgentError(
+    503,
+    "settings_unreadable",
+    "Could not read where the inbox was last marked seen. Nothing was changed. Try again shortly.",
+    undefined,
+    30,
+  );
+}
+
 async function handleMarkContactMessagesSeen(params: unknown, actingAs: string) {
   const input = agentMarkContactMessagesSeenSchema.parse(params);
-  const db = await adminClient();
-  // The boundary has to be a message somebody was shown, which is what the
-  // list's `newest_at` is. A made-up instant such as "now" would mark seen any
-  // message that arrived after the list was read, which nobody has looked at.
-  // The screen cannot send one; an agent improvising could, so it is refused.
-  const { data: atBoundary, error } = await db
-    .from("contact_messages")
-    .select("id")
-    .eq("created_at", input.seen_at)
-    .limit(1);
-  if (error) throw new AgentError(500, "db_error", error.message);
-  if (!atBoundary || atBoundary.length === 0) {
-    throw new AgentError(
-      422,
-      "not_a_message",
-      "seen_at must be the newest_at from list_contact_messages, the arrival time of the newest message the manager was shown. Read the list again and send that.",
-    );
-  }
   let stamped: { marker: string | null; skipped: boolean };
   try {
-    stamped = await stampSeenMarker(db, CONTACT_SEEN_KEY, input.seen_at, actingAs);
+    stamped = await acknowledgeContactMessages(await adminClient(), input.seen_at, actingAs);
   } catch (e) {
+    if (e instanceof NotAMessageError) {
+      throw new AgentError(
+        422,
+        "not_a_message",
+        "seen_at must be the newest_at from list_contact_messages, the arrival time of the newest message the manager was shown. Read the list again and send that.",
+      );
+    }
     throw new AgentError(500, "db_error", e instanceof Error ? e.message : String(e));
   }
   // Skipped with no marker means the current one could not be read, so there
   // was nothing to compare against and nothing was written (`stampSeenMarker`).
-  if (stamped.skipped && stamped.marker === null) {
-    throw new AgentError(
-      503,
-      "settings_unreadable",
-      "Could not read where the inbox was last marked seen, so nothing was marked. Try again shortly.",
-      undefined,
-      30,
-    );
-  }
+  if (stamped.skipped && stamped.marker === null) throw seenMarkerUnreadable();
   console.info(
     "[agent.mark_contact_messages_seen] audit",
     JSON.stringify({ seenAt: stamped.marker, moved: !stamped.skipped, actor: actingAs }),

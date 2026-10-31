@@ -578,20 +578,34 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
 - `list_contact_messages` / `mark_contact_messages_seen` /
   `delete_contact_message` (`"32"`) — the contact inbox, the agent's equivalent
   of `/manager/contact-messages`. The read is `loadContactMessages`, the
-  acknowledgement `stampSeenMarker` and the delete `deleteContactMessageRow`,
-  the same three calls the screen makes. One difference, on purpose:
+  acknowledgement `acknowledgeContactMessages` and the delete
+  `deleteContactMessageRow`, the same calls the screen makes. One difference,
+  on purpose, and the guards that follow from it:
   - **Reading marks nothing seen.** The screen stamps the club-wide seen marker
     as soon as it loads; the list action never does. That marker clears every
     manager's "needs attention" item, so an agent reading the inbox for its
     own reasons (a summary, a draft reply) must not clear it for them.
     Acknowledging is `mark_contact_messages_seen`, made when the manager asks.
   - **Its `seen_at` must be a message's arrival time** (`422 not_a_message`
-    otherwise), which is what the list's `newest_at` is. The screen can only
-    send the boundary it rendered; an agent could improvise "now", which would
-    mark seen whatever arrived after the list was read. `newest_at` is null on
-    a truncated list for the same reason as on the screen. A marker that cannot
-    be read is `503 settings_unreadable` with nothing written, since the
-    only-moves-forward guard needs it (`src/lib/seen-markers.ts`).
+    otherwise), checked by `acknowledgeContactMessages`, which the screen's
+    `markContactMessagesSeen` calls too, so both enforce one rule. The screen
+    only ever sends the boundary it rendered; an agent could improvise "now",
+    which would mark seen whatever arrived after the list was read. The match
+    is by instant and to the millisecond (a client re-serialising the timestamp
+    keeps no more), and what is stamped is the message's own `created_at` as
+    the database renders it: markers are compared as text, so a caller's string
+    in another offset would sort wrongly.
+  - **What it cannot check is that the caller showed every message before
+    `seen_at`.** That half is the caller's, as it is the screen's: `newest_at`
+    is null on a truncated list, and the skill tells agents never to substitute
+    a row's `created_at` from one. Enforcing it would need the server to know
+    what was shown, which it does not.
+  - **A marker that cannot be read is refused** on both actions, as
+    `503 settings_unreadable` with nothing written. The screen degrades it to
+    "everything is unread", which an agent would report as an inbox nobody had
+    ever opened (`seenFailed` on `loadContactMessages`), and marking needs the
+    current marker for the only-moves-forward guard (`src/lib/seen-markers.ts`).
+  - `unread_count` counts the messages returned, not the whole inbox.
   - **The delete has no confirm flag**, like `delete_blog_post`: asking the
     manager is the caller's job, and the skill says so. It is part of the
     club's erasure path (`docs/erasing-personal-data.md`), writes an audit line

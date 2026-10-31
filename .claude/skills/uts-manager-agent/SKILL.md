@@ -1356,7 +1356,10 @@ sender typed, so unlike `list_users` it is always their own.
 
 `params`: `limit` (optional, 1 to 500, default 200). Newest first, each message
 with `unread`, plus `unread_count`, `seen_at` (where the inbox was last marked
-seen) and `newest_at`.
+seen) and `newest_at`. `unread_count` counts only the messages returned: when
+`truncated` is true, say "at least" to the manager. `503 settings_unreadable`
+means the seen marker could not be read, so nothing could be said about what
+is unread; retry.
 
 ```bash
 scripts/agent.sh list_contact_messages '{}'
@@ -1382,7 +1385,10 @@ scripts/agent.sh mark_contact_messages_seen '{"seen_at":"<newest_at from the lis
   seen if they tell you to. Never as a side effect of reading.
 - `newest_at` is `null` when `truncated` is true: the list stopped short of the
   inbox, and marking it would also mark messages nobody was shown. Read again
-  with a larger `limit` (up to 500) first.
+  with a larger `limit` (up to 500) first. **Never send a message's
+  `created_at` from a truncated list instead**: the server checks that
+  `seen_at` is a real message, not that the manager saw everything before it,
+  so it would accept it and mark the unshown ones seen.
 - `422 not_a_message`: `seen_at` is not a message's arrival time. Send the
   list's `newest_at` as it came back.
 - `marked: false` means the inbox was already marked seen at least that far.

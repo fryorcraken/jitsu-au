@@ -76,6 +76,11 @@ export async function loadContactMessages(admin: AdminClient, limit: number) {
     total,
     truncated,
     seenAt: seen.marker,
+    // The screen degrades a failed marker read to "everything is unread", which
+    // over-reports in the safe direction. Said out loud so a caller that cannot
+    // see the server log (the agent API) can refuse instead of reporting a
+    // whole inbox as never opened.
+    seenFailed: seen.failed,
     // Ordered newest-first, so the first row is the boundary that was seen.
     newestAt: truncated ? null : (messages[0]?.created_at ?? null),
     unreadIds: unreadSince(messages, seen.marker).map((m) => m.id),
@@ -90,21 +95,57 @@ export const listContactMessages = createServerFn({ method: "GET" })
     return loadContactMessages(await adminClient(), data.limit);
   });
 
+/** Thrown when a boundary to acknowledge is not any message's arrival time. */
+export class NotAMessageError extends Error {}
+
 /**
- * Move the club-wide marker up to the newest message the caller actually saw.
+ * Move the club-wide marker up to one message: the newest the caller showed.
  *
- * The boundary comes from the browser, and the guards that make that safe live
- * in `stampSeenMarker`.
+ * The boundary arrives from outside (the screen's own list, or a manager's
+ * agent), so it has to name a message that exists. An invented instant such as
+ * "now" would mark seen whatever arrived after the list was read, which nobody
+ * has looked at. It is matched to the millisecond rather than exactly, because
+ * a client that re-serialises the timestamp (`toISOString`) keeps milliseconds
+ * and drops the rest, and by instant, so any offset names the same moment.
+ *
+ * What is stamped is the message's own `created_at` as the database renders
+ * it, never the caller's string. `advanceSeenMarker` compares markers as text,
+ * which only orders correctly while every marker is written in one format: a
+ * Sydney-offset string would sort after "now" and clamp the marker forward.
+ *
+ * Checked here rather than in either caller so the screen and the agent API
+ * enforce one rule. The other guards (clamp to the present, only forwards)
+ * live in `stampSeenMarker`.
  */
+export async function acknowledgeContactMessages(
+  admin: AdminClient,
+  seenAt: string,
+  userId: string,
+): Promise<{ marker: string | null; skipped: boolean }> {
+  const from = new Date(seenAt);
+  const to = new Date(from.getTime() + 1);
+  const { data: rows, error } = await admin
+    .from("contact_messages")
+    .select("created_at")
+    .gte("created_at", from.toISOString())
+    .lt("created_at", to.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const boundary = rows?.[0]?.created_at;
+  if (!boundary) {
+    throw new NotAMessageError("That is not the arrival time of any message in the inbox.");
+  }
+  return stampSeenMarker(admin, CONTACT_SEEN_KEY, boundary, userId);
+}
+
 export const markContactMessagesSeen = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => markContactMessagesSeenSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
-    const admin = await adminClient();
-    const { marker, skipped } = await stampSeenMarker(
-      admin,
-      CONTACT_SEEN_KEY,
+    const { marker, skipped } = await acknowledgeContactMessages(
+      await adminClient(),
       data.seen_at,
       context.userId,
     );
