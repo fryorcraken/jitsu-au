@@ -1759,6 +1759,8 @@ manager's own wording (`"Free trial, 2 left"`, `"One semester"`, `"No cover"`),
 so read it back as it is. `warnings` say why when nothing pays
 (`payment_pending`, `credits_exhausted`, `not_started` and so on).
 `already_checked_in: true` comes with their `checkin` and `would_spend: null`.
+It refuses what `check_in` would (a cancelled class, no waiver on file), so a
+preview always describes a check-in that can happen.
 `guardian_name` and `age` are set only for somebody on another person's
 account, and are what tell two children in one family apart: say both when
 confirming a child.
@@ -1790,7 +1792,9 @@ Deletes it and gives back any session it spent, reopening the membership if
 this check-in is what finished it. `{ id, removed, refunded, reopened }`;
 `removed: false` means it was already gone, and nothing changed. When they
 trained goes with it, so **do not undo to change what paid**: that is
-`move_check_in` or `attach_check_in`.
+`move_check_in` or `attach_check_in`. `500 refund_failed` means it was removed
+but the session could not go back: do not send it again, and tell the manager
+which membership is a session short.
 
 ### `attach_check_in` — cover a check-in nothing paid for
 
@@ -1823,7 +1827,12 @@ or its dates do not cover that class), the check-in lands uncovered with
 `warnings` saying why and goes on `list_uncovered_check_ins`, while the old
 membership keeps its session back. So check the target with the manager
 before moving. `409 not_covered` means nothing pays for it yet (use
-`attach_check_in`); `409 same_membership` means it is already there.
+`attach_check_in`); `409 same_membership` means it is already there. Two
+failures come after the class was taken off the old membership, so never send
+the move again after either: `500 move_incomplete` (the old membership has its
+session back and the class is uncovered: `attach_check_in` it to the membership
+wanted) and `500 refund_failed` (the old membership did not get its session
+back: tell the manager).
 
 ## Guidance
 

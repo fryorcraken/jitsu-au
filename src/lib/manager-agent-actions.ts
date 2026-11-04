@@ -227,6 +227,7 @@ import {
   listCheckInEventRows,
   listUncoveredCheckInRows,
   loadCheckInBoard,
+  previewCheckInRow,
   transferCheckInRow,
   undoCheckInRow,
 } from "@/lib/checkin.functions";
@@ -2567,6 +2568,11 @@ const CHECK_IN_REFUSAL_STATUS: Record<CheckInRefusal, number> = {
   same_membership: 409,
   claim_lost: 409,
   not_their_membership: 422,
+  // Server failures, but not ones to retry: the release they followed already
+  // happened. Their own code (not db_error) keeps the message, which says what
+  // state things were left in and what to do.
+  refund_failed: 500,
+  move_incomplete: 500,
 };
 
 /** Run a shared check-in call, answering its refusals in the endpoint's envelope. */
@@ -2628,17 +2634,8 @@ async function handleListAttendance(params: unknown) {
 async function handleGetCheckInPreview(params: unknown) {
   const input = agentCheckInPreviewSchema.parse(params ?? {});
   const db = await adminClient();
-  const board = await onCheckIn(() => loadCheckInBoard(db, input));
-  const preview = agentCheckInPreview(board, input.user_id);
-  if (!preview) {
-    // The same refusal, in the same words, that check_in would give.
-    throw new AgentError(
-      CHECK_IN_REFUSAL_STATUS.no_waiver,
-      "no_waiver",
-      "Only someone with a waiver on file can be checked in.",
-    );
-  }
-  return { time_zone: CLUB_TIME_ZONE, ...preview };
+  const preview = await onCheckIn(() => previewCheckInRow(db, input));
+  return { time_zone: CLUB_TIME_ZONE, ...agentCheckInPreview(preview) };
 }
 
 // ---- action: list_uncovered_check_ins ----

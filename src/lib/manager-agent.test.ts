@@ -1231,7 +1231,7 @@ describe("check-in on the agent API", () => {
     warnings: [],
   };
 
-  const board = { event: morningClass, roster: [rosterRow], checkins: [] };
+  const preview = { event: morningClass, row: rosterRow, checkin: null };
 
   it("reports a class in club time, as the calendar actions do", () => {
     expect(projectAgentCheckInClass({ ...morningClass, checked_in_count: 4 })).toMatchObject({
@@ -1264,8 +1264,8 @@ describe("check-in on the agent API", () => {
   // The preview is the screen's roster row, so an agent reads back to the
   // manager what the screen shows beside the button, in the same words.
   it("previews what the door would spend, labelled as the screen labels it", () => {
-    const preview = agentCheckInPreview(board, "u-member");
-    expect(preview).toMatchObject({
+    const projected = agentCheckInPreview(preview);
+    expect(projected).toMatchObject({
       user_id: "u-member",
       name: "Sam Example",
       already_checked_in: false,
@@ -1277,27 +1277,21 @@ describe("check-in on the agent API", () => {
         sessions_remaining_before: 2,
       },
     });
-    expect(preview?.event.weekday).toBe("Thursday");
+    expect(projected.event.weekday).toBe("Thursday");
   });
 
   it("never reports the roster's search address", () => {
-    expect(JSON.stringify(agentCheckInPreview(board, "u-member"))).not.toContain(
-      "parent@example.com",
-    );
-  });
-
-  it("is null for somebody not on the roster, which is having no waiver on file", () => {
-    expect(agentCheckInPreview(board, "u-lead")).toBeNull();
+    expect(JSON.stringify(agentCheckInPreview(preview))).not.toContain("parent@example.com");
   });
 
   // A second check-in to the same class spends nothing, so previewing a spend
   // for somebody already in would describe a credit that never moves.
   it("previews no spend for somebody already checked in, and names their check-in", () => {
     const checkin = { id: "c1", user_id: "u-member", coverage: "trial" };
-    const preview = agentCheckInPreview({ ...board, checkins: [checkin] }, "u-member");
-    expect(preview?.already_checked_in).toBe(true);
-    expect(preview?.checkin).toEqual(checkin);
-    expect(preview?.would_spend).toBeNull();
+    const projected = agentCheckInPreview({ ...preview, checkin });
+    expect(projected.already_checked_in).toBe(true);
+    expect(projected.checkin).toEqual(checkin);
+    expect(projected.would_spend).toBeNull();
   });
 
   it("says No cover when nothing would pay", () => {
@@ -1309,8 +1303,10 @@ describe("check-in on the agent API", () => {
       consumes_credit: false,
       warnings: ["no_cover"],
     };
-    const preview = agentCheckInPreview({ ...board, roster: [none] }, "u-member");
-    expect(preview?.would_spend).toMatchObject({ label: "No cover", warnings: ["no_cover"] });
+    expect(agentCheckInPreview({ ...preview, row: none }).would_spend).toMatchObject({
+      label: "No cover",
+      warnings: ["no_cover"],
+    });
   });
 
   // The MCP server runs reads without asking and changes only after the

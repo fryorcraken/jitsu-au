@@ -362,11 +362,20 @@ export function projectAgentCalendarEvent(e: AgentCalendarEvent) {
  * check-in actions cannot disagree about which day a class is on.
  */
 function clubTimes(startsAt: string, endsAt: string) {
-  const startsLocal = clubLocalDateTime(new Date(startsAt));
+  const start = clubStart(startsAt);
   return {
-    starts_local: startsLocal,
+    starts_local: start.local,
     ends_local: clubLocalDateTime(new Date(endsAt)),
-    weekday: WEEKDAY_LABELS[new Date(`${startsLocal.slice(0, 10)}T00:00:00Z`).getUTCDay()],
+    weekday: start.weekday,
+  };
+}
+
+/** An instant in club time, and the club-time weekday it falls on. */
+function clubStart(at: string) {
+  const local = clubLocalDateTime(new Date(at));
+  return {
+    local,
+    weekday: WEEKDAY_LABELS[new Date(`${local.slice(0, 10)}T00:00:00Z`).getUTCDay()],
   };
 }
 
@@ -408,18 +417,18 @@ export function projectAgentCheckInClass(e: AgentCheckInClass) {
  * club time beside the UTC one.
  */
 export function projectAgentUncoveredCheckIn<T extends { event_starts_at: string | null }>(r: T) {
-  const local = r.event_starts_at ? clubTimes(r.event_starts_at, r.event_starts_at) : null;
+  const start = r.event_starts_at ? clubStart(r.event_starts_at) : null;
   return {
     ...r,
-    event_starts_local: local?.starts_local ?? null,
-    event_weekday: local?.weekday ?? null,
+    event_starts_local: start?.local ?? null,
+    event_weekday: start?.weekday ?? null,
   };
 }
 
-/** The parts of the check-in board (`loadCheckInBoard`) a preview reads. */
-export type AgentCheckInBoard = {
+/** What `previewCheckInRow` reads: the class, one roster row, their check-in to it. */
+export type AgentCheckInPreviewInput = {
   event: AgentCheckInClass;
-  roster: {
+  row: {
     user_id: string;
     name: string | null;
     guardian_name: string | null;
@@ -429,28 +438,24 @@ export type AgentCheckInBoard = {
     sessions_remaining_before: number | null;
     consumes_credit: boolean;
     warnings: string[];
-  }[];
-  checkins: { id: string; user_id: string; [key: string]: unknown }[];
+  };
+  checkin: { id: string; user_id: string } | null;
 };
 
 /**
- * What checking one person in to one class would do, read off the door
- * screen's own board: the roster row is the screen's preview, so what an agent
- * reads back to a manager and what the screen shows beside the button are the
- * same answer, worded by the same `coveragePreviewLabel`. Null when the person
- * is not on the roster, which is what having no waiver on file means.
+ * What checking one person in to one class would do, as `get_check_in_preview`
+ * reports it. The row is built by the door screen's own roster builder, so what
+ * an agent reads back to a manager and what the screen shows beside the button
+ * are the same answer, worded by the same `coveragePreviewLabel`.
  *
  * Deliberately leaves out the roster row's `email`. On the screen it is only a
  * search key, resolved through the guardian, and it is never printed; printed
  * bare under a child's name it would read as the child's mailbox. `get_user`
  * reports the address with the caption that says whose it is.
  */
-export function agentCheckInPreview(board: AgentCheckInBoard, userId: string) {
-  const row = board.roster.find((r) => r.user_id === userId);
-  if (!row) return null;
-  const checkin = board.checkins.find((c) => c.user_id === userId) ?? null;
+export function agentCheckInPreview({ event, row, checkin }: AgentCheckInPreviewInput) {
   return {
-    event: projectAgentCheckInClass(board.event),
+    event: projectAgentCheckInClass(event),
     user_id: row.user_id,
     name: row.name,
     // Set for somebody on another person's account, with their age: what tells
@@ -2113,7 +2118,7 @@ export const AGENT_MANIFEST: {
       name: "get_check_in_preview",
       method: "POST",
       summary:
-        'What checking one person in to one class would do, before doing it: the badge the manager\'s Check-in screen shows beside the button, from the same read. Read would_spend.label back to the manager when confirming a check-in. Returns event, user_id, name, guardian_name and age (both set only for somebody on another person\'s account, usually a child: what tells two children in one family apart), already_checked_in, checkin (their check-in to this class, as list_attendance reports it, or null) and would_spend (null when they are already in): label ("Free trial, 2 left", "One semester" or "No cover"), coverage (trial | session | period | none), plan_name, consumes_credit, sessions_remaining_before and warnings (why, when nothing covers it). It is worked out against the class\'s start, so last week\'s class previews as it would have at the door. 404 not_found when there is no such class; 422 no_waiver when the person has no waiver on file and so cannot be checked in until they sign one.',
+        'What checking one person in to one class would do, before doing it: the badge the manager\'s Check-in screen shows beside the button, from the same read. Read would_spend.label back to the manager when confirming a check-in. Returns event, user_id, name, guardian_name and age (both set only for somebody on another person\'s account, usually a child: what tells two children in one family apart), already_checked_in, checkin (their check-in to this class, as list_attendance reports it, or null) and would_spend (null when they are already in): label ("Free trial, 2 left", "One semester" or "No cover"), coverage (trial | session | period | none), plan_name, consumes_credit, sessions_remaining_before and warnings (why, when nothing covers it). It is worked out against the class\'s start, so last week\'s class previews as it would have at the door. It refuses whatever check_in would refuse: 404 not_found when there is no such class; 409 class_cancelled for a cancelled class; 422 no_waiver when the person has no waiver on file and so cannot be checked in until they sign one.',
       params: [
         {
           name: "event_id",
@@ -2161,7 +2166,7 @@ export const AGENT_MANIFEST: {
       name: "undo_check_in",
       method: "POST",
       summary:
-        "Remove a check-in: Undo on the manager's Check-in screen, through the same code. The check-in is deleted, and any session it spent goes back on its membership, which reopens if this check-in is what finished it (one a manager ended, or whose dates have passed, stays ended). When they were on the mat goes with it, so to change only what paid for a class use move_check_in or attach_check_in instead. Nobody is emailed. Returns removed, refunded (a session went back) and reopened. Safe to send again: a check-in that is already gone comes back removed: false and gives nothing back.",
+        "Remove a check-in: Undo on the manager's Check-in screen, through the same code. The check-in is deleted, and any session it spent goes back on its membership, which reopens if this check-in is what finished it (one a manager ended, or whose dates have passed, stays ended). When they were on the mat goes with it, so to change only what paid for a class use move_check_in or attach_check_in instead. Nobody is emailed. Returns removed, refunded (a session went back) and reopened. Safe to send again: a check-in that is already gone comes back removed: false and gives nothing back. 500 refund_failed means the check-in was removed but its session could not be given back: do not send it again (it would find nothing to undo), tell the manager the membership is a session short.",
       params: [
         {
           name: "id",
@@ -2194,7 +2199,7 @@ export const AGENT_MANIFEST: {
       name: "move_check_in",
       method: "POST",
       summary:
-        "Put a covered check-in on a different one of the same person's memberships: Move on the manager's person page, through the same code. It corrects what paid for a class without losing when they trained, and clears an attended blocker on delete_invoice. The session goes back on the old membership first (reopening it if this check-in finished it), then the new one pays as the door would have. If the new one cannot (no sessions left, or its dates do not include the class), the check-in lands uncovered with warnings saying why and goes on list_uncovered_check_ins, and the old membership keeps its session back. A casual class credit emails as check_in does. Returns decision, as check_in reports it. 404 not_found when there is no such check-in or membership; 409 not_covered when nothing pays for it yet (use attach_check_in); 409 same_membership when it is already on that membership; 409 claim_lost when another manager moved it first; 422 not_their_membership when the membership is somebody else's, checked before anything moves.",
+        "Put a covered check-in on a different one of the same person's memberships: Move on the manager's person page, through the same code. It corrects what paid for a class without losing when they trained, and clears an attended blocker on delete_invoice. The session goes back on the old membership first (reopening it if this check-in finished it), then the new one pays as the door would have. If the new one cannot (no sessions left, or its dates do not include the class), the check-in lands uncovered with warnings saying why and goes on list_uncovered_check_ins, and the old membership keeps its session back. A casual class credit emails as check_in does. Returns decision, as check_in reports it. 404 not_found when there is no such check-in or membership; 409 not_covered when nothing pays for it yet (use attach_check_in); 409 same_membership when it is already on that membership; 409 claim_lost when another manager moved it first; 422 not_their_membership when the membership is somebody else's, checked before anything moves. Two failures happen after the class has been taken off the old membership, so do not send the move again: 500 move_incomplete (the old membership has its session back but the new one could not take the class, which is now uncovered: attach_check_in it to the membership wanted) and 500 refund_failed (the old membership could not be given its session back: tell the manager).",
       params: [
         {
           name: "id",

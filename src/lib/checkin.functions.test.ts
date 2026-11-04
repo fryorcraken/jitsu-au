@@ -16,6 +16,8 @@ import {
   attachCheckInRow,
   CheckInError,
   checkInPersonRow,
+  listUncoveredCheckInRows,
+  previewCheckInRow,
   transferCheckInRow,
   undoCheckInRow,
 } from "./checkin.functions";
@@ -32,6 +34,18 @@ import {
 const ensureCasualInvoiceEmailed = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/membership.functions", () => ({
   ensureCasualInvoiceEmailed: (...args: unknown[]) => ensureCasualInvoiceEmailed(...args),
+}));
+
+/**
+ * The roster's household lookup (guardian names, contact addresses) reads auth
+ * users through an RPC the fake has no use for. Its own rules are tested in
+ * household-email.test.ts; here everybody is nobody's dependant.
+ */
+vi.mock("@/lib/household-email", () => ({
+  loadHouseholdContacts: async () => ({
+    deliveryEmail: () => null,
+    displayEmail: () => ({ onBehalfOf: null }),
+  }),
 }));
 
 type Result = { data: unknown; error: { message: string } | null; count?: number | null };
@@ -681,5 +695,182 @@ describe("attach and move refuse the wrong one of the two", () => {
         .reason,
     ).toBe("same_membership");
     expect(ofTable(calls, "session_checkins", "update")).toHaveLength(0);
+  });
+});
+
+// The agent's preview is the board's roster row for one person, built for that
+// person only: reading the whole club for one answer also meant somebody past
+// the roster's cap was told they had no waiver.
+describe("previewCheckInRow", () => {
+  const PROFILE = {
+    user_id: "u1",
+    first_name: "Sam",
+    middle_name: null,
+    last_name: "Example",
+    preferred_name: null,
+    date_of_birth: "1990-01-01",
+  };
+
+  it("reports what the door would spend, reading only that person", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok({ ...EVENT, title: "Gi" });
+      if (op.table === "profiles") return ok(PROFILE);
+      if (op.table === "session_checkins") return ok(null);
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships") return ok([trialRow()]);
+      return ok([]);
+    });
+
+    const preview = await previewCheckInRow(admin, { event_id: "evt-1", user_id: "u1" });
+    expect(preview.row).toMatchObject({
+      user_id: "u1",
+      name: "Sam Example",
+      coverage: "trial",
+      sessions_remaining_before: 2,
+      consumes_credit: true,
+    });
+    expect(preview.checkin).toBeNull();
+    // An adult's age answers nothing at the door, so it is withheld here too.
+    expect(preview.row.age).toBeNull();
+    expect(filterValue(ofTable(calls, "memberships", "select")[0], "user_id")).toEqual(["u1"]);
+    // Nothing is written by a preview.
+    expect(calls.every((c) => c.verb === "select")).toBe(true);
+  });
+
+  it("names their check-in when they are already in", async () => {
+    const existing = {
+      id: "chk-1",
+      user_id: "u1",
+      checked_in_at: CLASS_AT,
+      coverage: "trial",
+      membership_id: "mem-trial",
+      consumed_credit: true,
+      warnings: [],
+      note: null,
+    };
+    const { admin } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok(EVENT);
+      if (op.table === "profiles") return ok(PROFILE);
+      if (op.table === "session_checkins") return ok(existing);
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships") return ok([trialRow({ sessions_remaining: 1 })]);
+      return ok([]);
+    });
+
+    const { checkin } = await previewCheckInRow(admin, { event_id: "evt-1", user_id: "u1" });
+    expect(checkin).toMatchObject({ id: "chk-1", plan_name: "Free trial", name: "Sam Example" });
+  });
+
+  // check_in would refuse both, so a preview of a spend that cannot happen
+  // would be the one thing the manager confirms that is not so.
+  it("refuses a cancelled class, as check_in does", async () => {
+    const { admin } = fakeClient((op) =>
+      op.table === "calendar_events" ? ok({ ...EVENT, status: "cancelled" }) : ok(PROFILE),
+    );
+    expect(
+      (await refusal(() => previewCheckInRow(admin, { event_id: "evt-1", user_id: "u1" }))).reason,
+    ).toBe("class_cancelled");
+  });
+
+  it("refuses somebody with no waiver on file, as check_in does", async () => {
+    const { admin } = fakeClient((op) => (op.table === "calendar_events" ? ok(EVENT) : ok(null)));
+    expect(
+      (await refusal(() => previewCheckInRow(admin, { event_id: "evt-1", user_id: "u-lead" })))
+        .reason,
+    ).toBe("no_waiver");
+  });
+});
+
+// After a release there is nothing left to retry: undo finds no row, and a move
+// finds an uncovered check-in. Each failure past that point says what state it
+// left behind instead of reading as a database hiccup worth retrying.
+describe("a failure after the check-in is released", () => {
+  it("is refund_failed when an undo cannot give the session back", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins")
+        return ok({
+          id: "chk-1",
+          membership_id: "mem-trial",
+          consumed_credit: true,
+          closed_membership: false,
+        });
+      if (op.table === "memberships" && op.verb === "select")
+        return ok({ id: "mem-trial", status: "active", sessions_remaining: 1, ends_at: null });
+      return { data: null, error: { message: "connection reset" } };
+    });
+
+    const e = await refusal(() => undoCheckInRow(admin, "chk-1"));
+    expect(e.reason).toBe("refund_failed");
+    expect(e.message).not.toMatch(/try again/i);
+  });
+
+  it("is refund_failed when the balance keeps moving under both attempts", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins")
+        return ok({
+          id: "chk-1",
+          membership_id: "mem-trial",
+          consumed_credit: true,
+          closed_membership: false,
+        });
+      if (op.table === "memberships" && op.verb === "select")
+        return ok({ id: "mem-trial", status: "active", sessions_remaining: 1, ends_at: null });
+      return ok([]);
+    });
+
+    expect((await refusal(() => undoCheckInRow(admin, "chk-1"))).reason).toBe("refund_failed");
+  });
+
+  it("is move_incomplete when a move cannot put the class on the new membership", async () => {
+    const covered = {
+      id: "chk-1",
+      user_id: "u1",
+      event_id: "evt-1",
+      coverage: "period",
+      membership_id: "mem-sem",
+      consumed_credit: false,
+      closed_membership: false,
+      checked_in_at: CLASS_AT,
+    };
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins" && op.verb === "select") return ok(covered);
+      if (op.table === "session_checkins") return ok([{ id: "chk-1" }]);
+      if (op.table === "memberships" && filterValue(op, "id") !== undefined)
+        return ok({ id: "mem-trial", user_id: "u1" });
+      if (op.table === "calendar_events") return ok({ starts_at: CLASS_AT });
+      // Coverage resolution cannot read the plans.
+      return { data: null, error: { message: "connection reset" } };
+    });
+
+    const e = await refusal(() =>
+      transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-trial" }),
+    );
+    expect(e.reason).toBe("move_incomplete");
+    expect(e.message).toMatch(/attach/);
+  });
+});
+
+describe("listUncoveredCheckInRows", () => {
+  // A row with no class would be answered against when they were checked in
+  // rather than when the class ran, and reported as fact.
+  it("fails rather than report rows it could not fill", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins")
+        return ok([
+          {
+            id: "chk-1",
+            event_id: "evt-1",
+            user_id: "u1",
+            checked_in_at: CLASS_AT,
+            warnings: [],
+            note: null,
+          },
+        ]);
+      if (op.table === "calendar_events") return { data: null, error: { message: "timeout" } };
+      if (op.table === "membership_plans") return ok(PLANS);
+      return ok([]);
+    });
+
+    await expect(listUncoveredCheckInRows(admin)).rejects.toThrow("timeout");
   });
 });

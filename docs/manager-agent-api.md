@@ -722,14 +722,21 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   are `docs/check-in.md`. Refusals are `CheckInError`'s `reason` as the error
   code: `404 not_found`, `422 no_waiver`, `409 class_cancelled`,
   `409 already_covered` / `409 not_covered` (each names the other action),
-  `409 same_membership`, `409 claim_lost` and `422 not_their_membership`. What
-  is the agent's alone, and why:
+  `409 same_membership`, `409 claim_lost` and `422 not_their_membership`, plus
+  two that follow a release and so must not be retried: `500 refund_failed`
+  (a session that could not be given back) and `500 move_incomplete` (a move
+  that gave the old membership its session back but left the class
+  uncovered). Each has its own code rather than `db_error` so its message, which
+  says what state it left behind, reaches the caller. What is the agent's
+  alone, and why:
   - **A preview is a read.** The screen shows what a tap will spend before the
-    tap; `get_check_in_preview` is that badge, read off the same board
-    (`agentCheckInPreview` in `src/lib/manager-agent.ts`, worded by the same
-    `coveragePreviewLabel`), so the MCP server can run it without asking and
-    the agent can read it back to the manager before `check_in`, which is on
-    the change side. It reports nothing the roster row does not, and leaves out
+    tap; `get_check_in_preview` is that badge, built for one person by the
+    board's own row builder (`previewCheckInRow`, projected by
+    `agentCheckInPreview` and worded by the same `coveragePreviewLabel`), so the
+    MCP server can run it without asking and the agent can read it back to the
+    manager before `check_in`, which is on the change side. It refuses what
+    `check_in` refuses (a cancelled class, no waiver), so it never describes a
+    spend that cannot happen. It reports nothing the roster row does not, and leaves out
     one thing it does: the roster's `email` is a search key resolved through a
     guardian and is never printed on the screen, so under a child's name it
     would read as the child's mailbox. `get_user` reports addresses with the
