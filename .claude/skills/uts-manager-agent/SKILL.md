@@ -7,7 +7,7 @@ description: >-
   details, file a scanned paper waiver, edit and publish the waiver template
   people sign and the code of conduct members agree to, manage the club's membership dates, publish and reorder the
   club's knowledge base and read members' comments on it, keep the club
-  calendar) against the live site
+  calendar, check people in to classes and keep attendance) against the live site
   via its manager agent HTTP API. Use when a club
   manager asks an agent to look up members/invoices, check one person's state
   (verification, code of conduct, waivers, attendance, profile), put a member on a plan or
@@ -27,7 +27,8 @@ description: >-
   upload its pictures, or see what is on the club
   calendar and who is coming, add a class or event (once or weekly), edit,
   cancel or restore a date, stop a weekly class, or delete one added by
-  mistake. Requires the
+  mistake, or check somebody in to a class, see who was at one, undo a
+  check-in, or change which membership paid for it. Requires the
   UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
 ---
 
@@ -222,8 +223,9 @@ server never actually checked, so retry it.
 
 Some things a manager does from the person page are deliberately **not**
 actions: approving a waiver, changing somebody's login email, resending the
-verification email, correcting kit sizes, opening the waiver PDF, and moving
-check-in coverage. Tell the manager to do those on the page.
+verification email, correcting kit sizes and opening the waiver PDF. Tell the
+manager to do those on the page. Attaching and moving check-in cover are
+actions: see "Check-in and attendance" below.
 
 ### `list_invoices` — find an invoice to edit
 
@@ -489,10 +491,12 @@ closes the membership and keeps the record (`edit_invoice` with
 >   and there will not be one.** Unlike `edit_invoice`'s paid guard this is not
 >   a judgement call you can override: a paid invoice is the club's record that
 >   money moved. Cancel it instead.
-> - **`attended`** — a class was checked in against it. **You cannot clear this
->   one.** It is cleared by moving those check-ins to another membership, which
->   is a manager-screen action; this API cannot move a check-in. Tell the
->   manager what is blocking it and leave it to them.
+> - **`attended`** — a class was checked in against it. It is cleared by moving
+>   those check-ins to another of the person's memberships with
+>   `move_check_in` (`get_user` lists them, each with its `id` and
+>   `membership_id`). That changes what paid for a class somebody trained in,
+>   so tell the manager which classes and which membership, and move them only
+>   once they agree.
 >
 > Being **active is not a blocker**. Every membership is authorised from the
 > moment it is raised, so there is nothing to cancel first.
@@ -1470,9 +1474,8 @@ signed in to the site can reply, so each `email` is that person's own. A date
 that is not there is `404 not_found`, so an empty list always means nobody has
 replied.
 
-A reply is not attendance. Who actually turned up is a check-in, made on the
-manager's check-in screen and read per person through `get_user`'s `checkins`;
-this API cannot make or change one. Deleting a date, or stopping a repeat,
+A reply is not attendance. Who actually turned up is a check-in: see "Check-in
+and attendance" below. Deleting a date, or stopping a repeat,
 does remove the check-ins on the dates that go, as clean-up: say so to the
 manager before either.
 
@@ -1690,6 +1693,138 @@ already checked in. The result is `{ deleted: true, id, checkins_removed }`.
 - **`404 not_found`**: there is no such date. It was already deleted, or a
   stopped repeat took it.
 
+### Check-in and attendance
+
+Who was on the mat, and what paid for it. These eight actions are the agent's
+equivalent of the manager's Check-in screen at `/manager/check-in` and the
+attendance controls on a person's page, through the same functions those
+screens call, so a check-in you make is exactly the one a manager makes at the
+door. The product rules are the club's, not yours to decide:
+
+> [!IMPORTANT]
+>
+> - **A check-in spends a session.** In order: a free trial credit, then a
+>   casual class credit, then an unlimited semester membership, which is never
+>   used up. Yearly insurance never pays for a class. **Preview it first** with
+>   `get_check_in_preview` and read its `label` back to the manager.
+> - **Nobody is ever refused for want of cover.** With nothing to pay for it,
+>   the person is still checked in, with `coverage: "none"`, and it goes on
+>   `list_uncovered_check_ins` until it is attached. That is not an error, and
+>   not a reason to skip them: they trained.
+> - **Only somebody with a waiver on file can be checked in** (`422
+no_waiver`). A lead who registered interest has to sign the waiver first.
+> - **Coverage is the trainee's own.** A parent's membership never pays for a
+>   child's class, or the other way round (`422 not_their_membership`).
+> - **A check-in on a casual class credit can email** that credit's invoice,
+>   or its receipt if paid, to whoever pays for the person, when it has not
+>   gone already. Nothing else here emails anybody.
+> - **Every `event_id` is a calendar date's `id`**, the same one
+>   `list_calendar_events` reports. A check-in's own `id` is what undo, attach
+>   and move take.
+
+### `list_check_in_classes` — the classes near today
+
+```bash
+scripts/agent.sh list_check_in_classes '{}'
+```
+
+Takes no params and refuses any. Every class from 14 days before today to 14
+days after, oldest first, each with `id`, `title`, `starts_at` / `ends_at`
+(UTC), `starts_local` / `ends_local` (club time), `weekday`, `status`,
+`instructor_name`, `location` and `checked_in_count`. A manager says "tonight's
+class" or "last Thursday's": match on `weekday` and `starts_local`, never on
+your own sums from UTC. A cancelled class cannot be checked in to. A class
+further out is on `list_calendar_events`, and its id works here just the same.
+
+### `list_attendance` — who was at one class
+
+```bash
+scripts/agent.sh list_attendance '{"event_id":"<class id>"}'
+```
+
+`{ event, count, checkins }`, newest first. Each check-in has `id`, `user_id`,
+`name`, `checked_in_at`, `coverage` (`trial | session | period | none`, where
+`session` is a casual class credit), `membership_id` and `plan_name` (what paid
+for it), `consumed_credit`, `warnings` and `note`. One person's attendance over
+time is `get_user`'s `checkins`, and their total is `sessions_attended`.
+
+### `get_check_in_preview` — what a check-in would spend
+
+```bash
+scripts/agent.sh get_check_in_preview '{"event_id":"<class id>","user_id":"<uuid>"}'
+```
+
+The badge the screen shows beside the button. `would_spend.label` is the
+manager's own wording (`"Free trial, 2 left"`, `"One semester"`, `"No cover"`),
+so read it back as it is. `warnings` say why when nothing pays
+(`payment_pending`, `credits_exhausted`, `not_started` and so on).
+`already_checked_in: true` comes with their `checkin` and `would_spend: null`.
+`guardian_name` and `age` are set only for somebody on another person's
+account, and are what tell two children in one family apart: say both when
+confirming a child.
+
+### `check_in` — mark somebody as there
+
+```bash
+scripts/agent.sh check_in '{"event_id":"<class id>","user_id":"<uuid>"}'
+scripts/agent.sh check_in '{"event_id":"<class id>","user_id":"<uuid>","note":"Arrived late"}'
+```
+
+Returns `{ already_checked_in, checkin_id, decision }`, where `decision` says
+what paid (`coverage`, `plan_name`, `membership_id`), whether a session was
+spent (`consumes_credit`, `sessions_remaining_before` / `_after`) and whether
+that was their last (`closes_membership`: worth telling the manager, it is
+when somebody needs to sign up). **Safe to send again**: somebody already in
+comes back `already_checked_in: true` with their `checkin_id` and nothing spent,
+so a call you never heard back from can simply be repeated. `409
+class_cancelled` means the class was called off; if it did run after all, it
+has to be restored on the calendar first, which is the manager's call.
+
+### `undo_check_in` — remove a check-in
+
+```bash
+scripts/agent.sh undo_check_in '{"id":"<check-in id>"}'
+```
+
+Deletes it and gives back any session it spent, reopening the membership if
+this check-in is what finished it. `{ id, removed, refunded, reopened }`;
+`removed: false` means it was already gone, and nothing changed. When they
+trained goes with it, so **do not undo to change what paid**: that is
+`move_check_in` or `attach_check_in`.
+
+### `attach_check_in` — cover a check-in nothing paid for
+
+```bash
+scripts/agent.sh list_uncovered_check_ins '{}'
+scripts/agent.sh attach_check_in '{"id":"<check-in id>"}'
+scripts/agent.sh attach_check_in '{"id":"<check-in id>","membership_id":"<uuid>"}'
+```
+
+`list_uncovered_check_ins` is the needs-attention list (newest first, capped
+at 100). A row with `would_cover: true` can usually be attached with no
+`membership_id`: the door's rules now find something, typically because a
+payment has landed. To choose, name one of the row's `memberships` marked
+`usable`; the others carry a `reason`. If nothing can pay, the result's
+`decision.coverage` is still `none`, with `warnings` saying why: it stays on
+the list, and that is not an error. `409 already_covered` means something pays
+for it already (use `move_check_in`); `409 claim_lost` means another manager
+covered it first, and nothing was spent.
+
+### `move_check_in` — change which membership paid
+
+```bash
+scripts/agent.sh move_check_in '{"id":"<check-in id>","membership_id":"<uuid>"}'
+```
+
+For a check-in covered by the wrong membership, and to clear an `attended`
+blocker on `delete_invoice`. The old membership gets its session back first,
+then the new one pays as the door would have. If it cannot (no sessions left,
+or its dates do not cover that class), the check-in lands uncovered with
+`warnings` saying why and goes on `list_uncovered_check_ins`, while the old
+membership keeps its session back. So check the target with the manager
+before moving. `409 not_covered` means nothing pays for it yet (use
+`attach_check_in`); `409 same_membership` means it is already there.
+
 ## Guidance
 
 - Confirm the target invoice with the manager (member name + amount) before an
@@ -1718,6 +1853,13 @@ already checked in. The result is `{ deleted: true, id, checkins_removed }`.
   subscribers' calendar apps, and nobody is emailed about it, so there is no
   later step where a wrong day gets caught. When they say a class is off,
   cancel it; delete only what should never have been added.
+- Before checking anybody in, name the person and the class back to the
+  manager (the class by its weekday and club-time start) with what it will
+  spend, from `get_check_in_preview`'s `label`. With several people at once,
+  list them all and get one yes for the list. Where a name matches more than
+  one person, ask rather than pick: checking in the wrong sibling files the
+  class against the wrong child's attendance and credit, and nothing on any
+  screen looks wrong afterwards.
 - Before a `file_waiver` batch, confirm scope with the manager: how many
   records, whether any should be flagged for review rather than filed
   automatically, and that leaving everything pending (not approved) is what
@@ -1738,7 +1880,7 @@ already checked in. The result is `{ deleted: true, id, checkins_removed }`.
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"32"`), and its
+- The manifest's `version` tells generations apart (currently `"35"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

@@ -54,6 +54,13 @@ import {
   eventRsvpsSchema,
   stopRepeatingSchema,
   updateCalendarEntrySchema,
+  agentNoCheckInParamsSchema,
+  agentListAttendanceSchema,
+  agentCheckInPreviewSchema,
+  agentCheckInSchema,
+  agentUndoCheckInSchema,
+  agentAttachCheckInSchema,
+  agentMoveCheckInSchema,
   type BlogPostKind,
 } from "@/lib/validation";
 import type { ManagerAgentAction } from "@/lib/validation";
@@ -65,7 +72,10 @@ import {
   classifyAction,
   diffInvoicePatch,
   invoiceEditAudit,
+  agentCheckInPreview,
   projectAgentCalendarEvent,
+  projectAgentCheckInClass,
+  projectAgentUncoveredCheckIn,
   projectAgentCodeOfConductVersion,
   mergeAgentBlogPostEdit,
   projectAgentBlogPost,
@@ -209,6 +219,17 @@ import {
   updateCalendarEntryRow,
 } from "@/lib/calendar.functions";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
+import {
+  attachCheckInRow,
+  CheckInError,
+  type CheckInRefusal,
+  checkInPersonRow,
+  listCheckInEventRows,
+  listUncoveredCheckInRows,
+  loadCheckInBoard,
+  transferCheckInRow,
+  undoCheckInRow,
+} from "@/lib/checkin.functions";
 
 /**
  * Resolve auth emails (the one email store) for a set of user ids via the
@@ -2527,6 +2548,184 @@ async function handleDeleteCalendarEntry(params: unknown, actingAs: string) {
   return { deleted: true, id: input.id, checkins_removed: result.checkins_removed };
 }
 
+// ---- check-in ----
+//
+// Through the plain functions in checkin.functions.ts that the manager's
+// Check-in screen and person page also call, so a check-in an agent makes,
+// covers, moves or undoes is the same row moved the same way as a manager's
+// own, with the same credit spent or given back, and refused for the same
+// reasons in the same words. A check-in on a casual credit can email that
+// credit's invoice or receipt (`ensureCasualInvoiceEmailed`), as at the door.
+
+/** HTTP status for each refusal: no such thing, a state in the way, or a request that can never work. */
+const CHECK_IN_REFUSAL_STATUS: Record<CheckInRefusal, number> = {
+  not_found: 404,
+  no_waiver: 422,
+  class_cancelled: 409,
+  already_covered: 409,
+  not_covered: 409,
+  same_membership: 409,
+  claim_lost: 409,
+  not_their_membership: 422,
+};
+
+/** Run a shared check-in call, answering its refusals in the endpoint's envelope. */
+async function onCheckIn<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (e instanceof AgentError) throw e;
+    if (e instanceof CheckInError) {
+      throw new AgentError(CHECK_IN_REFUSAL_STATUS[e.reason], e.reason, e.message);
+    }
+    // Anything else is a database error's own text: it stays in the server log.
+    throw new AgentError(
+      500,
+      "db_error",
+      e instanceof Error ? e.message : "Check-ins could not be read.",
+    );
+  }
+}
+
+/**
+ * The audit line every check-in write leaves in the server log. A check-in
+ * spends or gives back a session, and the row records who put somebody on the
+ * mat but not who later moved or removed it, so the log is where an agent's
+ * hand in it is findable.
+ */
+function checkInAudit(action: string, detail: Record<string, unknown>, actingAs: string) {
+  console.info(`[agent.${action}] audit`, JSON.stringify({ ...detail, actor: actingAs }));
+}
+
+// ---- action: list_check_in_classes ----
+async function handleListCheckInClasses(params: unknown) {
+  agentNoCheckInParamsSchema.parse(params ?? {});
+  const db = await adminClient();
+  const classes = await onCheckIn(() => listCheckInEventRows(db));
+  return {
+    time_zone: CLUB_TIME_ZONE,
+    count: classes.length,
+    classes: classes.map(projectAgentCheckInClass),
+  };
+}
+
+// ---- action: list_attendance ----
+async function handleListAttendance(params: unknown) {
+  const input = agentListAttendanceSchema.parse(params ?? {});
+  const db = await adminClient();
+  const board = await onCheckIn(() => loadCheckInBoard(db, input));
+  // The roster (everybody who COULD be checked in) is the screen's search list,
+  // not attendance; one person's view of it is get_check_in_preview.
+  return {
+    time_zone: CLUB_TIME_ZONE,
+    event: projectAgentCheckInClass({ ...board.event, checked_in_count: board.checkins.length }),
+    count: board.checkins.length,
+    checkins: board.checkins,
+  };
+}
+
+// ---- action: get_check_in_preview ----
+async function handleGetCheckInPreview(params: unknown) {
+  const input = agentCheckInPreviewSchema.parse(params ?? {});
+  const db = await adminClient();
+  const board = await onCheckIn(() => loadCheckInBoard(db, input));
+  const preview = agentCheckInPreview(board, input.user_id);
+  if (!preview) {
+    // The same refusal, in the same words, that check_in would give.
+    throw new AgentError(
+      CHECK_IN_REFUSAL_STATUS.no_waiver,
+      "no_waiver",
+      "Only someone with a waiver on file can be checked in.",
+    );
+  }
+  return { time_zone: CLUB_TIME_ZONE, ...preview };
+}
+
+// ---- action: list_uncovered_check_ins ----
+async function handleListUncoveredCheckIns(params: unknown) {
+  agentNoCheckInParamsSchema.parse(params ?? {});
+  const db = await adminClient();
+  const rows = await onCheckIn(() => listUncoveredCheckInRows(db));
+  return {
+    time_zone: CLUB_TIME_ZONE,
+    count: rows.length,
+    checkins: rows.map(projectAgentUncoveredCheckIn),
+  };
+}
+
+// ---- action: check_in ----
+async function handleCheckIn(params: unknown, actingAs: string) {
+  const input = agentCheckInSchema.parse(params ?? {});
+  const db = await adminClient();
+  // `actingAs` is recorded as `checked_in_by`, as the screen records the
+  // manager at the door: the token's owner vouched for this person being there.
+  const result = await onCheckIn(() => checkInPersonRow(db, input, actingAs));
+  checkInAudit(
+    "check_in",
+    {
+      eventId: input.event_id,
+      userId: input.user_id,
+      checkinId: result.checkin_id,
+      alreadyCheckedIn: result.already_checked_in,
+      coverage: result.decision?.coverage ?? null,
+      membershipId: result.decision?.membership_id ?? null,
+      consumedCredit: result.decision?.consumes_credit ?? false,
+    },
+    actingAs,
+  );
+  return result;
+}
+
+// ---- action: undo_check_in ----
+async function handleUndoCheckIn(params: unknown, actingAs: string) {
+  const input = agentUndoCheckInSchema.parse(params ?? {});
+  const db = await adminClient();
+  const result = await onCheckIn(() => undoCheckInRow(db, input.id));
+  checkInAudit("undo_check_in", { checkinId: input.id, ...result }, actingAs);
+  return {
+    id: input.id,
+    removed: result.removed,
+    refunded: result.refunded,
+    reopened: result.reopened ?? false,
+  };
+}
+
+// ---- action: attach_check_in ----
+async function handleAttachCheckIn(params: unknown, actingAs: string) {
+  const input = agentAttachCheckInSchema.parse(params ?? {});
+  const db = await adminClient();
+  const result = await onCheckIn(() => attachCheckInRow(db, input));
+  checkInAudit(
+    "attach_check_in",
+    {
+      checkinId: input.id,
+      asked: input.membership_id ?? null,
+      coverage: result.decision.coverage,
+      membershipId: result.decision.membership_id,
+    },
+    actingAs,
+  );
+  return { id: input.id, decision: result.decision };
+}
+
+// ---- action: move_check_in ----
+async function handleMoveCheckIn(params: unknown, actingAs: string) {
+  const input = agentMoveCheckInSchema.parse(params ?? {});
+  const db = await adminClient();
+  const result = await onCheckIn(() => transferCheckInRow(db, input));
+  checkInAudit(
+    "move_check_in",
+    {
+      checkinId: input.id,
+      asked: input.membership_id,
+      coverage: result.decision.coverage,
+      membershipId: result.decision.membership_id,
+    },
+    actingAs,
+  );
+  return { id: input.id, decision: result.decision };
+}
+
 /**
  * Run one action. `requestOrigin` is the address the request came in on, where
  * a front door knows it; only links an action hands out read it.
@@ -2638,5 +2837,21 @@ export async function dispatch(
       return handleStopCalendarRepeat(params, actingAs);
     case "delete_calendar_entry":
       return handleDeleteCalendarEntry(params, actingAs);
+    case "list_check_in_classes":
+      return handleListCheckInClasses(params);
+    case "list_attendance":
+      return handleListAttendance(params);
+    case "get_check_in_preview":
+      return handleGetCheckInPreview(params);
+    case "list_uncovered_check_ins":
+      return handleListUncoveredCheckIns(params);
+    case "check_in":
+      return handleCheckIn(params, actingAs);
+    case "undo_check_in":
+      return handleUndoCheckIn(params, actingAs);
+    case "attach_check_in":
+      return handleAttachCheckIn(params, actingAs);
+    case "move_check_in":
+      return handleMoveCheckIn(params, actingAs);
   }
 }

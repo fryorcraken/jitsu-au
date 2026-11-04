@@ -19,7 +19,11 @@ import {
   mergeAgentBlogPostEdit,
   projectAgentBlogPost,
   projectAgentCalendarEvent,
+  agentCheckInPreview,
+  projectAgentCheckInClass,
+  projectAgentUncoveredCheckIn,
 } from "./manager-agent";
+import { isReadAction } from "./mcp/actions";
 import {
   createInvoiceSchema,
   deleteInvoiceSchema,
@@ -501,7 +505,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("34");
+    expect(AGENT_MANIFEST.version).toBe("35");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -1198,5 +1202,149 @@ describe("projectAgentCalendarEvent", () => {
       location: "Alumni Green",
       description: null,
     });
+  });
+});
+
+describe("check-in on the agent API", () => {
+  // The same 07:30 Thursday class the calendar tests use: 20:30 UTC Wednesday.
+  const morningClass = {
+    id: "0b6f1d2e-3c4a-4b5c-8d6e-7f8091a2b3c4",
+    title: "Early Gi",
+    instructor_name: null,
+    location: "Alumni Green",
+    starts_at: "2026-11-04T20:30:00.000Z",
+    ends_at: "2026-11-04T21:30:00.000Z",
+    status: "scheduled",
+  };
+
+  const rosterRow = {
+    user_id: "u-member",
+    name: "Sam Example",
+    // The screen's search key, resolved through a guardian: never reported.
+    email: "parent@example.com",
+    guardian_name: null,
+    age: null,
+    coverage: "trial",
+    plan_name: "Free trial",
+    sessions_remaining_before: 2,
+    consumes_credit: true,
+    warnings: [],
+  };
+
+  const board = { event: morningClass, roster: [rosterRow], checkins: [] };
+
+  it("reports a class in club time, as the calendar actions do", () => {
+    expect(projectAgentCheckInClass({ ...morningClass, checked_in_count: 4 })).toMatchObject({
+      id: morningClass.id,
+      starts_local: "2026-11-05T07:30",
+      ends_local: "2026-11-05T08:30",
+      weekday: "Thursday",
+      status: "scheduled",
+      checked_in_count: 4,
+    });
+  });
+
+  it("carries checked_in_count only when the read counted it", () => {
+    expect(projectAgentCheckInClass(morningClass)).not.toHaveProperty("checked_in_count");
+  });
+
+  it("gives an uncovered check-in's class its club-time day, and survives a class gone", () => {
+    const row = { id: "c1", event_starts_at: morningClass.starts_at };
+    expect(projectAgentUncoveredCheckIn(row)).toMatchObject({
+      id: "c1",
+      event_starts_local: "2026-11-05T07:30",
+      event_weekday: "Thursday",
+    });
+    expect(projectAgentUncoveredCheckIn({ id: "c2", event_starts_at: null })).toMatchObject({
+      event_starts_local: null,
+      event_weekday: null,
+    });
+  });
+
+  // The preview is the screen's roster row, so an agent reads back to the
+  // manager what the screen shows beside the button, in the same words.
+  it("previews what the door would spend, labelled as the screen labels it", () => {
+    const preview = agentCheckInPreview(board, "u-member");
+    expect(preview).toMatchObject({
+      user_id: "u-member",
+      name: "Sam Example",
+      already_checked_in: false,
+      checkin: null,
+      would_spend: {
+        label: "Free trial, 2 left",
+        coverage: "trial",
+        consumes_credit: true,
+        sessions_remaining_before: 2,
+      },
+    });
+    expect(preview?.event.weekday).toBe("Thursday");
+  });
+
+  it("never reports the roster's search address", () => {
+    expect(JSON.stringify(agentCheckInPreview(board, "u-member"))).not.toContain(
+      "parent@example.com",
+    );
+  });
+
+  it("is null for somebody not on the roster, which is having no waiver on file", () => {
+    expect(agentCheckInPreview(board, "u-lead")).toBeNull();
+  });
+
+  // A second check-in to the same class spends nothing, so previewing a spend
+  // for somebody already in would describe a credit that never moves.
+  it("previews no spend for somebody already checked in, and names their check-in", () => {
+    const checkin = { id: "c1", user_id: "u-member", coverage: "trial" };
+    const preview = agentCheckInPreview({ ...board, checkins: [checkin] }, "u-member");
+    expect(preview?.already_checked_in).toBe(true);
+    expect(preview?.checkin).toEqual(checkin);
+    expect(preview?.would_spend).toBeNull();
+  });
+
+  it("says No cover when nothing would pay", () => {
+    const none = {
+      ...rosterRow,
+      coverage: "none",
+      plan_name: null,
+      sessions_remaining_before: null,
+      consumes_credit: false,
+      warnings: ["no_cover"],
+    };
+    const preview = agentCheckInPreview({ ...board, roster: [none] }, "u-member");
+    expect(preview?.would_spend).toMatchObject({ label: "No cover", warnings: ["no_cover"] });
+  });
+
+  // The MCP server runs reads without asking and changes only after the
+  // manager says yes; the split is by name, so the names have to say it.
+  it("puts the reads on the read side and every write on the change side", () => {
+    for (const a of [
+      "list_check_in_classes",
+      "list_attendance",
+      "get_check_in_preview",
+      "list_uncovered_check_ins",
+    ])
+      expect(isReadAction(a)).toBe(true);
+    for (const a of ["check_in", "undo_check_in", "attach_check_in", "move_check_in"])
+      expect(isReadAction(a)).toBe(false);
+  });
+
+  it("no longer tells an agent that check-ins cannot be moved through the API", () => {
+    const deleteInvoice = AGENT_MANIFEST.actions.find((a) => a.name === "delete_invoice")!;
+    expect(deleteInvoice.summary).toMatch(/move_check_in/);
+    expect(deleteInvoice.summary).not.toMatch(/not available through this API/);
+  });
+
+  it("records the check-in actions in the changelog", () => {
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "35")!.notes.join(" ");
+    for (const a of [
+      "list_check_in_classes",
+      "list_attendance",
+      "get_check_in_preview",
+      "list_uncovered_check_ins",
+      "check_in",
+      "undo_check_in",
+      "attach_check_in",
+      "move_check_in",
+    ])
+      expect(notes).toContain(a);
   });
 });

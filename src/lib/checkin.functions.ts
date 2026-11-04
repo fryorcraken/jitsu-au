@@ -52,6 +52,7 @@ type CheckinClient = SupabaseClient<Database>;
  *   move for a covered one; each names the other.
  * - `same_membership`: a move onto the membership it is already on.
  * - `claim_lost`: another manager attached or moved the same check-in first.
+ * - `not_their_membership`: the membership named belongs to somebody else.
  */
 export type CheckInRefusal =
   | "not_found"
@@ -60,7 +61,8 @@ export type CheckInRefusal =
   | "already_covered"
   | "not_covered"
   | "same_membership"
-  | "claim_lost";
+  | "claim_lost"
+  | "not_their_membership";
 
 export class CheckInError extends Error {
   reason: CheckInRefusal;
@@ -73,6 +75,36 @@ export class CheckInError extends Error {
 
 const NO_SUCH_CLASS = "That class is not on the calendar.";
 const NO_SUCH_CHECK_IN = "That check-in no longer exists.";
+
+/**
+ * Refuse a named membership that is not the check-in's own person's.
+ *
+ * Coverage is strictly personal (`docs/check-in.md`), and `resolveCoverage`
+ * reads a foreign id as "nothing eligible", so without this an attach would
+ * land uncovered and say nothing more, and a MOVE would first release the
+ * check-in and refund its real cover, then land it uncovered: a correction that
+ * quietly makes things worse. The screens can never send one (they only offer
+ * the person's own memberships), but the manager agent API takes any id an
+ * agent types, so the guard lives here where both doors pass through it.
+ */
+async function assertMembershipIsTheirs(
+  admin: CheckinClient,
+  membershipId: string,
+  userId: string,
+): Promise<void> {
+  const { data: m, error } = await admin
+    .from("memberships")
+    .select("id, user_id")
+    .eq("id", membershipId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!m) throw new CheckInError("not_found", "That membership no longer exists.");
+  if (m.user_id !== userId)
+    throw new CheckInError(
+      "not_their_membership",
+      "That membership belongs to somebody else. A class is only covered by the membership of the person who trained.",
+    );
+}
 
 /** How far either side of today the class picker looks. */
 const EVENT_WINDOW_DAYS = 14;
@@ -497,7 +529,9 @@ export async function loadCheckInBoard(admin: CheckinClient, data: { event_id: s
       .limit(ROSTER_LIMIT),
     admin
       .from("session_checkins")
-      .select("id, user_id, checked_in_at, coverage, membership_id, consumed_credit, warnings")
+      .select(
+        "id, user_id, checked_in_at, coverage, membership_id, consumed_credit, warnings, note",
+      )
       .eq("event_id", data.event_id)
       .order("checked_in_at", { ascending: false }),
   ]);
@@ -555,9 +589,11 @@ export async function loadCheckInBoard(admin: CheckinClient, data: { event_id: s
       name: nameByUser.get(c.user_id) ?? null,
       checked_in_at: c.checked_in_at,
       coverage: c.coverage,
+      membership_id: c.membership_id,
       plan_name: c.membership_id ? (planByMembership.get(c.membership_id) ?? null) : null,
       consumed_credit: c.consumed_credit,
       warnings: c.warnings,
+      note: c.note,
     })),
   };
 }
@@ -696,7 +732,19 @@ export async function checkInPersonRow(
   if (iErr) {
     // Already on the list. Checking someone in twice is not an error at the
     // desk, so say so and stop rather than touching their credits again.
-    if (iErr.code === "23505") return { already_checked_in: true, decision: null };
+    // The existing row's id comes back with it, so a caller that was never
+    // told its first attempt landed (an agent retrying) can still undo or move
+    // the check-in it made.
+    if (iErr.code === "23505") {
+      const { data: existing, error: xErr } = await admin
+        .from("session_checkins")
+        .select("id")
+        .eq("event_id", data.event_id)
+        .eq("user_id", data.user_id)
+        .maybeSingle();
+      if (xErr) throw new Error(xErr.message);
+      return { already_checked_in: true, checkin_id: existing?.id ?? null, decision: null };
+    }
     throw new Error(iErr.message);
   }
   if (!inserted) throw new Error("Could not record the check-in.");
@@ -706,7 +754,7 @@ export async function checkInPersonRow(
     userId: data.user_id,
     at: event.starts_at,
   });
-  return { already_checked_in: false, decision };
+  return { already_checked_in: false, checkin_id: inserted.id, decision };
 }
 
 export const checkInPerson = createServerFn({ method: "POST" })
@@ -739,8 +787,9 @@ export async function attachCheckInRow(
   if (row.coverage !== "none")
     throw new CheckInError(
       "already_covered",
-      "That check-in is already covered. Undo it first to change what paid for it.",
+      "That check-in is already covered. Move it to another of their memberships to change what paid for it.",
     );
+  if (data.membership_id) await assertMembershipIsTheirs(admin, data.membership_id, row.user_id);
 
   const { data: event } = await admin
     .from("calendar_events")
@@ -808,6 +857,9 @@ export async function transferCheckInRow(
     );
   if (row.membership_id === data.membership_id)
     throw new CheckInError("same_membership", "That check-in is already on that membership.");
+  // Before the release below, which refunds the old cover: refusing after it
+  // would leave the class uncovered and the old credit handed back.
+  await assertMembershipIsTheirs(admin, data.membership_id, row.user_id);
 
   // The claim. Losing it means another manager is already moving this row.
   //

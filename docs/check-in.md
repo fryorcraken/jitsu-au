@@ -161,6 +161,12 @@ people in to a class that did not run.
    which deletes the row and loses `checked_in_at` — the record of when they were
    actually on the mat.
 
+   Attach with a named membership and Move both refuse a membership that is
+   **somebody else's**, a sibling's or a parent's included: coverage is the
+   trainee's own. The screens only offer the person's own memberships, so this
+   is for the agent API, but it lives in the shared function. Without it a
+   Move would hand back the real cover first and then land uncovered.
+
    The order is the same guard Undo uses. The row is **released first**, with a
    compare-and-swap against the coverage it held, and the old membership's credit
    is refunded only once that release is won: exactly one caller can win, so
@@ -229,7 +235,8 @@ people in to a class that did not run.
 - **A member's own Membership page** — "You have trained N times." Members are
   deliberately not shown the coverage bookkeeping: "no cover" against a class
   they attended reads as an accusation.
-- **The manager agent API** — `list_users` returns `sessions_attended`.
+- **The manager agent API** — `list_users` returns `sessions_attended`,
+  `get_user` the history, and `list_attendance` one class's (see below).
 
 ## At the door, on a bad connection
 
@@ -264,16 +271,36 @@ and then reconcile. Offline check-in is on the "not built, on purpose" list
 below. The terms above are in `src/lib/checkin-cache.ts`; `docs/pwa.md` has the
 storage rules they rest on.
 
+## On the manager agent API
+
+Everything above can also be done by a manager's agent, through the same
+functions the screens call: list the classes near today, see who is checked in
+to one, preview what checking somebody in would spend, check them in, undo it,
+attach cover, move cover, and read the needs-attention list. The action
+contract is `docs/manager-agent-api.md`.
+
+Until manifest version 35 this was on the list below as deliberately not
+built, because a check-in records physical presence and spends a session, and
+should not happen on the strength of a text prompt. The club has since decided
+to allow it. What answers the original worry:
+
+- **A check-in is still a manager's act.** The agent holds a manager's own
+  token or sign-in, and the check-in records that manager as who checked the
+  person in, as at the door.
+- **The preview is a read and the check-in is a change.** An assistant runs
+  the preview without asking, and is told to read its label ("Free trial, 2
+  left") back to the manager and confirm before it checks anybody in.
+- **Every mistake has the same undo the door has.** Undo gives the session
+  back, and Move corrects what paid without losing when they trained.
+- **Nothing here is refused that the door would accept, or accepted that the
+  door would refuse.** Same function, same rules, including rule 5.
+
 ## Not built, on purpose
 
 - **Self check-in, QR codes, kiosk mode.** A manager checks people in.
 - **Back-dating to a class that never existed.** Put it on the calendar first.
 - **Attendance reports and exports.** The counts are on the screens that need
   them; a reporting surface is its own feature.
-- **A check-in action on the manager agent API.** A check-in is a
-  physical-presence act that spends real money's worth of credit, so it should
-  not happen on the strength of a text prompt — the same reason `edit_invoice`
-  refuses to activate an invoice.
 - **An expiry job.** Check-in closes memberships it finds past their end date,
   but nothing sweeps the whole table on a schedule. That is a separate change.
   The morning job does now email people whose yearly insurance is ending

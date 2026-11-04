@@ -362,13 +362,10 @@ locked | already_verified` (the record has moved on, checked again at the send);
   cancelled instead. The `attended` blocker exists because
   `session_checkins.membership_id` is `ON DELETE SET NULL` — without it the
   delete would succeed and silently turn a class somebody attended into an
-  uncovered one. Clearing it means moving those check-ins to another membership,
-  which is a **manager-screen action with no agent equivalent**: this API cannot
-  make, move or cover a check-in, and adding the first such action is a wider
-  surface decision than the change that introduced this made on its own. (It
-  does remove check-ins in one place, on purpose: a deleted calendar date, or
-  one a stopped repeat removes, takes its check-ins with it, by the club's
-  rule that a class's check-ins go when the class does.)
+  uncovered one. Clearing it means moving those check-ins to another of the
+  person's memberships with `move_check_in` (`"35"`, below). (A deleted
+  calendar date, or one a stopped repeat removes, also takes its check-ins with
+  it, by the club's rule that a class's check-ins go when the class does.)
 - `file_waiver` — file a scanned paper waiver (migration / bulk filing from
   paper records). Same params as the manager's paper-upload form
   (`paperWaiverUploadSchema`); dispatches to `filePaperWaiver` in
@@ -711,6 +708,60 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   `invite_only`, and an edit changes it like any other detail, on one date or
   that date and every later one.
 
+- `list_check_in_classes` / `list_attendance` / `get_check_in_preview` /
+  `list_uncovered_check_ins` / `check_in` / `undo_check_in` /
+  `attach_check_in` / `move_check_in` (`"35"`) — check-in and attendance, the
+  agent's equivalent of `/manager/check-in` and the attendance controls on
+  `/manager/users/<id>`. Every read and write goes through the plain functions
+  in `src/lib/checkin.functions.ts` that those screens' server functions also
+  call (`listCheckInEventRows`, `loadCheckInBoard`, `listUncoveredCheckInRows`,
+  `checkInPersonRow`, `undoCheckInRow`, `attachCheckInRow`,
+  `transferCheckInRow`), so a check-in an agent makes is the same row, spending
+  the same session, as one made at the door. The product rules (what pays for
+  a class, in what order, and why nothing is ever refused for want of cover)
+  are `docs/check-in.md`. Refusals are `CheckInError`'s `reason` as the error
+  code: `404 not_found`, `422 no_waiver`, `409 class_cancelled`,
+  `409 already_covered` / `409 not_covered` (each names the other action),
+  `409 same_membership`, `409 claim_lost` and `422 not_their_membership`. What
+  is the agent's alone, and why:
+  - **A preview is a read.** The screen shows what a tap will spend before the
+    tap; `get_check_in_preview` is that badge, read off the same board
+    (`agentCheckInPreview` in `src/lib/manager-agent.ts`, worded by the same
+    `coveragePreviewLabel`), so the MCP server can run it without asking and
+    the agent can read it back to the manager before `check_in`, which is on
+    the change side. It reports nothing the roster row does not, and leaves out
+    one thing it does: the roster's `email` is a search key resolved through a
+    guardian and is never printed on the screen, so under a child's name it
+    would read as the child's mailbox. `get_user` reports addresses with the
+    caption that says whose they are.
+  - **`list_attendance` is the board without the roster.** The roster is
+    everybody who could be checked in, which is the screen's search list and
+    not attendance. One person's view of it is the preview.
+  - **`check_in` is safe to retry, and says which row it made.** The
+    `UNIQUE (event_id, user_id)` constraint already made a second check-in a
+    no-op that spends nothing; it now also returns the existing row's
+    `checkin_id`, so a caller that never heard back can undo or move the
+    check-in it made. `checked_in_by` is the token's owner, as the screen
+    records the manager at the door.
+  - **A named membership must be the trainee's own** (`not_their_membership`).
+    Coverage is personal, and `resolveCoverage` reads a foreign id as "nothing
+    eligible", so without the guard an attach would land uncovered without
+    saying why, and a move would first refund the real cover and then land
+    uncovered. The screens only offer the person's own memberships and cannot
+    hit it; the guard is in the shared function anyway, before the move's
+    release.
+  - **Every schema is `.strict()`**, as on the calendar: a misspelt
+    `membership_id` on `attach_check_in` would otherwise be stripped, and the
+    door's own rules would spend a membership nobody asked for.
+  - **Each write leaves an audit line** in the server log
+    (`[agent.check_in]`, `[agent.undo_check_in]`, `[agent.attach_check_in]`,
+    `[agent.move_check_in]`) naming the actor. The row records who checked
+    somebody in, but not who later moved or removed it.
+  - **The only email is the door's own**: a check-in drawn on a casual class
+    credit sends that credit's invoice or receipt if it has not gone already
+    (`ensureCasualInvoiceEmailed`), whichever door it came through. Nothing
+    else here emails anybody.
+
 ### `file_waiver`: the parts that have bitten us
 
 - **The address is taken in parts (`address_parts`), and the API also takes
@@ -799,14 +850,13 @@ showed all of it. The rule, in both directions:
 **Screen-only writes, deliberately.** These are on `/manager/users/<id>` and
 have no action:
 
-| Write                                               | Why not on the API                                                                                                                                                                                                            |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setWaiverApproval` (approve a waiver)              | Outward-facing and hard to undo: it emails the person, unlocks the login of whoever the club writes to about them and assigns the free trial (`docs/waivers.md`, rule 6). Needs a product decision before an agent may do it. |
-| `setClubUserEmail` (change a login email)           | Moves the person's identity, drops their verified badge and emails the new address. Needs a product decision.                                                                                                                 |
-| `setClubUserKitSizes`                               | Reversible and sends nothing, so safe to expose. Not built because no agent workflow has asked for it yet; add it when one does.                                                                                              |
-| `getWaiverPdfUrl`                                   | A read, but of a signed legal document with health answers in it, handed out as a bearer link. `has_pdf` says whether there is one. Expose only for a caller that needs the document itself.                                  |
-| `attachCheckInCoverage` / `transferCheckInCoverage` | This API cannot make, move or cover a check-in, on purpose (see `delete_invoice` above).                                                                                                                                      |
-| `setMembershipStatus` to `active` (reopen)          | Recomputes dates and credits; `edit_invoice` refuses `active` for that reason.                                                                                                                                                |
+| Write                                      | Why not on the API                                                                                                                                                                                                            |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setWaiverApproval` (approve a waiver)     | Outward-facing and hard to undo: it emails the person, unlocks the login of whoever the club writes to about them and assigns the free trial (`docs/waivers.md`, rule 6). Needs a product decision before an agent may do it. |
+| `setClubUserEmail` (change a login email)  | Moves the person's identity, drops their verified badge and emails the new address. Needs a product decision.                                                                                                                 |
+| `setClubUserKitSizes`                      | Reversible and sends nothing, so safe to expose. Not built because no agent workflow has asked for it yet; add it when one does.                                                                                              |
+| `getWaiverPdfUrl`                          | A read, but of a signed legal document with health answers in it, handed out as a bearer link. `has_pdf` says whether there is one. Expose only for a caller that needs the document itself.                                  |
+| `setMembershipStatus` to `active` (reopen) | Recomputes dates and credits; `edit_invoice` refuses `active` for that reason.                                                                                                                                                |
 
 ### The four sync points
 
@@ -827,7 +877,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"34"`.
+test so the bump is a deliberate edit, and the current value is `"35"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call
