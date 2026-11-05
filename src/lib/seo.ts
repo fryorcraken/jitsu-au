@@ -22,7 +22,7 @@ import {
   VENUE_SUBURB,
 } from "./venue";
 import { SITE_ORIGIN, isProductionHost } from "./site-origin";
-import trainingAsset from "../assets/training1.jpg.asset.json";
+import heroAsset from "../assets/hero-dscf0691.jpg.asset.json";
 import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
 
 /**
@@ -31,16 +31,16 @@ import logoAsset from "../assets/UTS_JITSU_CMYK.png.asset.json";
  * The root route already sets `twitter:card: summary_large_image`, which asks
  * for a picture; without one, a shared link renders as a bare grey box.
  *
- * This is the same training photo used as the homepage hero
- * (`src/assets/training1.jpg.asset.json`, imported above), served from
- * Lovable's asset host rather than `public/`. Width/height match the
- * intrinsic size set on that `<img>` in `routes/index.tsx`.
+ * This is the homepage hero photo (`src/assets/hero-dscf0691.jpg.asset.json`,
+ * imported above), served from Lovable's asset host rather than `public/`.
+ * Width/height are its intrinsic size, so a crawler asking for the picture is
+ * told what it will actually get.
  */
 export const SOCIAL_IMAGE = {
-  url: `${SITE_ORIGIN}${trainingAsset.url}`,
-  width: 1600,
-  height: 1205,
-  alt: "UTS Jitsu students training on the mat",
+  url: `${SITE_ORIGIN}${heroAsset.url}`,
+  width: 1920,
+  height: 1280,
+  alt: "A UTS Jitsu student breaking his fall mid-throw while the class trains behind him",
 } as const;
 
 /**
