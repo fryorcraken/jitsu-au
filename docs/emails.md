@@ -46,7 +46,10 @@ from `email-sender.ts`. The handler can set a Reply-To (`replyTo`, since
 
 **Best-effort, everywhere.** A failed send is caught by its caller and logged,
 never thrown into the flow that triggered it: a waiver is saved, a payment is
-recorded, a membership is raised whether or not the email about it lands.
+recorded, a membership is raised whether or not the email about it lands. The
+log line names the record by its id, never the person's address: whoever reads
+the server log is not owed a member's contact details, and the id finds the row
+that holds them.
 
 **Capped, where the public can trigger it.** Four forms accept a write from
 somebody who is not signed in, and three of them email the address that was
