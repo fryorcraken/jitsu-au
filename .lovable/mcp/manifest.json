@@ -68,7 +68,11 @@
                 "list_blog_posts",
                 "get_blog_post",
                 "list_calendar_events",
-                "list_calendar_rsvps"
+                "list_calendar_rsvps",
+                "list_check_in_classes",
+                "list_attendance",
+                "get_check_in_preview",
+                "list_uncovered_check_ins"
               ],
               "description": "The read-only action to run."
             },
@@ -131,7 +135,11 @@
                 "edit_calendar_entry",
                 "cancel_calendar_entry",
                 "stop_calendar_repeat",
-                "delete_calendar_entry"
+                "delete_calendar_entry",
+                "check_in",
+                "undo_check_in",
+                "attach_check_in",
+                "move_check_in"
               ],
               "description": "The action to run."
             },

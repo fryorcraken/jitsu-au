@@ -20,6 +20,7 @@ import { versionLabel } from "@/lib/document-versions";
 import { canonicalUrl } from "@/lib/seo";
 import { SITE_ORIGIN } from "@/lib/site-origin";
 import { WEEKDAY_LABELS, clubLocalDateTime } from "@/lib/calendar";
+import { coveragePreviewLabel } from "@/lib/checkin";
 
 /** The columns `list_kb_articles` projects from. */
 export type AgentKbArticle = {
@@ -336,7 +337,6 @@ export type AgentCalendarEvent = {
  *   every later date" scope applies and whether the date can be deleted.
  */
 export function projectAgentCalendarEvent(e: AgentCalendarEvent) {
-  const startsLocal = clubLocalDateTime(new Date(e.starts_at));
   return {
     id: e.id,
     series_id: e.series_id,
@@ -344,9 +344,7 @@ export function projectAgentCalendarEvent(e: AgentCalendarEvent) {
     title: e.title,
     starts_at: e.starts_at,
     ends_at: e.ends_at,
-    starts_local: startsLocal,
-    ends_local: clubLocalDateTime(new Date(e.ends_at)),
-    weekday: WEEKDAY_LABELS[new Date(`${startsLocal.slice(0, 10)}T00:00:00Z`).getUTCDay()],
+    ...clubTimes(e.starts_at, e.ends_at),
     status: e.status,
     visibility: e.visibility,
     invite_only: e.invite_only,
@@ -354,6 +352,130 @@ export function projectAgentCalendarEvent(e: AgentCalendarEvent) {
     location: e.location,
     description: e.description,
     ...(e.rsvps && { rsvps: e.rsvps }),
+  };
+}
+
+/**
+ * A date's start and end in club time, and the club-time weekday it starts on:
+ * what every date the agent API reports carries beside its UTC instants (see
+ * `projectAgentCalendarEvent` for why). One function, so the calendar and
+ * check-in actions cannot disagree about which day a class is on.
+ */
+function clubTimes(startsAt: string, endsAt: string) {
+  const start = clubStart(startsAt);
+  return {
+    starts_local: start.local,
+    ends_local: clubLocalDateTime(new Date(endsAt)),
+    weekday: start.weekday,
+  };
+}
+
+/** An instant in club time, and the club-time weekday it falls on. */
+function clubStart(at: string) {
+  const local = clubLocalDateTime(new Date(at));
+  return {
+    local,
+    weekday: WEEKDAY_LABELS[new Date(`${local.slice(0, 10)}T00:00:00Z`).getUTCDay()],
+  };
+}
+
+/** A class as the check-in screen reads it (`listCheckInEventRows`, `loadCheckInBoard`). */
+export type AgentCheckInClass = {
+  id: string;
+  title: string;
+  instructor_name: string | null;
+  location: string | null;
+  starts_at: string;
+  ends_at: string;
+  status: string;
+  checked_in_count?: number;
+};
+
+/**
+ * One class as `list_check_in_classes`, `list_attendance` and
+ * `get_check_in_preview` report it: the check-in screen's row, plus club time.
+ * `id` is the calendar date's id, the same one `list_calendar_events` reports,
+ * because a check-in hangs off a date on the calendar.
+ */
+export function projectAgentCheckInClass(e: AgentCheckInClass) {
+  return {
+    id: e.id,
+    title: e.title,
+    starts_at: e.starts_at,
+    ends_at: e.ends_at,
+    ...clubTimes(e.starts_at, e.ends_at),
+    status: e.status,
+    instructor_name: e.instructor_name,
+    location: e.location,
+    ...(e.checked_in_count !== undefined && { checked_in_count: e.checked_in_count }),
+  };
+}
+
+/**
+ * One uncovered check-in as `list_uncovered_check_ins` reports it: the
+ * needs-attention row (`listUncoveredCheckInRows`), with its class's start in
+ * club time beside the UTC one.
+ */
+export function projectAgentUncoveredCheckIn<T extends { event_starts_at: string | null }>(r: T) {
+  const start = r.event_starts_at ? clubStart(r.event_starts_at) : null;
+  return {
+    ...r,
+    event_starts_local: start?.local ?? null,
+    event_weekday: start?.weekday ?? null,
+  };
+}
+
+/** What `previewCheckInRow` reads: the class, one roster row, their check-in to it. */
+export type AgentCheckInPreviewInput = {
+  event: AgentCheckInClass;
+  row: {
+    user_id: string;
+    name: string | null;
+    guardian_name: string | null;
+    age: number | null;
+    coverage: string;
+    plan_name: string | null;
+    sessions_remaining_before: number | null;
+    consumes_credit: boolean;
+    warnings: string[];
+  };
+  checkin: { id: string; user_id: string } | null;
+};
+
+/**
+ * What checking one person in to one class would do, as `get_check_in_preview`
+ * reports it. The row is built by the door screen's own roster builder, so what
+ * an agent reads back to a manager and what the screen shows beside the button
+ * are the same answer, worded by the same `coveragePreviewLabel`.
+ *
+ * Deliberately leaves out the roster row's `email`. On the screen it is only a
+ * search key, resolved through the guardian, and it is never printed; printed
+ * bare under a child's name it would read as the child's mailbox. `get_user`
+ * reports the address with the caption that says whose it is.
+ */
+export function agentCheckInPreview({ event, row, checkin }: AgentCheckInPreviewInput) {
+  return {
+    event: projectAgentCheckInClass(event),
+    user_id: row.user_id,
+    name: row.name,
+    // Set for somebody on another person's account, with their age: what tells
+    // two children in one family apart (`rosterHouseholdFields`).
+    guardian_name: row.guardian_name,
+    age: row.age,
+    already_checked_in: checkin !== null,
+    checkin,
+    // Null once they are in: a second check-in to the same class spends
+    // nothing, so a preview of one would describe a credit that never moves.
+    would_spend: checkin
+      ? null
+      : {
+          label: coveragePreviewLabel(row),
+          coverage: row.coverage,
+          plan_name: row.plan_name,
+          consumes_credit: row.consumes_credit,
+          sessions_remaining_before: row.sessions_remaining_before,
+          warnings: row.warnings,
+        },
   };
 }
 
@@ -380,7 +502,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "34",
+  version: "35",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -393,6 +515,16 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "35",
+      // New actions, and nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "Check-in and attendance, the agent's equivalent of the manager's Check-in screen and the attendance controls on a person's page, through the same functions those screens call. New read actions: list_check_in_classes (classes from 14 days back to 14 ahead, with checked_in_count), list_attendance (who is checked in to one class), get_check_in_preview (what checking one person in to one class would spend, the badge the screen shows beside the button) and list_uncovered_check_ins (the needs-attention list).",
+        "New change actions: check_in (spends a session, as at the door; never refused for want of cover), undo_check_in (removes a check-in and gives its session back), attach_check_in (covers an uncovered check-in) and move_check_in (puts a covered check-in on another of the person's memberships). A check-in drawn on a casual class credit emails that credit's invoice or receipt if it has not gone already, as at the door; nothing else here emails anybody.",
+        "An attended blocker on delete_invoice can now be cleared through the API, with move_check_in. get_user's checkins carry the id those actions take.",
+      ],
+    },
     {
       version: "34",
       // One new optional param and one new response field. Nothing that
@@ -802,7 +934,7 @@ export const AGENT_MANIFEST: {
       name: "get_user",
       method: "POST",
       summary:
-        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: first, middle, last and preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at, checkin_count and insurance_reminder (see list_invoices); list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at, approver, and is_paper: true for a scanned paper form filed by a manager). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
+        "Everything the manager person page (/manager/users/<id>) shows about one person, from the same read: `user` (headline: name, email + email_belongs_to, email_confirmed_at, phone, roles, lifecycle_status, sessions_attended, latest_plan_kind, latest_membership_status, latest_sessions_remaining, first_seen_at), `profile` (the club's live record: first, middle, last and preferred name, date of birth, address, UTS student number, emergency contact, medical notes, is_minor and the guardian block, SMS/WhatsApp consent, gi and belt size, media_consent with who set it and when), `household` (guardian and dependants, by id and name), `memberships` (each with plan_name, kind, status, price_cents, payment_reference, dates, sessions_remaining, paid_at, checkin_count and insurance_reminder (see list_invoices); list_users' `invoices` carries the money detail such as payment_method and notes), `checkins` (attendance, newest first, capped at 100; `user.sessions_attended` is the exact total; each with the id undo_check_in, attach_check_in and move_check_in take, and the membership_id that paid for it), `code_of_conduct` (state unsigned | signed | outdated, current_version, accepted_version, accepted_at, signature_name), and `waivers` (every submission as signed, with status, template_version, signed_at, has_pdf, approved_at, approver, and is_paper: true for a scanned paper form filed by a manager). As on list_users, a dependant's `email` is their guardian's and `email_belongs_to` says so: report the two together or neither. Read-only. A lead has no person record, so 404 not_found; a read that could not fill any part (the address, the code of conduct, a name) is 500 db_error rather than a guess; retry it.",
       params: [
         {
           name: "user_id",
@@ -946,7 +1078,7 @@ export const AGENT_MANIFEST: {
       name: "delete_invoice",
       method: "POST",
       summary:
-        "Delete an invoice outright, for tidying up one that should never have existed. Refused with 409 invoice_not_deletable when a payment is recorded against it, or when a class was checked in against it; error.details.blockers names EVERY reason at once (paid | attended) so clearing one does not walk into the next. Being active is NOT a blocker: every membership is authorised from the moment it is raised, so that would refuse everything. A paid invoice is never deletable and there is no confirm flag to force it — cancel it instead via edit_invoice, which closes it and keeps the club's record of the money. An 'attended' blocker is cleared by moving those check-ins to another membership, which is a manager-screen action and not available through this API.",
+        "Delete an invoice outright, for tidying up one that should never have existed. Refused with 409 invoice_not_deletable when a payment is recorded against it, or when a class was checked in against it; error.details.blockers names EVERY reason at once (paid | attended) so clearing one does not walk into the next. Being active is NOT a blocker: every membership is authorised from the moment it is raised, so that would refuse everything. A paid invoice is never deletable and there is no confirm flag to force it — cancel it instead via edit_invoice, which closes it and keeps the club's record of the money. An 'attended' blocker is cleared by moving those check-ins to another of the person's memberships with move_check_in (get_user lists them, with each check-in's id and membership_id).",
       params: [{ name: "id", required: true, description: "Invoice (membership) UUID." }],
     },
     {
@@ -1959,6 +2091,125 @@ export const AGENT_MANIFEST: {
           name: "id",
           required: true,
           description: "The date's id, from list_calendar_events.",
+        },
+      ],
+    },
+    {
+      name: "list_check_in_classes",
+      method: "POST",
+      summary:
+        "Every class from 14 days before today to 14 days after, oldest first: the class picker on the manager's Check-in screen, from the same read. Each has id (the calendar date's id, the same one list_calendar_events reports; every check-in action takes it as event_id), title, starts_at and ends_at (UTC), starts_local and ends_local (the same times in club time, Australia/Sydney, as YYYY-MM-DDTHH:MM), weekday (the club-time day it starts on), status (scheduled | cancelled; a cancelled class cannot be checked in to), instructor_name, location and checked_in_count. A class further out is on list_calendar_events, and its id works with every check-in action just the same. Takes no params, and refuses any (400 invalid_params). time_zone names the club's zone.",
+      params: [],
+    },
+    {
+      name: "list_attendance",
+      method: "POST",
+      summary:
+        "Who is checked in to one class, newest first: Here now on the manager's Check-in screen, from the same read. Returns event (as list_check_in_classes reports it), count and checkins, each with id (what undo_check_in, attach_check_in and move_check_in take), user_id, name, checked_in_at, coverage (trial | session | period | none, where session is a casual class credit and none means nothing has paid for it yet), membership_id and plan_name (what paid for it), consumed_credit (whether it spent a session), warnings and note. One person's attendance across every class is get_user's checkins. 404 not_found when there is no such class.",
+      params: [
+        {
+          name: "event_id",
+          required: true,
+          description: "The class's id, from list_check_in_classes or list_calendar_events.",
+        },
+      ],
+    },
+    {
+      name: "get_check_in_preview",
+      method: "POST",
+      summary:
+        'What checking one person in to one class would do, before doing it: the badge the manager\'s Check-in screen shows beside the button, from the same read. Read would_spend.label back to the manager when confirming a check-in. Returns event, user_id, name, guardian_name and age (both set only for somebody on another person\'s account, usually a child: what tells two children in one family apart), already_checked_in, checkin (their check-in to this class, as list_attendance reports it, or null) and would_spend (null when they are already in): label ("Free trial, 2 left", "One semester" or "No cover"), coverage (trial | session | period | none), plan_name, consumes_credit, sessions_remaining_before and warnings (why, when nothing covers it). It is worked out against the class\'s start, so last week\'s class previews as it would have at the door. It refuses whatever check_in would refuse: 404 not_found when there is no such class; 409 class_cancelled for a cancelled class; 422 no_waiver when the person has no waiver on file and so cannot be checked in until they sign one.',
+      params: [
+        {
+          name: "event_id",
+          required: true,
+          description: "The class's id, from list_check_in_classes or list_calendar_events.",
+        },
+        {
+          name: "user_id",
+          required: true,
+          description: "The person's user UUID, from list_users.",
+        },
+      ],
+    },
+    {
+      name: "list_uncovered_check_ins",
+      method: "POST",
+      summary:
+        "Every check-in nothing has paid for yet, across all classes, newest first and capped at 100: the needs-attention list on the manager's Check-in screen, from the same read. Each has id, user_id, name, event_id, event_title, event_starts_at, event_starts_local and event_weekday, checked_in_at, warnings (why nothing covered it), note, would_cover (true when the door's own rules would now find something to pay for it, usually because a payment has landed since: attach_check_in with no membership_id) and memberships (every membership of theirs, each with id, plan_name, status, sessions_remaining, usable, and reason when it is not usable for that class). Takes no params, and refuses any (400 invalid_params).",
+      params: [],
+    },
+    {
+      name: "check_in",
+      method: "POST",
+      summary:
+        "Check one person in to one class: the button on the manager's Check-in screen, through the same code. It records that they were on the mat, and spends a session when one pays for it: a free trial credit first, then a casual class credit, then an unlimited semester membership, which is never used up. Having nothing to pay for it is never a refusal: they are checked in with coverage none and the check-in goes on list_uncovered_check_ins, to attach once their membership is sorted out. A check-in drawn on a casual class credit emails that credit's invoice (or its receipt, when paid) to whoever pays for them, if it has not gone already. Confirm the person and the class with the manager first, reading back get_check_in_preview's label. Returns already_checked_in, checkin_id and decision: coverage, membership_id, plan_name, consumes_credit, sessions_remaining_before, sessions_remaining_after, closes_membership (true when this took the last session, which finishes that membership) and warnings. Safe to send again: somebody already checked in to that class comes back already_checked_in: true with their checkin_id and decision null, and nothing is spent twice. 404 not_found when there is no such class; 409 class_cancelled for a cancelled class (restore it with cancel_calendar_entry first if it did run); 422 no_waiver when the person has no waiver on file.",
+      params: [
+        {
+          name: "event_id",
+          required: true,
+          description: "The class's id, from list_check_in_classes or list_calendar_events.",
+        },
+        {
+          name: "user_id",
+          required: true,
+          description: "The person's user UUID, from list_users.",
+        },
+        {
+          name: "note",
+          required: false,
+          description: "Up to 500 characters, kept on the check-in and shown in list_attendance.",
+        },
+      ],
+    },
+    {
+      name: "undo_check_in",
+      method: "POST",
+      summary:
+        "Remove a check-in: Undo on the manager's Check-in screen, through the same code. The check-in is deleted, and any session it spent goes back on its membership, which reopens if this check-in is what finished it (one a manager ended, or whose dates have passed, stays ended). When they were on the mat goes with it, so to change only what paid for a class use move_check_in or attach_check_in instead. Nobody is emailed. Returns removed, refunded (a session went back) and reopened. Safe to send again: a check-in that is already gone comes back removed: false and gives nothing back. 500 refund_failed means the check-in was removed but its session could not be given back: do not send it again (it would find nothing to undo), tell the manager the membership is a session short.",
+      params: [
+        {
+          name: "id",
+          required: true,
+          description:
+            "The check-in's id, from list_attendance, list_uncovered_check_ins, get_user's checkins or check_in's checkin_id.",
+        },
+      ],
+    },
+    {
+      name: "attach_check_in",
+      method: "POST",
+      summary:
+        "Give an uncovered check-in (coverage none) its cover: Attach on the manager's Check-in screen and person page, through the same code. With no membership_id it runs the rules the door would have run, which is right once a late payment has landed; with one, that membership pays if it can. Either way the session is spent now, worked out against the class's start, and a casual class credit emails as check_in does. If nothing can pay for it, it stays uncovered and decision.coverage comes back none, with warnings saying why: not an error. Returns decision, as check_in reports it. 404 not_found when there is no such check-in or membership; 409 already_covered when something already pays for it (use move_check_in); 409 claim_lost when another manager covered it first, in which case nothing was spent; 422 not_their_membership when the membership is somebody else's, since a class is only ever paid for by the membership of the person who trained, a child's included.",
+      params: [
+        {
+          name: "id",
+          required: true,
+          description: "The check-in's id, from list_uncovered_check_ins or get_user's checkins.",
+        },
+        {
+          name: "membership_id",
+          required: false,
+          description:
+            "One of the same person's memberships, from list_uncovered_check_ins' memberships (prefer one marked usable) or get_user's memberships. Omit to let the door's rules choose.",
+        },
+      ],
+    },
+    {
+      name: "move_check_in",
+      method: "POST",
+      summary:
+        "Put a covered check-in on a different one of the same person's memberships: Move on the manager's person page, through the same code. It corrects what paid for a class without losing when they trained, and clears an attended blocker on delete_invoice. The session goes back on the old membership first (reopening it if this check-in finished it), then the new one pays as the door would have. If the new one cannot (no sessions left, or its dates do not include the class), the check-in lands uncovered with warnings saying why and goes on list_uncovered_check_ins, and the old membership keeps its session back. A casual class credit emails as check_in does. Returns decision, as check_in reports it. 404 not_found when there is no such check-in or membership; 409 not_covered when nothing pays for it yet (use attach_check_in); 409 same_membership when it is already on that membership; 409 claim_lost when another manager moved it first; 422 not_their_membership when the membership is somebody else's, checked before anything moves. Two failures happen after the class has been taken off the old membership, so do not send the move again: 500 move_incomplete (the old membership has its session back but the new one could not take the class, which is now uncovered: attach_check_in it to the membership wanted) and 500 refund_failed (the old membership could not be given its session back, and the class is uncovered too: attach_check_in it to the membership wanted, and tell the manager about the missing session).",
+      params: [
+        {
+          name: "id",
+          required: true,
+          description: "The check-in's id, from list_attendance or get_user's checkins.",
+        },
+        {
+          name: "membership_id",
+          required: true,
+          description: "Another membership of the same person's, from get_user's memberships.",
         },
       ],
     },

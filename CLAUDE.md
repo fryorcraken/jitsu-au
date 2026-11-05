@@ -214,7 +214,8 @@ src/
     site/                 App chrome + shared UX: SiteLayout/MemberLayout/KbLayout,
                           SiteHeader, SiteFooter, SignaturePad, AuthPending,
                           SubmitStatus, StatusPill, Loading, LoadFailure,
-                          SaveFailure, StaleNotice, DraftRestoreBanner
+                          SaveFailure, ActionFailure, StaleNotice,
+                          DraftRestoreBanner
   integrations/supabase/  Supabase clients + auth middleware + generated types
   lib/                    Business logic, server functions, PDF, email templates, utils
   hooks/                  useAuth / useRoles, use-resilient-submit, use-mobile,
@@ -1058,6 +1059,12 @@ Then hold the change to this:
   Clear it when the form is edited, or the panel starts claiming something about
   work it never saw. The three long-form editors (blog, knowledge base, waiver
   template) are the worked examples. A _success_ toast is still right.
+- **Nor is a failed one-tap action** (undo, attach, move) whose failure leaves
+  somebody something to do. Render **`components/site/ActionFailure`** beside
+  the section the press was made in: it carries the failure's own message and a
+  Dismiss, and deliberately no retry, because a failure that went part of the
+  way is made worse by pressing again. The check-in screen and the person
+  page's attendance controls are the worked examples.
 - **Anywhere somebody types at length, keep it on the device.** `beforeunload`
   is not a safety net on a phone: iOS ignores it, and an installed app the
   system reclaims in the background is killed without being asked to unload.

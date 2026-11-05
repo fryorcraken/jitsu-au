@@ -3163,6 +3163,14 @@ export const managerAgentActions = [
   "cancel_calendar_entry",
   "stop_calendar_repeat",
   "delete_calendar_entry",
+  "list_check_in_classes",
+  "list_attendance",
+  "get_check_in_preview",
+  "list_uncovered_check_ins",
+  "check_in",
+  "undo_check_in",
+  "attach_check_in",
+  "move_check_in",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
@@ -3962,6 +3970,25 @@ export const transferCheckInSchema = z.object({
   membership_id: z.string().uuid(),
 });
 export type TransferCheckInInput = z.infer<typeof transferCheckInSchema>;
+
+// The manager agent's check-in actions: the screens' own schemas, made strict.
+// A field an agent misspells must be refused, not stripped: a dropped
+// `membership_id` on attach would quietly fall back to the door's own rules and
+// spend a different membership than the manager asked for, and a dropped one on
+// a list read would come back as the unfiltered answer, read as filtered.
+
+/** `list_check_in_classes` and `list_uncovered_check_ins` take nothing. */
+export const agentNoCheckInParamsSchema = z.object({}).strict();
+/** `list_attendance`: who is checked in to one class. */
+export const agentListAttendanceSchema = checkInBoardSchema.strict();
+/** `get_check_in_preview`: what checking one person in to one class would spend. */
+export const agentCheckInPreviewSchema = z
+  .object({ event_id: z.string().uuid(), user_id: z.string().uuid() })
+  .strict();
+export const agentCheckInSchema = checkInSchema.strict();
+export const agentUndoCheckInSchema = undoCheckInSchema.strict();
+export const agentAttachCheckInSchema = attachCheckInSchema.strict();
+export const agentMoveCheckInSchema = transferCheckInSchema.strict();
 
 /**
  * Parse a "$245", "245", "20.50" or "2,450.00" money string into integer cents.

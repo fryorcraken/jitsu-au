@@ -11,7 +11,17 @@
 // twice must not spend twice, and the membership a check-in just drew on must
 // not be closed out from under it.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyCoverage, undoCheckInRow } from "./checkin.functions";
+import {
+  applyCoverage,
+  attachCheckInRow,
+  CheckInError,
+  checkInPersonRow,
+  listUncoveredCheckInRows,
+  loadClassAttendance,
+  previewCheckInRow,
+  transferCheckInRow,
+  undoCheckInRow,
+} from "./checkin.functions";
 
 /**
  * `applyCoverage` reaches for this the moment a casual credit is actually
@@ -25,6 +35,18 @@ import { applyCoverage, undoCheckInRow } from "./checkin.functions";
 const ensureCasualInvoiceEmailed = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/membership.functions", () => ({
   ensureCasualInvoiceEmailed: (...args: unknown[]) => ensureCasualInvoiceEmailed(...args),
+}));
+
+/**
+ * The roster's household lookup (guardian names, contact addresses) reads auth
+ * users through an RPC the fake has no use for. Its own rules are tested in
+ * household-email.test.ts; here everybody is nobody's dependant.
+ */
+vi.mock("@/lib/household-email", () => ({
+  loadHouseholdContacts: async () => ({
+    deliveryEmail: () => null,
+    displayEmail: () => ({ onBehalfOf: null }),
+  }),
 }));
 
 type Result = { data: unknown; error: { message: string } | null; count?: number | null };
@@ -470,5 +492,553 @@ describe("undoCheckInRow", () => {
 
     expect(await undoCheckInRow(admin, "chk-1")).toEqual({ removed: true, refunded: false });
     expect(ofTable(calls, "memberships", "update")).toHaveLength(0);
+  });
+});
+
+/** The refusal a call threw, so a test can assert on its reason. */
+async function refusal(run: () => Promise<unknown>): Promise<CheckInError> {
+  try {
+    await run();
+  } catch (e) {
+    if (e instanceof CheckInError) return e;
+    throw e;
+  }
+  throw new Error("expected a CheckInError, and the call succeeded");
+}
+
+const EVENT = { id: "evt-1", starts_at: CLASS_AT, status: "scheduled" };
+
+describe("checkInPersonRow", () => {
+  beforeEach(() => {
+    ensureCasualInvoiceEmailed.mockClear();
+  });
+
+  it("records who checked them in, and returns the new check-in's id", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok(EVENT);
+      if (op.table === "profiles") return ok({ user_id: "u1" });
+      if (op.table === "session_checkins" && op.verb === "insert") return ok({ id: "chk-new" });
+      if (op.table === "session_checkins") return ok([{ id: "chk-new" }]);
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships" && op.verb === "select") return ok([trialRow()]);
+      return ok([{ id: "mem-trial" }]);
+    });
+
+    const result = await checkInPersonRow(admin, { event_id: "evt-1", user_id: "u1" }, "mgr-1");
+    expect(result).toMatchObject({ already_checked_in: false, checkin_id: "chk-new" });
+    expect(result.decision?.coverage).toBe("trial");
+    expect(ofTable(calls, "session_checkins", "insert")[0].patch).toMatchObject({
+      checked_in_by: "mgr-1",
+    });
+  });
+
+  // A caller retrying a check-in it never heard back from needs the row it
+  // made, to undo or move it; and it must not spend a second credit.
+  it("returns the existing check-in's id on a repeat, and spends nothing", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok(EVENT);
+      if (op.table === "profiles") return ok({ user_id: "u1" });
+      if (op.table === "session_checkins" && op.verb === "insert")
+        return { data: null, error: { message: "duplicate", code: "23505" } as never };
+      if (op.table === "session_checkins") return ok({ id: "chk-old" });
+      return ok([]);
+    });
+
+    expect(await checkInPersonRow(admin, { event_id: "evt-1", user_id: "u1" }, "mgr-1")).toEqual({
+      already_checked_in: true,
+      checkin_id: "chk-old",
+      decision: null,
+    });
+    expect(ofTable(calls, "memberships", "update")).toHaveLength(0);
+  });
+
+  it("refuses a cancelled class, writing nothing", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok({ ...EVENT, status: "cancelled" });
+      return ok({ user_id: "u1" });
+    });
+
+    const e = await refusal(() =>
+      checkInPersonRow(admin, { event_id: "evt-1", user_id: "u1" }, "mgr-1"),
+    );
+    expect(e.reason).toBe("class_cancelled");
+    expect(ofTable(calls, "session_checkins", "insert")).toHaveLength(0);
+  });
+
+  it("refuses somebody with no waiver on file", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok(EVENT);
+      return ok(null);
+    });
+
+    const e = await refusal(() =>
+      checkInPersonRow(admin, { event_id: "evt-1", user_id: "u-lead" }, "mgr-1"),
+    );
+    expect(e.reason).toBe("no_waiver");
+  });
+
+  it("refuses a class that is not on the calendar", async () => {
+    const { admin } = fakeClient(() => ok(null));
+    const e = await refusal(() =>
+      checkInPersonRow(admin, { event_id: "evt-gone", user_id: "u1" }, "mgr-1"),
+    );
+    expect(e.reason).toBe("not_found");
+  });
+});
+
+// Coverage is the trainee's own. A foreign membership id resolves to "nothing
+// eligible", so without the guard an attach would land uncovered without
+// saying why, and a move would first refund the real cover and then land
+// uncovered. The screens cannot send one; the agent API can.
+describe("naming somebody else's membership", () => {
+  const uncovered = { id: "chk-1", user_id: "u1", event_id: "evt-1", coverage: "none" };
+  const covered = {
+    ...uncovered,
+    coverage: "trial",
+    membership_id: "mem-trial",
+    consumed_credit: true,
+    closed_membership: false,
+    checked_in_at: CLASS_AT,
+  };
+  /** The guard's lookup is by id; coverage resolution reads by user_id. */
+  const isGuardLookup = (op: Op) =>
+    op.table === "memberships" && op.verb === "select" && filterValue(op, "id") !== undefined;
+
+  it("is refused on attach before any credit moves", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "session_checkins") return ok(uncovered);
+      if (isGuardLookup(op)) return ok({ id: "mem-theirs", user_id: "u-sibling" });
+      return ok([]);
+    });
+
+    const e = await refusal(() =>
+      attachCheckInRow(admin, { id: "chk-1", membership_id: "mem-theirs" }),
+    );
+    expect(e.reason).toBe("not_their_membership");
+    expect(ofTable(calls, "memberships", "update")).toHaveLength(0);
+    expect(ofTable(calls, "session_checkins", "update")).toHaveLength(0);
+  });
+
+  it("is refused on move before the check-in is released or refunded", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "session_checkins") return ok(covered);
+      if (isGuardLookup(op)) return ok({ id: "mem-theirs", user_id: "u-sibling" });
+      return ok([]);
+    });
+
+    const e = await refusal(() =>
+      transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-theirs" }),
+    );
+    expect(e.reason).toBe("not_their_membership");
+    expect(ofTable(calls, "session_checkins", "update")).toHaveLength(0);
+    expect(ofTable(calls, "memberships", "update")).toHaveLength(0);
+  });
+
+  it("is not_found for a membership that does not exist", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins") return ok(uncovered);
+      if (isGuardLookup(op)) return ok(null);
+      return ok([]);
+    });
+
+    const e = await refusal(() => attachCheckInRow(admin, { id: "chk-1", membership_id: "mem-x" }));
+    expect(e.reason).toBe("not_found");
+  });
+
+  it("lets the person's own named membership pay", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins" && op.verb === "select") return ok(uncovered);
+      if (op.table === "session_checkins") return ok([{ id: "chk-1" }]);
+      if (isGuardLookup(op)) return ok({ id: "mem-trial", user_id: "u1" });
+      if (op.table === "calendar_events") return ok({ starts_at: CLASS_AT });
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships" && op.verb === "select") return ok([trialRow()]);
+      return ok([{ id: "mem-trial" }]);
+    });
+
+    const { decision } = await attachCheckInRow(admin, { id: "chk-1", membership_id: "mem-trial" });
+    expect(decision).toMatchObject({ coverage: "trial", membership_id: "mem-trial" });
+  });
+});
+
+describe("attach and move refuse the wrong one of the two", () => {
+  it("sends a covered check-in to move, not attach", async () => {
+    const { admin } = fakeClient(() =>
+      ok({ id: "chk-1", user_id: "u1", event_id: "evt-1", coverage: "trial" }),
+    );
+    expect((await refusal(() => attachCheckInRow(admin, { id: "chk-1" }))).reason).toBe(
+      "already_covered",
+    );
+  });
+
+  it("sends an uncovered check-in to attach, not move", async () => {
+    const { admin } = fakeClient(() =>
+      ok({ id: "chk-1", user_id: "u1", event_id: "evt-1", coverage: "none", membership_id: null }),
+    );
+    expect(
+      (await refusal(() => transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-a" })))
+        .reason,
+    ).toBe("not_covered");
+  });
+
+  it("refuses a move onto the membership it is already on", async () => {
+    const { admin, calls } = fakeClient(() =>
+      ok({
+        id: "chk-1",
+        user_id: "u1",
+        event_id: "evt-1",
+        coverage: "trial",
+        membership_id: "mem-a",
+      }),
+    );
+    expect(
+      (await refusal(() => transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-a" })))
+        .reason,
+    ).toBe("same_membership");
+    expect(ofTable(calls, "session_checkins", "update")).toHaveLength(0);
+  });
+});
+
+// The agent's preview is the board's roster row for one person, built for that
+// person only: reading the whole club for one answer also meant somebody past
+// the roster's cap was told they had no waiver.
+describe("previewCheckInRow", () => {
+  const PROFILE = {
+    user_id: "u1",
+    first_name: "Sam",
+    middle_name: null,
+    last_name: "Example",
+    preferred_name: null,
+    date_of_birth: "1990-01-01",
+  };
+
+  it("reports what the door would spend, reading only that person", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok({ ...EVENT, title: "Gi" });
+      if (op.table === "profiles") return ok(PROFILE);
+      if (op.table === "session_checkins") return ok(null);
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships") return ok([trialRow()]);
+      return ok([]);
+    });
+
+    const preview = await previewCheckInRow(admin, { event_id: "evt-1", user_id: "u1" });
+    expect(preview.row).toMatchObject({
+      user_id: "u1",
+      name: "Sam Example",
+      coverage: "trial",
+      sessions_remaining_before: 2,
+      consumes_credit: true,
+    });
+    expect(preview.checkin).toBeNull();
+    // An adult's age answers nothing at the door, so it is withheld here too.
+    expect(preview.row.age).toBeNull();
+    expect(filterValue(ofTable(calls, "memberships", "select")[0], "user_id")).toEqual(["u1"]);
+    // Nothing is written by a preview.
+    expect(calls.every((c) => c.verb === "select")).toBe(true);
+  });
+
+  it("names their check-in when they are already in", async () => {
+    const existing = {
+      id: "chk-1",
+      user_id: "u1",
+      checked_in_at: CLASS_AT,
+      coverage: "trial",
+      membership_id: "mem-trial",
+      consumed_credit: true,
+      warnings: [],
+      note: null,
+    };
+    const { admin } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok(EVENT);
+      if (op.table === "profiles") return ok(PROFILE);
+      if (op.table === "session_checkins") return ok(existing);
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships") return ok([trialRow({ sessions_remaining: 1 })]);
+      return ok([]);
+    });
+
+    const { checkin } = await previewCheckInRow(admin, { event_id: "evt-1", user_id: "u1" });
+    expect(checkin).toMatchObject({ id: "chk-1", plan_name: "Free trial", name: "Sam Example" });
+  });
+
+  // check_in would refuse both, so a preview of a spend that cannot happen
+  // would be the one thing the manager confirms that is not so.
+  it("refuses a cancelled class, as check_in does", async () => {
+    const { admin } = fakeClient((op) =>
+      op.table === "calendar_events" ? ok({ ...EVENT, status: "cancelled" }) : ok(PROFILE),
+    );
+    expect(
+      (await refusal(() => previewCheckInRow(admin, { event_id: "evt-1", user_id: "u1" }))).reason,
+    ).toBe("class_cancelled");
+  });
+
+  it("refuses somebody with no waiver on file, as check_in does", async () => {
+    const { admin } = fakeClient((op) => (op.table === "calendar_events" ? ok(EVENT) : ok(null)));
+    expect(
+      (await refusal(() => previewCheckInRow(admin, { event_id: "evt-1", user_id: "u-lead" })))
+        .reason,
+    ).toBe("no_waiver");
+  });
+});
+
+// After a release there is nothing left to retry: undo finds no row, and a move
+// finds an uncovered check-in. Each failure past that point says what state it
+// left behind instead of reading as a database hiccup worth retrying.
+describe("a failure after the check-in is released", () => {
+  it("is refund_failed when an undo cannot give the session back", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins")
+        return ok({
+          id: "chk-1",
+          membership_id: "mem-trial",
+          consumed_credit: true,
+          closed_membership: false,
+        });
+      if (op.table === "memberships" && op.verb === "select")
+        return ok({ id: "mem-trial", status: "active", sessions_remaining: 1, ends_at: null });
+      return { data: null, error: { message: "connection reset" } };
+    });
+
+    const e = await refusal(() => undoCheckInRow(admin, "chk-1"));
+    expect(e.reason).toBe("refund_failed");
+    expect(e.message).not.toMatch(/try again/i);
+  });
+
+  it("is refund_failed when the balance keeps moving under both attempts", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins")
+        return ok({
+          id: "chk-1",
+          membership_id: "mem-trial",
+          consumed_credit: true,
+          closed_membership: false,
+        });
+      if (op.table === "memberships" && op.verb === "select")
+        return ok({ id: "mem-trial", status: "active", sessions_remaining: 1, ends_at: null });
+      return ok([]);
+    });
+
+    expect((await refusal(() => undoCheckInRow(admin, "chk-1"))).reason).toBe("refund_failed");
+  });
+
+  it("is move_incomplete when a move cannot put the class on the new membership", async () => {
+    const covered = {
+      id: "chk-1",
+      user_id: "u1",
+      event_id: "evt-1",
+      coverage: "period",
+      membership_id: "mem-sem",
+      consumed_credit: false,
+      closed_membership: false,
+      checked_in_at: CLASS_AT,
+    };
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins" && op.verb === "select") return ok(covered);
+      if (op.table === "session_checkins") return ok([{ id: "chk-1" }]);
+      if (op.table === "memberships" && filterValue(op, "id") !== undefined)
+        return ok({ id: "mem-trial", user_id: "u1" });
+      if (op.table === "calendar_events") return ok({ starts_at: CLASS_AT });
+      // Coverage resolution cannot read the plans.
+      return { data: null, error: { message: "connection reset" } };
+    });
+
+    const e = await refusal(() =>
+      transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-trial" }),
+    );
+    expect(e.reason).toBe("move_incomplete");
+    expect(e.message).toMatch(/attach/);
+  });
+});
+
+describe("listUncoveredCheckInRows", () => {
+  // A row with no class would be answered against when they were checked in
+  // rather than when the class ran, and reported as fact.
+  it("fails rather than report rows it could not fill", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins")
+        return ok([
+          {
+            id: "chk-1",
+            event_id: "evt-1",
+            user_id: "u1",
+            checked_in_at: CLASS_AT,
+            warnings: [],
+            note: null,
+          },
+        ]);
+      if (op.table === "calendar_events") return { data: null, error: { message: "timeout" } };
+      if (op.table === "membership_plans") return ok(PLANS);
+      return ok([]);
+    });
+
+    await expect(listUncoveredCheckInRows(admin)).rejects.toThrow("timeout");
+  });
+});
+
+describe("transferCheckInRow", () => {
+  const onTrial = {
+    id: "chk-1",
+    user_id: "u1",
+    event_id: "evt-1",
+    coverage: "trial",
+    membership_id: "mem-trial",
+    consumed_credit: true,
+    closed_membership: false,
+    checked_in_at: CLASS_AT,
+  };
+  const semester = trialRow({
+    id: "mem-sem",
+    plan_id: "plan-sem",
+    sessions_remaining: null,
+    ends_at: "2099-01-01T00:00:00.000Z",
+  });
+
+  it("releases, gives the old session back, then covers from the one asked for", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "session_checkins" && op.verb === "select") return ok(onTrial);
+      if (op.table === "session_checkins") return ok([{ id: "chk-1" }]);
+      if (op.table === "memberships" && op.verb === "select") {
+        if (filterValue(op, "id") === "mem-sem") return ok({ id: "mem-sem", user_id: "u1" });
+        if (filterValue(op, "id") === "mem-trial")
+          return ok({ id: "mem-trial", status: "active", sessions_remaining: 1, ends_at: null });
+        return ok([trialRow({ sessions_remaining: 2 }), semester]);
+      }
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "calendar_events") return ok({ starts_at: CLASS_AT });
+      return ok([{ id: "mem-trial" }]);
+    });
+
+    const { decision } = await transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-sem" });
+    expect(decision).toMatchObject({ coverage: "period", membership_id: "mem-sem" });
+
+    // The release is a compare-and-swap on BOTH what covered it and which
+    // membership, so a second mover's stale update matches nothing and cannot
+    // refund the old membership twice.
+    const [release, recover] = ofTable(calls, "session_checkins", "update");
+    expect(release.patch).toMatchObject({ coverage: "none", membership_id: null });
+    expect(filterValue(release, "coverage")).toBe("trial");
+    expect(filterValue(release, "membership_id")).toBe("mem-trial");
+    expect(recover.patch).toMatchObject({ coverage: "period", membership_id: "mem-sem" });
+
+    // The old membership gets its session back, guarded on the balance read.
+    const refund = ofTable(calls, "memberships", "update")[0];
+    expect(refund.patch).toMatchObject({ sessions_remaining: 2 });
+    expect(filterValue(refund, "id")).toBe("mem-trial");
+  });
+
+  it("refuses a second mover whose release matches nothing, refunding nothing", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "session_checkins" && op.verb === "select") return ok(onTrial);
+      if (op.table === "session_checkins") return ok([]);
+      if (op.table === "memberships") return ok({ id: "mem-sem", user_id: "u1" });
+      return ok([]);
+    });
+
+    const e = await refusal(() =>
+      transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-sem" }),
+    );
+    expect(e.reason).toBe("claim_lost");
+    expect(ofTable(calls, "memberships", "update")).toHaveLength(0);
+  });
+
+  // Released, so the class is uncovered as well as the old membership short:
+  // the caller has to be told both, or nobody attaches it.
+  it("says the class is uncovered when the old session cannot be given back", async () => {
+    const { admin } = fakeClient((op) => {
+      if (op.table === "session_checkins" && op.verb === "select") return ok(onTrial);
+      if (op.table === "session_checkins") return ok([{ id: "chk-1" }]);
+      if (op.table === "memberships" && op.verb === "select") {
+        if (filterValue(op, "id") === "mem-sem") return ok({ id: "mem-sem", user_id: "u1" });
+        return ok({ id: "mem-trial", status: "active", sessions_remaining: 1, ends_at: null });
+      }
+      return { data: null, error: { message: "connection reset" } };
+    });
+
+    const e = await refusal(() =>
+      transferCheckInRow(admin, { id: "chk-1", membership_id: "mem-sem" }),
+    );
+    expect(e.reason).toBe("refund_failed");
+    expect(e.message).toMatch(/uncovered/);
+    expect(e.message).toMatch(/attach/);
+  });
+});
+
+// The insert collides with a check-in that is undone before it can be read
+// back. "Already checked in" would then be untrue, so it checks them in.
+describe("checkInPersonRow, racing an undo", () => {
+  it("checks them in rather than report a check-in that is gone", async () => {
+    let inserts = 0;
+    const { admin } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok(EVENT);
+      if (op.table === "profiles") return ok({ user_id: "u1" });
+      if (op.table === "session_checkins" && op.verb === "insert")
+        return ++inserts === 1
+          ? { data: null, error: { message: "duplicate", code: "23505" } as never }
+          : ok({ id: "chk-new" });
+      if (op.table === "session_checkins" && op.verb === "select") return ok(null);
+      if (op.table === "session_checkins") return ok([{ id: "chk-new" }]);
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships" && op.verb === "select") return ok([trialRow()]);
+      return ok([{ id: "mem-trial" }]);
+    });
+
+    const result = await checkInPersonRow(admin, { event_id: "evt-1", user_id: "u1" }, "mgr-1");
+    expect(result).toMatchObject({ already_checked_in: false, checkin_id: "chk-new" });
+    expect(inserts).toBe(2);
+  });
+});
+
+describe("loadClassAttendance", () => {
+  it("names who is in and what paid, reading only those people", async () => {
+    const { admin, calls } = fakeClient((op) => {
+      if (op.table === "calendar_events") return ok({ ...EVENT, title: "Gi" });
+      if (op.table === "session_checkins")
+        return ok([
+          {
+            id: "chk-1",
+            user_id: "u1",
+            checked_in_at: CLASS_AT,
+            coverage: "trial",
+            membership_id: "mem-trial",
+            consumed_credit: true,
+            warnings: [],
+            note: "Late",
+          },
+        ]);
+      if (op.table === "profiles")
+        return ok([
+          {
+            user_id: "u1",
+            first_name: "Sam",
+            middle_name: null,
+            last_name: "Example",
+            preferred_name: null,
+          },
+        ]);
+      if (op.table === "membership_plans") return ok(PLANS);
+      if (op.table === "memberships") return ok([trialRow()]);
+      return ok([]);
+    });
+
+    const { checkins } = await loadClassAttendance(admin, { event_id: "evt-1" });
+    expect(checkins).toEqual([
+      expect.objectContaining({
+        id: "chk-1",
+        name: "Sam Example",
+        plan_name: "Free trial",
+        membership_id: "mem-trial",
+        note: "Late",
+      }),
+    ]);
+    // Not the whole club: only the people checked in to this class.
+    expect(filterValue(ofTable(calls, "profiles", "select")[0], "user_id")).toEqual(["u1"]);
+  });
+
+  it("refuses a class that is not on the calendar", async () => {
+    const { admin } = fakeClient(() => ok(null));
+    expect((await refusal(() => loadClassAttendance(admin, { event_id: "x" }))).reason).toBe(
+      "not_found",
+    );
   });
 });

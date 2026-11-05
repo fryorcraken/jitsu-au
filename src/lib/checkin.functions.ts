@@ -36,8 +36,114 @@ import { topUpHorizon } from "@/lib/calendar.functions";
 import { ensureCasualInvoiceEmailed } from "@/lib/membership.functions";
 import type { ClubUserEmail } from "@/lib/club-users";
 import { loadHouseholdContacts } from "@/lib/household-email";
+import { chunks } from "@/lib/id-chunks";
 
 type CheckinClient = SupabaseClient<Database>;
+
+/**
+ * Why a check-in write or read was refused, so a caller that is not a screen
+ * (the manager agent API) can answer each with its own status instead of
+ * parsing a sentence. The message is the one the screen shows, unchanged:
+ * `CheckInError` is an `Error`, and the screens read `message`.
+ *
+ * - `not_found`: the class, the check-in or the membership is not there.
+ * - `no_waiver`: the person has no record, which is what a waiver on file is.
+ * - `class_cancelled`: a cancelled class cannot be checked in to.
+ * - `already_covered` / `not_covered`: attach is for an uncovered check-in and
+ *   move for a covered one; each names the other.
+ * - `same_membership`: a move onto the membership it is already on.
+ * - `claim_lost`: another manager attached or moved the same check-in first.
+ * - `not_their_membership`: the membership named belongs to somebody else.
+ * - `refund_failed`: a check-in was released (undone, or taken off its old
+ *   membership by a move) but its session could not be given back. Retrying
+ *   cannot fix it, since the release already happened: the next attempt finds
+ *   nothing to undo, or an uncovered check-in to move.
+ * - `move_incomplete`: a move released the check-in and gave the old
+ *   membership its session back, but could not put it on the new one, so it is
+ *   uncovered until somebody attaches it.
+ */
+export type CheckInRefusal =
+  | "not_found"
+  | "no_waiver"
+  | "class_cancelled"
+  | "already_covered"
+  | "not_covered"
+  | "same_membership"
+  | "claim_lost"
+  | "not_their_membership"
+  | "refund_failed"
+  | "move_incomplete";
+
+export class CheckInError extends Error {
+  reason: CheckInRefusal;
+  constructor(reason: CheckInRefusal, message: string) {
+    super(message);
+    this.name = "CheckInError";
+    this.reason = reason;
+  }
+}
+
+const NO_SUCH_CLASS = "That class is not on the calendar.";
+const NO_SUCH_CHECK_IN = "That check-in no longer exists.";
+
+const CLASS_COLUMNS = "id, title, instructor_name, location, starts_at, ends_at, status";
+
+/** A class on the calendar, or `not_found`. */
+async function loadClass(admin: CheckinClient, eventId: string) {
+  const { data: event, error } = await admin
+    .from("calendar_events")
+    .select(CLASS_COLUMNS)
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!event) throw new CheckInError("not_found", NO_SUCH_CLASS);
+  return event;
+}
+
+/**
+ * A class somebody can be checked in to: on the calendar and not cancelled.
+ * One function for `check_in` and its preview, because the preview's promise is
+ * to refuse exactly what the check-in would.
+ */
+async function loadCheckableClass(admin: CheckinClient, eventId: string) {
+  const event = await loadClass(admin, eventId);
+  if (event.status === "cancelled")
+    throw new CheckInError(
+      "class_cancelled",
+      "That class was cancelled, so nobody can be checked in to it.",
+    );
+  return event;
+}
+
+/**
+ * Refuse a named membership that is not the check-in's own person's.
+ *
+ * Coverage is strictly personal (`docs/check-in.md`), and `resolveCoverage`
+ * reads a foreign id as "nothing eligible", so without this an attach would
+ * land uncovered and say nothing more, and a MOVE would first release the
+ * check-in and refund its real cover, then land it uncovered: a correction that
+ * quietly makes things worse. The screens can never send one (they only offer
+ * the person's own memberships), but the manager agent API takes any id an
+ * agent types, so the guard lives here where both doors pass through it.
+ */
+async function assertMembershipIsTheirs(
+  admin: CheckinClient,
+  membershipId: string,
+  userId: string,
+): Promise<void> {
+  const { data: m, error } = await admin
+    .from("memberships")
+    .select("id, user_id")
+    .eq("id", membershipId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!m) throw new CheckInError("not_found", "That membership no longer exists.");
+  if (m.user_id !== userId)
+    throw new CheckInError(
+      "not_their_membership",
+      "That membership belongs to somebody else. A class is only covered by the membership of the person who trained.",
+    );
+}
 
 /** How far either side of today the class picker looks. */
 const EVENT_WINDOW_DAYS = 14;
@@ -64,13 +170,6 @@ type MembershipSelection = Pick<
   | "ends_at"
   | "created_at"
 >;
-
-/**
- * How many ids to put in one `.in()` filter. PostgREST renders it into the query
- * string, so a few hundred UUIDs blow past the proxy's request-line limit — the
- * same reason the calendar chunks its RSVP tally.
- */
-const ID_CHUNK = 100;
 
 async function adminClient(): Promise<CheckinClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -113,11 +212,11 @@ async function coverageCandidatesByUser(
   // past the proxy's request-line limit. The board passes every person in the
   // club, so this is not a theoretical size.
   const rows: MembershipSelection[] = [];
-  for (let i = 0; i < userIds.length; i += ID_CHUNK) {
+  for (const slice of chunks(userIds)) {
     const { data, error } = await admin
       .from("memberships")
       .select(MEMBERSHIP_COLUMNS)
-      .in("user_id", userIds.slice(i, i + ID_CHUNK));
+      .in("user_id", slice);
     if (error) throw new Error(error.message);
     rows.push(...(data ?? []));
   }
@@ -340,7 +439,10 @@ export async function applyCoverage(
     // because we know the exact row and amount we moved.
     if (decision.consumes_credit) await refundCredit(admin, decision);
     if (error) throw new Error(error.message);
-    throw new Error("Someone else covered that check-in first. Reload to see where it landed.");
+    throw new CheckInError(
+      "claim_lost",
+      "Someone else covered that check-in first. Reload to see where it landed.",
+    );
   }
 
   // Only now, and never the membership this check-in just drew on.
@@ -387,139 +489,266 @@ async function refundCredit(admin: CheckinClient, decision: CoverageDecision): P
  * entry is checkable on the day it runs. Deliberately narrower than
  * `listManagerEvents`: no RSVP tallies, a two-week window, because this is a
  * screen a manager reloads between classes on a phone.
+ *
+ * A plain function taking its client, so the manager agent API reads the same
+ * list (`list_check_in_classes`); the caller checks the manager role.
  */
+export async function listCheckInEventRows(admin: CheckinClient) {
+  await topUpHorizon(admin);
+
+  const { data, error } = await admin
+    .from("calendar_events")
+    .select("id, title, instructor_name, location, starts_at, ends_at, status")
+    .gte("starts_at", `${dateFromNow(-EVENT_WINDOW_DAYS)}T00:00:00.000Z`)
+    .lte("starts_at", `${dateFromNow(EVENT_WINDOW_DAYS)}T23:59:59.999Z`)
+    .order("starts_at", { ascending: true })
+    .limit(EVENT_LIMIT);
+  if (error) throw new Error(error.message);
+  const events = data ?? [];
+  // Ordered ascending, so hitting the cap drops the FUTURE end of the window —
+  // including today's class, which is the one the screen exists for.
+  if (events.length === EVENT_LIMIT)
+    console.warn(`[checkin] class list capped at ${EVENT_LIMIT}; later classes are missing`);
+
+  // Attendance tally per class, in slices (`id-chunks.ts` says why).
+  const counts = new Map<string, number>();
+  for (const slice of chunks(events.map((e) => e.id))) {
+    const { data: rows, error: cErr } = await admin
+      .from("session_checkins")
+      .select("event_id")
+      .in("event_id", slice);
+    if (cErr) throw new Error(cErr.message);
+    for (const r of rows ?? []) counts.set(r.event_id, (counts.get(r.event_id) ?? 0) + 1);
+  }
+
+  return events.map((e) => ({ ...e, checked_in_count: counts.get(e.id) ?? 0 }));
+}
+
 export const listCheckInEvents = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context as { supabase: CheckinClient; userId: string });
-    const admin = await adminClient();
-    await topUpHorizon(admin);
-
-    const { data, error } = await admin
-      .from("calendar_events")
-      .select("id, title, instructor_name, location, starts_at, ends_at, status")
-      .gte("starts_at", `${dateFromNow(-EVENT_WINDOW_DAYS)}T00:00:00.000Z`)
-      .lte("starts_at", `${dateFromNow(EVENT_WINDOW_DAYS)}T23:59:59.999Z`)
-      .order("starts_at", { ascending: true })
-      .limit(EVENT_LIMIT);
-    if (error) throw new Error(error.message);
-    const events = data ?? [];
-    // Ordered ascending, so hitting the cap drops the FUTURE end of the window —
-    // including today's class, which is the one the screen exists for.
-    if (events.length === EVENT_LIMIT)
-      console.warn(`[checkin] class list capped at ${EVENT_LIMIT}; later classes are missing`);
-
-    // Attendance tally per class. Chunked: `.in()` becomes a query-string
-    // filter, and a few hundred UUIDs blow past the proxy's request-line limit.
-    const counts = new Map<string, number>();
-    const ids = events.map((e) => e.id);
-    const CHUNK = 100;
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      const { data: rows, error: cErr } = await admin
-        .from("session_checkins")
-        .select("event_id")
-        .in("event_id", ids.slice(i, i + CHUNK));
-      if (cErr) throw new Error(cErr.message);
-      for (const r of rows ?? []) counts.set(r.event_id, (counts.get(r.event_id) ?? 0) + 1);
-    }
-
-    return events.map((e) => ({ ...e, checked_in_count: counts.get(e.id) ?? 0 }));
+    return listCheckInEventRows(await adminClient());
   });
 
 // ---- Manager: the door screen for one class ----
+
+type RosterProfile = {
+  user_id: string;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  preferred_name: string | null;
+  date_of_birth: string | null;
+};
+
+/**
+ * One person's row on the door's roster: who they are, and what checking them
+ * in to a class starting `at` would spend. The board builds every row with it
+ * and `previewCheckInRow` builds one, so the preview an agent reads back to a
+ * manager and the badge beside the button cannot be worked out differently.
+ */
+function rosterRow(
+  p: RosterProfile,
+  contact: RosterContact | undefined,
+  memberships: CoverageCandidate[],
+  at: string,
+) {
+  const decision = resolveCoverage({ memberships, at });
+  return {
+    user_id: p.user_id,
+    name: nameWithPreferred(p) || null,
+    email: contact?.email ?? null,
+    // What tells one child from another at the door, and what is withheld
+    // about everybody else. The rule is in `checkin.ts` with its reasoning
+    // and its tests, because the withholding half is a privacy decision
+    // rather than a rendering detail.
+    ...rosterHouseholdFields({
+      guardianName: contact?.guardianName ?? null,
+      dateOfBirth: p.date_of_birth,
+    }),
+    coverage: decision.coverage,
+    plan_name: decision.plan_name,
+    // Named to match `coveragePreviewLabel`, so the screen labels a roster
+    // row with the very function the server labels a decision with.
+    sessions_remaining_before: decision.sessions_remaining_before,
+    consumes_credit: decision.consumes_credit,
+    warnings: decision.warnings,
+  };
+}
+
+const BOARD_CHECKIN_COLUMNS =
+  "id, user_id, checked_in_at, coverage, membership_id, consumed_credit, warnings, note";
+
+/** One check-in on the board, as Here now lists it and the preview reports it. */
+function boardCheckIn(
+  c: {
+    id: string;
+    user_id: string;
+    checked_in_at: string;
+    coverage: string;
+    membership_id: string | null;
+    consumed_credit: boolean;
+    warnings: string[];
+    note: string | null;
+  },
+  name: string | null,
+  planByMembership: Map<string, string | null>,
+) {
+  return {
+    id: c.id,
+    user_id: c.user_id,
+    name,
+    checked_in_at: c.checked_in_at,
+    coverage: c.coverage,
+    membership_id: c.membership_id,
+    plan_name: c.membership_id ? (planByMembership.get(c.membership_id) ?? null) : null,
+    consumed_credit: c.consumed_credit,
+    warnings: c.warnings,
+    note: c.note,
+  };
+}
+
+/**
+ * Who is checked in to one class, newest first: Here now on the door screen,
+ * and `list_attendance` on the agent API. Reads only the people checked in to
+ * it, so a question about one class costs one class's worth of reads rather
+ * than the whole club's roster.
+ */
+export async function loadClassAttendance(admin: CheckinClient, data: { event_id: string }) {
+  const event = await loadClass(admin, data.event_id);
+
+  const { data: rows, error } = await admin
+    .from("session_checkins")
+    .select(BOARD_CHECKIN_COLUMNS)
+    .eq("event_id", data.event_id)
+    .order("checked_in_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  const checkins = rows ?? [];
+
+  const userIds = [...new Set(checkins.map((c) => c.user_id))];
+  const [{ data: profiles, error: pErr }, candidates] = await Promise.all([
+    userIds.length
+      ? admin
+          .from("profiles")
+          .select("user_id, first_name, middle_name, last_name, preferred_name")
+          .in("user_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
+    coverageCandidatesByUser(admin, userIds),
+  ]);
+  if (pErr) throw new Error(pErr.message);
+
+  const nameByUser = new Map(
+    (profiles ?? []).map((p) => [p.user_id, nameWithPreferred(p) || null]),
+  );
+  const planByMembership = new Map<string, string | null>();
+  for (const list of candidates.values())
+    for (const m of list) planByMembership.set(m.id, m.plan_name);
+
+  return {
+    event,
+    checkins: checkins.map((c) =>
+      boardCheckIn(c, nameByUser.get(c.user_id) ?? null, planByMembership),
+    ),
+  };
+}
 
 /**
  * Who is already in, and everyone who could be. The roster carries each person's
  * coverage preview so the manager sees what a tap will spend before they make
  * it. Only people with a waiver on file appear: a `profiles` row IS the waiver
  * on file, and the check-in's foreign key says the same thing in the database.
+ *
+ * Who is already in is `loadClassAttendance`, the read the agent API's
+ * `list_attendance` makes; the caller checks the manager role.
  */
+export async function loadCheckInBoard(admin: CheckinClient, data: { event_id: string }) {
+  const [{ event, checkins }, { data: profiles, error: pErr }] = await Promise.all([
+    loadClassAttendance(admin, data),
+    admin
+      .from("profiles")
+      .select("user_id, first_name, middle_name, last_name, preferred_name, date_of_birth")
+      .limit(ROSTER_LIMIT),
+  ]);
+  if (pErr) throw new Error(pErr.message);
+  const people = profiles ?? [];
+  if (people.length === ROSTER_LIMIT)
+    console.warn(`[checkin] roster capped at ${ROSTER_LIMIT}; some people are not listed`);
+
+  const userIds = people.map((p) => p.user_id);
+  const [emails, candidates] = await Promise.all([
+    rosterContactsByUserId(admin, userIds),
+    coverageCandidatesByUser(admin, userIds),
+  ]);
+
+  const roster = people.map((p) =>
+    rosterRow(p, emails.get(p.user_id), candidates.get(p.user_id) ?? [], event.starts_at),
+  );
+
+  return { event, roster, checkins };
+}
+
 export const getCheckInBoard = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => checkInBoardSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: CheckinClient; userId: string });
-    const admin = await adminClient();
-
-    const { data: event, error: eErr } = await admin
-      .from("calendar_events")
-      .select("id, title, instructor_name, location, starts_at, ends_at, status")
-      .eq("id", data.event_id)
-      .maybeSingle();
-    if (eErr) throw new Error(eErr.message);
-    if (!event) throw new Error("That class is not on the calendar.");
-
-    const [{ data: profiles, error: pErr }, { data: checkins, error: cErr }] = await Promise.all([
-      admin
-        .from("profiles")
-        .select("user_id, first_name, middle_name, last_name, preferred_name, date_of_birth")
-        .limit(ROSTER_LIMIT),
-      admin
-        .from("session_checkins")
-        .select("id, user_id, checked_in_at, coverage, membership_id, consumed_credit, warnings")
-        .eq("event_id", data.event_id)
-        .order("checked_in_at", { ascending: false }),
-    ]);
-    if (pErr) throw new Error(pErr.message);
-    if (cErr) throw new Error(cErr.message);
-    const people = profiles ?? [];
-    if (people.length === ROSTER_LIMIT)
-      console.warn(`[checkin] roster capped at ${ROSTER_LIMIT}; some people are not listed`);
-
-    const userIds = people.map((p) => p.user_id);
-    const [emails, candidates] = await Promise.all([
-      rosterContactsByUserId(admin, userIds),
-      coverageCandidatesByUser(admin, userIds),
-    ]);
-
-    const nameByUser = new Map(people.map((p) => [p.user_id, nameWithPreferred(p) || null]));
-    const planByMembership = new Map<string, string | null>();
-    for (const list of candidates.values())
-      for (const m of list) planByMembership.set(m.id, m.plan_name);
-
-    const roster = people.map((p) => {
-      const decision = resolveCoverage({
-        memberships: candidates.get(p.user_id) ?? [],
-        at: event.starts_at,
-      });
-      const contact = emails.get(p.user_id);
-      return {
-        user_id: p.user_id,
-        name: nameByUser.get(p.user_id) ?? null,
-        email: contact?.email ?? null,
-        // What tells one child from another at the door, and what is withheld
-        // about everybody else. The rule is in `checkin.ts` with its reasoning
-        // and its tests, because the withholding half is a privacy decision
-        // rather than a rendering detail.
-        ...rosterHouseholdFields({
-          guardianName: contact?.guardianName ?? null,
-          dateOfBirth: p.date_of_birth,
-        }),
-        coverage: decision.coverage,
-        plan_name: decision.plan_name,
-        // Named to match `coveragePreviewLabel`, so the screen labels a roster
-        // row with the very function the server labels a decision with.
-        sessions_remaining_before: decision.sessions_remaining_before,
-        consumes_credit: decision.consumes_credit,
-        warnings: decision.warnings,
-      };
-    });
-
-    return {
-      event,
-      roster,
-      checkins: (checkins ?? []).map((c) => ({
-        id: c.id,
-        user_id: c.user_id,
-        name: nameByUser.get(c.user_id) ?? null,
-        checked_in_at: c.checked_in_at,
-        coverage: c.coverage,
-        plan_name: c.membership_id ? (planByMembership.get(c.membership_id) ?? null) : null,
-        consumed_credit: c.consumed_credit,
-        warnings: c.warnings,
-      })),
-    };
+    return loadCheckInBoard(await adminClient(), data);
   });
+
+/**
+ * One person's row of the board for one class, and their check-in to it if
+ * they have one: what `get_check_in_preview` on the agent API reports.
+ *
+ * Built by the board's own row builders (`rosterRow`, `boardCheckIn`) from the
+ * same reads, for one person rather than the whole club. Reading the full
+ * board for one answer cost a lookup of every member's address and every
+ * membership in the club, and the roster's cap meant somebody past it would be
+ * told they had no waiver when `check_in` would accept them.
+ *
+ * Refuses what `check_in` refuses, through the same `loadCheckableClass`: a
+ * class that is not on the calendar, a cancelled class, and somebody with no
+ * waiver on file. A preview of what a check-in would spend, for a check-in that
+ * cannot happen, would be the one thing a manager is asked to confirm that is
+ * not so.
+ */
+export async function previewCheckInRow(
+  admin: CheckinClient,
+  data: { event_id: string; user_id: string },
+) {
+  const event = await loadCheckableClass(admin, data.event_id);
+
+  const [{ data: profile, error: pErr }, { data: checkin, error: cErr }] = await Promise.all([
+    admin
+      .from("profiles")
+      .select("user_id, first_name, middle_name, last_name, preferred_name, date_of_birth")
+      .eq("user_id", data.user_id)
+      .maybeSingle(),
+    admin
+      .from("session_checkins")
+      .select(BOARD_CHECKIN_COLUMNS)
+      .eq("event_id", data.event_id)
+      .eq("user_id", data.user_id)
+      .maybeSingle(),
+  ]);
+  if (pErr) throw new Error(pErr.message);
+  if (cErr) throw new Error(cErr.message);
+  if (!profile)
+    throw new CheckInError("no_waiver", "Only someone with a waiver on file can be checked in.");
+
+  const [contacts, candidates] = await Promise.all([
+    rosterContactsByUserId(admin, [data.user_id]),
+    coverageCandidatesByUser(admin, [data.user_id]),
+  ]);
+  const mine = candidates.get(data.user_id) ?? [];
+  const row = rosterRow(profile, contacts.get(data.user_id), mine, event.starts_at);
+  const planByMembership = new Map(mine.map((m) => [m.id, m.plan_name]));
+  return {
+    event,
+    row,
+    checkin: checkin ? boardCheckIn(checkin, row.name, planByMembership) : null,
+  };
+}
 
 // ---- Manager: the needs-attention list ----
 
@@ -528,28 +757,27 @@ export const getCheckInBoard = createServerFn({ method: "POST" })
  * to the class on screen, or an uncovered check-in from last Tuesday would be
  * invisible because the picker is on today. Each row carries the memberships it
  * could now be attached to, so fixing one is a single round trip.
+ *
+ * A plain function taking its client, so the manager agent API reads the same
+ * list (`list_uncovered_check_ins`); the caller checks the manager role.
  */
-export const listUncoveredCheckIns = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await requireManager(context as { supabase: CheckinClient; userId: string });
-    const admin = await adminClient();
+export async function listUncoveredCheckInRows(admin: CheckinClient) {
+  const { data: rows, error } = await admin
+    .from("session_checkins")
+    .select("id, event_id, user_id, checked_in_at, warnings, note")
+    .eq("coverage", "none")
+    .order("checked_in_at", { ascending: false })
+    .limit(UNCOVERED_LIMIT);
+  if (error) throw new Error(error.message);
+  const uncovered = rows ?? [];
+  if (uncovered.length === UNCOVERED_LIMIT)
+    console.warn(`[checkin] needs-attention list capped at ${UNCOVERED_LIMIT}`);
+  if (!uncovered.length) return [];
 
-    const { data: rows, error } = await admin
-      .from("session_checkins")
-      .select("id, event_id, user_id, checked_in_at, warnings, note")
-      .eq("coverage", "none")
-      .order("checked_in_at", { ascending: false })
-      .limit(UNCOVERED_LIMIT);
-    if (error) throw new Error(error.message);
-    const uncovered = rows ?? [];
-    if (uncovered.length === UNCOVERED_LIMIT)
-      console.warn(`[checkin] needs-attention list capped at ${UNCOVERED_LIMIT}`);
-    if (!uncovered.length) return [];
-
-    const userIds = [...new Set(uncovered.map((r) => r.user_id))];
-    const eventIds = [...new Set(uncovered.map((r) => r.event_id))];
-    const [{ data: profiles }, { data: events }, candidates] = await Promise.all([
+  const userIds = [...new Set(uncovered.map((r) => r.user_id))];
+  const eventIds = [...new Set(uncovered.map((r) => r.event_id))];
+  const [{ data: profiles, error: pErr }, { data: events, error: eErr }, candidates] =
+    await Promise.all([
       admin
         .from("profiles")
         .select("user_id, first_name, middle_name, last_name, preferred_name")
@@ -557,35 +785,47 @@ export const listUncoveredCheckIns = createServerFn({ method: "GET" })
       admin.from("calendar_events").select("id, title, starts_at").in("id", eventIds),
       coverageCandidatesByUser(admin, userIds),
     ]);
+  // A failed lookup is an error, not a row with no name and no class: the
+  // class's start is what `would_cover` and `memberships` are worked out
+  // against, so a missing one would answer for the wrong moment.
+  if (pErr) throw new Error(pErr.message);
+  if (eErr) throw new Error(eErr.message);
 
-    const nameByUser = new Map(
-      (profiles ?? []).map((p) => [p.user_id, nameWithPreferred(p) || null]),
-    );
-    const eventById = new Map((events ?? []).map((e) => [e.id, e]));
+  const nameByUser = new Map(
+    (profiles ?? []).map((p) => [p.user_id, nameWithPreferred(p) || null]),
+  );
+  const eventById = new Map((events ?? []).map((e) => [e.id, e]));
 
-    return uncovered.map((r) => {
-      const event = eventById.get(r.event_id) ?? null;
-      const mine = candidates.get(r.user_id) ?? [];
-      const at = event?.starts_at ?? r.checked_in_at;
-      return {
-        id: r.id,
-        user_id: r.user_id,
-        name: nameByUser.get(r.user_id) ?? null,
-        event_id: r.event_id,
-        event_title: event?.title ?? null,
-        event_starts_at: event?.starts_at ?? null,
-        checked_in_at: r.checked_in_at,
-        warnings: r.warnings,
-        note: r.note,
-        // What it would resolve to right now: usually the whole answer, since
-        // the reason it is uncovered is normally a payment that has since landed.
-        would_cover: resolveCoverage({ memberships: mine, at }).coverage !== "none",
-        memberships: attachableMemberships(mine, at),
-      };
-    });
+  return uncovered.map((r) => {
+    const event = eventById.get(r.event_id) ?? null;
+    const mine = candidates.get(r.user_id) ?? [];
+    const at = event?.starts_at ?? r.checked_in_at;
+    return {
+      id: r.id,
+      user_id: r.user_id,
+      name: nameByUser.get(r.user_id) ?? null,
+      event_id: r.event_id,
+      event_title: event?.title ?? null,
+      event_starts_at: event?.starts_at ?? null,
+      checked_in_at: r.checked_in_at,
+      warnings: r.warnings,
+      note: r.note,
+      // What it would resolve to right now: usually the whole answer, since
+      // the reason it is uncovered is normally a payment that has since landed.
+      would_cover: resolveCoverage({ memberships: mine, at }).coverage !== "none",
+      memberships: attachableMemberships(mine, at),
+    };
+  });
+}
+
+export const listUncoveredCheckIns = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireManager(context as { supabase: CheckinClient; userId: string });
+    return listUncoveredCheckInRows(await adminClient());
   });
 
-// ---- Manager: the three writes ----
+// ---- Manager: the writes ----
 
 /**
  * Check one person in to one class.
@@ -596,104 +836,135 @@ export const listUncoveredCheckIns = createServerFn({ method: "GET" })
  * anything fails after the insert, the result is an uncovered check-in that the
  * needs-attention list already knows how to fix; the other order fails as a
  * spent credit with no attendance record, which nobody ever notices.
+ *
+ * A plain function taking its client and the acting manager, so the manager
+ * agent API checks people in through the same code (`check_in`); the caller
+ * checks the manager role.
  */
+export async function checkInPersonRow(
+  admin: CheckinClient,
+  data: { event_id: string; user_id: string; note?: string },
+  actingAs: string,
+) {
+  const event = await loadCheckableClass(admin, data.event_id);
+
+  const { data: profile, error: pErr } = await admin
+    .from("profiles")
+    .select("user_id")
+    .eq("user_id", data.user_id)
+    .maybeSingle();
+  if (pErr) throw new Error(pErr.message);
+  if (!profile)
+    throw new CheckInError("no_waiver", "Only someone with a waiver on file can be checked in.");
+
+  // Two attempts, for one race: the insert collides with a check-in that is
+  // undone before we can read it back. Answering "already checked in" then
+  // would tell the caller somebody is on the list who is not on it any more,
+  // so the second attempt checks them in for real.
+  let inserted: { id: string } | null = null;
+  for (let attempt = 0; attempt < 2 && !inserted; attempt++) {
+    const { data: row, error: iErr } = await admin
+      .from("session_checkins")
+      .insert({
+        event_id: data.event_id,
+        user_id: data.user_id,
+        checked_in_by: actingAs,
+        note: data.note?.trim() || null,
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (!iErr) {
+      inserted = row;
+      break;
+    }
+    if (iErr.code !== "23505") throw new Error(iErr.message);
+
+    // Already on the list. Checking someone in twice is not an error at the
+    // desk, so say so and stop rather than touching their credits again. The
+    // existing row's id comes back with it, so a caller that was never told
+    // its first attempt landed (an agent retrying) can still undo or move the
+    // check-in it made.
+    const { data: existing, error: xErr } = await admin
+      .from("session_checkins")
+      .select("id")
+      .eq("event_id", data.event_id)
+      .eq("user_id", data.user_id)
+      .maybeSingle();
+    if (xErr) throw new Error(xErr.message);
+    if (existing) return { already_checked_in: true, checkin_id: existing.id, decision: null };
+  }
+  if (!inserted) throw new Error("Could not record the check-in.");
+
+  const decision = await applyCoverage(admin, {
+    checkInId: inserted.id,
+    userId: data.user_id,
+    at: event.starts_at,
+  });
+  return { already_checked_in: false, checkin_id: inserted.id, decision };
+}
+
 export const checkInPerson = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => checkInSchema.parse(d))
   .handler(async ({ data, context }) => {
     const ctx = context as { supabase: CheckinClient; userId: string };
     await requireManager(ctx);
-    const admin = await adminClient();
-
-    const { data: event, error: eErr } = await admin
-      .from("calendar_events")
-      .select("id, starts_at, status")
-      .eq("id", data.event_id)
-      .maybeSingle();
-    if (eErr) throw new Error(eErr.message);
-    if (!event) throw new Error("That class is not on the calendar.");
-    if (event.status === "cancelled")
-      throw new Error("That class was cancelled, so nobody can be checked in to it.");
-
-    const { data: profile, error: pErr } = await admin
-      .from("profiles")
-      .select("user_id")
-      .eq("user_id", data.user_id)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    if (!profile) throw new Error("Only someone with a waiver on file can be checked in.");
-
-    const { data: inserted, error: iErr } = await admin
-      .from("session_checkins")
-      .insert({
-        event_id: data.event_id,
-        user_id: data.user_id,
-        checked_in_by: ctx.userId,
-        note: data.note?.trim() || null,
-      })
-      .select("id")
-      .maybeSingle();
-
-    if (iErr) {
-      // Already on the list. Checking someone in twice is not an error at the
-      // desk, so say so and stop rather than touching their credits again.
-      if (iErr.code === "23505") return { already_checked_in: true, decision: null };
-      throw new Error(iErr.message);
-    }
-    if (!inserted) throw new Error("Could not record the check-in.");
-
-    const decision = await applyCoverage(admin, {
-      checkInId: inserted.id,
-      userId: data.user_id,
-      at: event.starts_at,
-    });
-    return { already_checked_in: false, decision };
+    return checkInPersonRow(await adminClient(), data, ctx.userId);
   });
 
 /**
  * Give an uncovered check-in its cover, spending the credit at that moment.
  * With no `membership_id` it re-runs the door's own precedence, which is the
  * right answer once a late bank transfer has been reconciled.
+ *
+ * A plain function taking its client (`attach_check_in` on the agent API).
  */
+export async function attachCheckInRow(
+  admin: CheckinClient,
+  data: { id: string; membership_id?: string },
+) {
+  const { data: row, error } = await admin
+    .from("session_checkins")
+    .select("id, user_id, event_id, coverage, checked_in_at")
+    .eq("id", data.id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!row) throw new CheckInError("not_found", NO_SUCH_CHECK_IN);
+  if (row.coverage !== "none")
+    throw new CheckInError(
+      "already_covered",
+      "That check-in is already covered. To change what paid for it, move it from the person's page.",
+    );
+  if (data.membership_id) await assertMembershipIsTheirs(admin, data.membership_id, row.user_id);
+
+  const { data: event } = await admin
+    .from("calendar_events")
+    .select("starts_at")
+    .eq("id", row.event_id)
+    .maybeSingle();
+
+  const decision = await applyCoverage(admin, {
+    checkInId: row.id,
+    userId: row.user_id,
+    at: event?.starts_at ?? row.checked_in_at,
+    onlyMembershipId: data.membership_id,
+  });
+  return { decision };
+}
+
 export const attachCheckInCoverage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => attachCheckInSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const ctx = context as { supabase: CheckinClient; userId: string };
-    await requireManager(ctx);
-    const admin = await adminClient();
-
-    const { data: row, error } = await admin
-      .from("session_checkins")
-      .select("id, user_id, event_id, coverage, checked_in_at")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!row) throw new Error("That check-in no longer exists.");
-    if (row.coverage !== "none")
-      throw new Error(
-        "That check-in is already covered. Undo it first to change what paid for it.",
-      );
-
-    const { data: event } = await admin
-      .from("calendar_events")
-      .select("starts_at")
-      .eq("id", row.event_id)
-      .maybeSingle();
-
-    const decision = await applyCoverage(admin, {
-      checkInId: row.id,
-      userId: row.user_id,
-      at: event?.starts_at ?? row.checked_in_at,
-      onlyMembershipId: data.membership_id,
-    });
-    return { decision };
+    await requireManager(context as { supabase: CheckinClient; userId: string });
+    return attachCheckInRow(await adminClient(), data);
   });
 
 /**
  * Move an already-covered check-in onto a different membership.
  *
- * `attachCheckInCoverage` above handles the uncovered row; this handles the one
+ * `attachCheckInRow` above handles the uncovered row; this handles the one
  * that is covered by the wrong membership. Until now the only way to correct
  * that was to undo the check-in and record it again, which deletes the row and
  * loses `checked_in_at` — the record of when they were actually on the mat.
@@ -710,59 +981,83 @@ export const attachCheckInCoverage = createServerFn({ method: "POST" })
  * lands it uncovered and warns, rather than being force-fitted. The old
  * membership has its credit back either way, which is the honest outcome: the
  * manager asked to take the class off it.
+ *
+ * A plain function taking its client (`move_check_in` on the agent API).
  */
-export const transferCheckInCoverage = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => transferCheckInSchema.parse(d))
-  .handler(async ({ data, context }) => {
-    const ctx = context as { supabase: CheckinClient; userId: string };
-    await requireManager(ctx);
-    const admin = await adminClient();
+export async function transferCheckInRow(
+  admin: CheckinClient,
+  data: { id: string; membership_id: string },
+) {
+  const { data: row, error } = await admin
+    .from("session_checkins")
+    .select(
+      "id, user_id, event_id, coverage, membership_id, consumed_credit, closed_membership, checked_in_at",
+    )
+    .eq("id", data.id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!row) throw new CheckInError("not_found", NO_SUCH_CHECK_IN);
+  if (row.coverage === "none")
+    throw new CheckInError(
+      "not_covered",
+      "That check-in is not covered by anything yet, so attach it instead.",
+    );
+  if (row.membership_id === data.membership_id)
+    throw new CheckInError("same_membership", "That check-in is already on that membership.");
+  // Before the release below, which refunds the old cover: refusing after it
+  // would leave the class uncovered and the old credit handed back.
+  await assertMembershipIsTheirs(admin, data.membership_id, row.user_id);
 
-    const { data: row, error } = await admin
-      .from("session_checkins")
-      .select(
-        "id, user_id, event_id, coverage, membership_id, consumed_credit, closed_membership, checked_in_at",
-      )
-      .eq("id", data.id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!row) throw new Error("That check-in no longer exists.");
-    if (row.coverage === "none")
-      throw new Error("That check-in is not covered by anything yet, so attach it instead.");
-    if (row.membership_id === data.membership_id)
-      throw new Error("That check-in is already on that membership.");
+  // The claim. Losing it means another manager is already moving this row.
+  //
+  // Pinned on `membership_id` as well as `coverage`, because coverage alone
+  // does not identify the state this call read. Two managers moving the same
+  // check-in: the first releases it, refunds A and re-covers it from B, all
+  // before the second's update runs — whose `coverage` filter then matches
+  // the NEW state and releases it a second time, refunding A again off a
+  // stale row while B's credit stays spent and the class ends up uncovered.
+  // Pinning the membership makes the second update match nothing, which is
+  // the whole point of a compare-and-swap.
+  let claim = admin
+    .from("session_checkins")
+    .update({
+      coverage: "none",
+      membership_id: null,
+      consumed_credit: false,
+      closed_membership: false,
+    })
+    .eq("id", row.id)
+    .eq("coverage", row.coverage);
+  claim = row.membership_id
+    ? claim.eq("membership_id", row.membership_id)
+    : claim.is("membership_id", null);
+  const { data: released, error: relErr } = await claim.select("id");
+  if (relErr) throw new Error(relErr.message);
+  if ((released ?? []).length === 0)
+    throw new CheckInError(
+      "claim_lost",
+      "Someone else moved that check-in first. Reload to see where it landed.",
+    );
 
-    // The claim. Losing it means another manager is already moving this row.
-    //
-    // Pinned on `membership_id` as well as `coverage`, because coverage alone
-    // does not identify the state this call read. Two managers moving the same
-    // check-in: the first releases it, refunds A and re-covers it from B, all
-    // before the second's update runs — whose `coverage` filter then matches
-    // the NEW state and releases it a second time, refunding A again off a
-    // stale row while B's credit stays spent and the class ends up uncovered.
-    // Pinning the membership makes the second update match nothing, which is
-    // the whole point of a compare-and-swap.
-    let claim = admin
-      .from("session_checkins")
-      .update({
-        coverage: "none",
-        membership_id: null,
-        consumed_credit: false,
-        closed_membership: false,
-      })
-      .eq("id", row.id)
-      .eq("coverage", row.coverage);
-    claim = row.membership_id
-      ? claim.eq("membership_id", row.membership_id)
-      : claim.is("membership_id", null);
-    const { data: released, error: relErr } = await claim.select("id");
-    if (relErr) throw new Error(relErr.message);
-    if ((released ?? []).length === 0)
-      throw new Error("Someone else moved that check-in first. Reload to see where it landed.");
-
+  try {
     await refundCheckInCredit(admin, row);
+  } catch (e) {
+    // Released, so the class is uncovered as well as the old membership being
+    // short. A move's caller has to be told both, or it reports only the
+    // missing session and nobody attaches the class to what was asked for.
+    if (e instanceof CheckInError && e.reason === "refund_failed")
+      throw new CheckInError(
+        "refund_failed",
+        "The class was taken off the old membership, but its session could not be given back, so that membership is one session short. The class is uncovered for now: attach it to the membership you wanted, and tell whoever looks after the club's records about the missing session. Moving it again will not fix either.",
+      );
+    throw e;
+  }
 
+  // From here the check-in is released and the old membership has its session
+  // back. A failure now must say so, not read as worth retrying: a retry finds
+  // an uncovered check-in and is refused as not_covered, which hides that the
+  // first half of the move happened.
+  try {
     const { data: event } = await admin
       .from("calendar_events")
       .select("starts_at")
@@ -776,6 +1071,22 @@ export const transferCheckInCoverage = createServerFn({ method: "POST" })
       onlyMembershipId: data.membership_id,
     });
     return { decision };
+  } catch (e) {
+    if (e instanceof CheckInError) throw e;
+    console.error(`[checkin] move of ${row.id} released but not re-covered:`, e);
+    throw new CheckInError(
+      "move_incomplete",
+      "The class was taken off the old membership, which has its session back, but could not be put on the new one. It is uncovered for now: attach it to the membership you wanted.",
+    );
+  }
+}
+
+export const transferCheckInCoverage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => transferCheckInSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context as { supabase: CheckinClient; userId: string });
+    return transferCheckInRow(await adminClient(), data);
   });
 
 /**
@@ -838,20 +1149,37 @@ export async function undoCheckInRow(
 export async function refundCheckInCredit(
   admin: CheckinClient,
   row: {
+    id: string;
     membership_id: string | null;
     consumed_credit: boolean | null;
     closed_membership: boolean | null;
   },
 ): Promise<{ refunded: boolean; reopened?: boolean }> {
   if (!row.consumed_credit || !row.membership_id) return { refunded: false };
+  const membershipId = row.membership_id;
+
+  // The check-in is already released, so any failure from here leaves the
+  // membership a session short with nothing left to retry. Say exactly that,
+  // and leave the membership's id in the log, since no screen can add a
+  // session back.
+  const lost = (cause: unknown) => {
+    console.error(
+      `[checkin] check-in ${row.id} was released but its session on membership ${membershipId} was not given back:`,
+      cause,
+    );
+    return new CheckInError(
+      "refund_failed",
+      "The check-in was released, but its session could not be given back, so that membership is one session short. Doing it again will not fix it: tell whoever looks after the club's records.",
+    );
+  };
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const { data: m, error: mErr } = await admin
       .from("memberships")
       .select("id, status, sessions_remaining, ends_at")
-      .eq("id", row.membership_id)
+      .eq("id", membershipId)
       .maybeSingle();
-    if (mErr) throw new Error(mErr.message);
+    if (mErr) throw lost(mErr.message);
     // The membership is gone: nothing to refund, and the check-in is already
     // released, so there is nothing left to reconcile.
     if (!m || m.sessions_remaining === null) return { refunded: false };
@@ -870,8 +1198,8 @@ export async function refundCheckInCredit(
       .eq("id", m.id)
       .eq("sessions_remaining", m.sessions_remaining)
       .select("id");
-    if (uErr) throw new Error(uErr.message);
+    if (uErr) throw lost(uErr.message);
     if ((updated ?? []).length > 0) return { refunded: true, reopened: reopen };
   }
-  throw new Error("The check-in was released but the session could not be given back. Try again.");
+  throw lost("the balance kept changing under two attempts");
 }

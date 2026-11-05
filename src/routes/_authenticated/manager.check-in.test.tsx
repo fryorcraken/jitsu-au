@@ -3,7 +3,7 @@
 // whether it is usable there: the roster is on screen when there is no signal,
 // and the manager is told when what they are reading is not live.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { CHECKIN_CACHE_MAX_AGE_MS } from "@/lib/checkin-cache";
@@ -13,6 +13,7 @@ import { writeCache } from "@/lib/local-cache";
 const listCheckInEvents = vi.fn();
 const getCheckInBoard = vi.fn();
 const listUncoveredCheckIns = vi.fn();
+const undoCheckIn = vi.fn();
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => opts,
@@ -29,7 +30,7 @@ vi.mock("@/lib/checkin.functions", () => ({
   getCheckInBoard: (...a: unknown[]) => getCheckInBoard(...a),
   listUncoveredCheckIns: (...a: unknown[]) => listUncoveredCheckIns(...a),
   checkInPerson: vi.fn(),
-  undoCheckIn: vi.fn(),
+  undoCheckIn: (...a: unknown[]) => undoCheckIn(...a),
   attachCheckInCoverage: vi.fn(),
 }));
 
@@ -185,5 +186,28 @@ describe("/manager/check-in offline", () => {
       expect(screen.getByText(/The class list could not be loaded/i)).toBeInTheDocument(),
     );
     expect(screen.queryByText("Jane L.")).not.toBeInTheDocument();
+  });
+});
+
+// Some failures leave work for somebody: an undo that removed the check-in but
+// could not give the session back leaves a membership a session short. A toast
+// is gone in four seconds, so the failure stays on screen until dismissed.
+describe("/manager/check-in when a press does not go through", () => {
+  it("keeps a failed undo on screen, in its own words, until dismissed", async () => {
+    listCheckInEvents.mockResolvedValue([{ ...EVENT, checked_in_count: 1 }]);
+    getCheckInBoard.mockResolvedValue(BOARD);
+    undoCheckIn.mockRejectedValue(
+      new Error("The check-in was released, but that membership is one session short."),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Undoing Jane L. did not finish.");
+    expect(alert).toHaveTextContent("that membership is one session short");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 });

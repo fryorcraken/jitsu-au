@@ -3,6 +3,10 @@ import { DEFAULT_EVENT_LOCATION } from "./calendar";
 import {
   agentCreateCalendarEntrySchema,
   agentListCalendarEventsSchema,
+  agentAttachCheckInSchema,
+  agentCheckInSchema,
+  agentMoveCheckInSchema,
+  agentNoCheckInParamsSchema,
   agentGetBlogPostSchema,
   agentSaveBlogPostSchema,
   asBlogPostKind,
@@ -3826,5 +3830,37 @@ describe("the blog through the manager agent API", () => {
     ).toBe(true);
     expect(agentStartBlogImageUploadSchema.safeParse({ data: "iVBO" }).success).toBe(false);
     expect(agentStartBlogImageUploadSchema.safeParse({ post_id: "draft" }).success).toBe(false);
+  });
+});
+
+// The agent's check-in schemas are the screens' own, made strict. A misspelt
+// field must be refused rather than stripped: a dropped membership_id on attach
+// would let the door's rules choose and spend a membership nobody asked for.
+describe("the agent's check-in schemas", () => {
+  const id = "0b6f1d2e-3c4a-4b5c-8d6e-7f8091a2b3c4";
+  const other = "9c8b7a6d-5e4f-4a3b-9c2d-1e0f2a3b4c5d";
+
+  it("accept what the screens send", () => {
+    expect(agentCheckInSchema.safeParse({ event_id: id, user_id: other }).success).toBe(true);
+    expect(
+      agentCheckInSchema.safeParse({ event_id: id, user_id: other, note: "Late" }).success,
+    ).toBe(true);
+    expect(agentAttachCheckInSchema.safeParse({ id }).success).toBe(true);
+    expect(agentAttachCheckInSchema.safeParse({ id, membership_id: other }).success).toBe(true);
+    expect(agentMoveCheckInSchema.safeParse({ id, membership_id: other }).success).toBe(true);
+  });
+
+  it("refuse a misspelt membership rather than fall back to the door's choice", () => {
+    expect(agentAttachCheckInSchema.safeParse({ id, membershipId: other }).success).toBe(false);
+    expect(agentMoveCheckInSchema.safeParse({ id, membershipId: other }).success).toBe(false);
+  });
+
+  it("refuse a filter the lists do not have, rather than return everything", () => {
+    expect(agentNoCheckInParamsSchema.safeParse({}).success).toBe(true);
+    expect(agentNoCheckInParamsSchema.safeParse({ event_id: id }).success).toBe(false);
+  });
+
+  it("refuse a move with nowhere to move to", () => {
+    expect(agentMoveCheckInSchema.safeParse({ id }).success).toBe(false);
   });
 });

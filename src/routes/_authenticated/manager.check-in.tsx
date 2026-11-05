@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
+import { ActionFailure } from "@/components/site/ActionFailure";
 import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
 import { Pill } from "@/components/site/StatusPill";
@@ -121,6 +122,14 @@ function CheckInPage() {
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [openAttach, setOpenAttach] = useState<string | null>(null);
+  // A failed press stays on screen, beside the section it was made in, until it
+  // is dismissed or the next press starts: some of these failures leave work
+  // for somebody (a session not given back), and a toast is gone in four seconds.
+  const [actionError, setActionError] = useState<{
+    where: "checkin" | "here" | "attention";
+    title: string;
+    message: string;
+  } | null>(null);
   const [attachChoice, setAttachChoice] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -232,6 +241,7 @@ function CheckInPage() {
   async function doCheckIn(row: RosterRow) {
     if (!eventId) return;
     setBusy(true);
+    setActionError(null);
     try {
       const res = await checkIn({ data: { event_id: eventId, user_id: row.user_id } });
       const who = row.name ?? "They";
@@ -249,7 +259,11 @@ function CheckInPage() {
       setSearch("");
       await refreshAfterWrite();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not check them in");
+      setActionError({
+        where: "checkin",
+        title: `${row.name ?? "They"} could not be checked in.`,
+        message: describeLoadError(e, "The check-in did not go through."),
+      });
     } finally {
       setBusy(false);
     }
@@ -257,6 +271,7 @@ function CheckInPage() {
 
   async function doUndo(id: string, name: string | null) {
     setBusy(true);
+    setActionError(null);
     try {
       const res = await undo({ data: { id } });
       if (!res.removed) {
@@ -272,7 +287,14 @@ function CheckInPage() {
       }
       await refreshAfterWrite();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not undo that check-in");
+      setActionError({
+        where: "here",
+        title: `Undoing ${name ?? "that check-in"} did not finish.`,
+        message: describeLoadError(e, "The check-in could not be removed."),
+      });
+      // It may have gone part of the way (removed, but the session not given
+      // back), so show what is really there now rather than the old row.
+      await refreshAfterWrite().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -280,6 +302,7 @@ function CheckInPage() {
 
   async function doAttach(row: UncoveredRow) {
     setBusy(true);
+    setActionError(null);
     try {
       const chosen = attachChoice[row.id];
       const res = await attach({
@@ -295,7 +318,11 @@ function CheckInPage() {
       }
       await refreshAfterWrite();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not attach that check-in");
+      setActionError({
+        where: "attention",
+        title: `${row.name ?? "That check-in"} could not be attached.`,
+        message: describeLoadError(e, "Nothing was attached."),
+      });
     } finally {
       setBusy(false);
     }
@@ -395,6 +422,13 @@ function CheckInPage() {
       {/* ---- Here now ---- */}
       <div className="space-y-2">
         <h2 className="text-xl font-bold">Here now{board ? ` (${board.checkins.length})` : ""}</h2>
+        {actionError?.where === "here" && (
+          <ActionFailure
+            title={actionError.title}
+            message={actionError.message}
+            onDismiss={() => setActionError(null)}
+          />
+        )}
         {boardError && (
           <LoadFailure
             what="The roster"
@@ -461,6 +495,13 @@ function CheckInPage() {
       {/* ---- Everyone else ---- */}
       <div className="space-y-2">
         <h2 className="text-xl font-bold">Check someone in</h2>
+        {actionError?.where === "checkin" && (
+          <ActionFailure
+            title={actionError.title}
+            message={actionError.message}
+            onDismiss={() => setActionError(null)}
+          />
+        )}
         <Input
           autoFocus
           placeholder="Search by name, email or parent"
@@ -565,6 +606,13 @@ function CheckInPage() {
           Check-ins nothing covered, from every class. Once the person is sorted out, attach the
           check-in here and the session is used then.
         </p>
+        {actionError?.where === "attention" && (
+          <ActionFailure
+            title={actionError.title}
+            message={actionError.message}
+            onDismiss={() => setActionError(null)}
+          />
+        )}
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-left">
