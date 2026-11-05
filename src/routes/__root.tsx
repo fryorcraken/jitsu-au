@@ -134,10 +134,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "Learn practical self-defence at UTS Ultimo. Beginner-friendly Japanese Jiu-Jitsu classes Mon, Wed & Sat. First two sessions free.",
       },
       // Set once here so every page has a share image. Child routes override
-      // the title/description/url around it, not the picture.
+      // the title/description/url around it; a blog post swaps in its cover.
+      // No width/height: they would stay behind on a post whose cover differs.
       { property: "og:image", content: SOCIAL_IMAGE.url },
-      { property: "og:image:width", content: String(SOCIAL_IMAGE.width) },
-      { property: "og:image:height", content: String(SOCIAL_IMAGE.height) },
       { property: "og:image:alt", content: SOCIAL_IMAGE.alt },
       { name: "twitter:image", content: SOCIAL_IMAGE.url },
       { name: "twitter:image:alt", content: SOCIAL_IMAGE.alt },
