@@ -167,6 +167,12 @@ people in to a class that did not run.
    is for the agent API, but it lives in the shared function. Without it a
    Move would hand back the real cover first and then land uncovered.
 
+   If an Undo or a Move fails part of the way (the check-in released, but a
+   session not given back, or a move that could not land on the new membership),
+   the screen keeps the failure on screen in its own words until it is
+   dismissed: those failures leave a membership a session short or a class
+   uncovered, and a toast would be gone before anybody read it.
+
    The order is the same guard Undo uses. The row is **released first**, with a
    compare-and-swap against the coverage it held, and the old membership's credit
    is refunded only once that release is won: exactly one caller can win, so

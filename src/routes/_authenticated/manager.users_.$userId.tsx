@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ChevronDown, Contact, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
+import { ActionFailure } from "@/components/site/ActionFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
@@ -614,6 +615,12 @@ function ManagerUserPage() {
   const moveCoverage = useServerFn(transferCheckInCoverage);
   const [moveChoice, setMoveChoice] = useState<Record<string, string>>({});
   const [moving, setMoving] = useState<string | null>(null);
+  // A failed attach or move stays on screen until dismissed or the next one
+  // starts: a move that fails part way can leave a class uncovered or a
+  // membership a session short, which a toast would report for four seconds.
+  const [coverageError, setCoverageError] = useState<{ title: string; message: string } | null>(
+    null,
+  );
 
   const load = useCallback(
     async (resetOpen: boolean) => {
@@ -694,6 +701,7 @@ function ManagerUserPage() {
 
   async function attachCheckIn(id: string) {
     setAttaching(id);
+    setCoverageError(null);
     try {
       const chosen = attachChoice[id];
       const res = await attachCoverage({
@@ -706,7 +714,10 @@ function ManagerUserPage() {
       }
       await load(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not attach that check-in");
+      setCoverageError({
+        title: "That check-in could not be attached.",
+        message: describeLoadError(e, "Nothing was attached."),
+      });
     } finally {
       setAttaching(null);
     }
@@ -721,6 +732,7 @@ function ManagerUserPage() {
     const target = moveChoice[id];
     if (!target) return;
     setMoving(id);
+    setCoverageError(null);
     try {
       const res = await moveCoverage({ data: { id, membership_id: target } });
       // The credit came off the old membership either way — the manager asked
@@ -734,7 +746,10 @@ function ManagerUserPage() {
         toast.success(`Moved to ${res.decision.plan_name ?? "that membership"}.`);
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not move that check-in");
+      setCoverageError({
+        title: "Moving that check-in did not finish.",
+        message: describeLoadError(e, "The check-in could not be moved."),
+      });
     } finally {
       // Reload whatever happened, not only on success. A move that fails part
       // way has already released the check-in and refunded the old membership,
@@ -1086,6 +1101,13 @@ function ManagerUserPage() {
           </Link>
           .
         </p>
+        {coverageError && (
+          <ActionFailure
+            title={coverageError.title}
+            message={coverageError.message}
+            onDismiss={() => setCoverageError(null)}
+          />
+        )}
         {checkins.length > 0 && (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">

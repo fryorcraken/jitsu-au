@@ -36,6 +36,7 @@ import { topUpHorizon } from "@/lib/calendar.functions";
 import { ensureCasualInvoiceEmailed } from "@/lib/membership.functions";
 import type { ClubUserEmail } from "@/lib/club-users";
 import { loadHouseholdContacts } from "@/lib/household-email";
+import { chunks } from "@/lib/id-chunks";
 
 type CheckinClient = SupabaseClient<Database>;
 
@@ -84,6 +85,35 @@ export class CheckInError extends Error {
 
 const NO_SUCH_CLASS = "That class is not on the calendar.";
 const NO_SUCH_CHECK_IN = "That check-in no longer exists.";
+
+const CLASS_COLUMNS = "id, title, instructor_name, location, starts_at, ends_at, status";
+
+/** A class on the calendar, or `not_found`. */
+async function loadClass(admin: CheckinClient, eventId: string) {
+  const { data: event, error } = await admin
+    .from("calendar_events")
+    .select(CLASS_COLUMNS)
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!event) throw new CheckInError("not_found", NO_SUCH_CLASS);
+  return event;
+}
+
+/**
+ * A class somebody can be checked in to: on the calendar and not cancelled.
+ * One function for `check_in` and its preview, because the preview's promise is
+ * to refuse exactly what the check-in would.
+ */
+async function loadCheckableClass(admin: CheckinClient, eventId: string) {
+  const event = await loadClass(admin, eventId);
+  if (event.status === "cancelled")
+    throw new CheckInError(
+      "class_cancelled",
+      "That class was cancelled, so nobody can be checked in to it.",
+    );
+  return event;
+}
 
 /**
  * Refuse a named membership that is not the check-in's own person's.
@@ -141,13 +171,6 @@ type MembershipSelection = Pick<
   | "created_at"
 >;
 
-/**
- * How many ids to put in one `.in()` filter. PostgREST renders it into the query
- * string, so a few hundred UUIDs blow past the proxy's request-line limit — the
- * same reason the calendar chunks its RSVP tally.
- */
-const ID_CHUNK = 100;
-
 async function adminClient(): Promise<CheckinClient> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin as unknown as CheckinClient;
@@ -189,11 +212,11 @@ async function coverageCandidatesByUser(
   // past the proxy's request-line limit. The board passes every person in the
   // club, so this is not a theoretical size.
   const rows: MembershipSelection[] = [];
-  for (let i = 0; i < userIds.length; i += ID_CHUNK) {
+  for (const slice of chunks(userIds)) {
     const { data, error } = await admin
       .from("memberships")
       .select(MEMBERSHIP_COLUMNS)
-      .in("user_id", userIds.slice(i, i + ID_CHUNK));
+      .in("user_id", slice);
     if (error) throw new Error(error.message);
     rows.push(...(data ?? []));
   }
@@ -487,16 +510,13 @@ export async function listCheckInEventRows(admin: CheckinClient) {
   if (events.length === EVENT_LIMIT)
     console.warn(`[checkin] class list capped at ${EVENT_LIMIT}; later classes are missing`);
 
-  // Attendance tally per class. Chunked: `.in()` becomes a query-string
-  // filter, and a few hundred UUIDs blow past the proxy's request-line limit.
+  // Attendance tally per class, in slices (`id-chunks.ts` says why).
   const counts = new Map<string, number>();
-  const ids = events.map((e) => e.id);
-  const CHUNK = 100;
-  for (let i = 0; i < ids.length; i += CHUNK) {
+  for (const slice of chunks(events.map((e) => e.id))) {
     const { data: rows, error: cErr } = await admin
       .from("session_checkins")
       .select("event_id")
-      .in("event_id", ids.slice(i, i + CHUNK));
+      .in("event_id", slice);
     if (cErr) throw new Error(cErr.message);
     for (const r of rows ?? []) counts.set(r.event_id, (counts.get(r.event_id) ?? 0) + 1);
   }
@@ -590,36 +610,67 @@ function boardCheckIn(
 }
 
 /**
+ * Who is checked in to one class, newest first: Here now on the door screen,
+ * and `list_attendance` on the agent API. Reads only the people checked in to
+ * it, so a question about one class costs one class's worth of reads rather
+ * than the whole club's roster.
+ */
+export async function loadClassAttendance(admin: CheckinClient, data: { event_id: string }) {
+  const event = await loadClass(admin, data.event_id);
+
+  const { data: rows, error } = await admin
+    .from("session_checkins")
+    .select(BOARD_CHECKIN_COLUMNS)
+    .eq("event_id", data.event_id)
+    .order("checked_in_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  const checkins = rows ?? [];
+
+  const userIds = [...new Set(checkins.map((c) => c.user_id))];
+  const [{ data: profiles, error: pErr }, candidates] = await Promise.all([
+    userIds.length
+      ? admin
+          .from("profiles")
+          .select("user_id, first_name, middle_name, last_name, preferred_name")
+          .in("user_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
+    coverageCandidatesByUser(admin, userIds),
+  ]);
+  if (pErr) throw new Error(pErr.message);
+
+  const nameByUser = new Map(
+    (profiles ?? []).map((p) => [p.user_id, nameWithPreferred(p) || null]),
+  );
+  const planByMembership = new Map<string, string | null>();
+  for (const list of candidates.values())
+    for (const m of list) planByMembership.set(m.id, m.plan_name);
+
+  return {
+    event,
+    checkins: checkins.map((c) =>
+      boardCheckIn(c, nameByUser.get(c.user_id) ?? null, planByMembership),
+    ),
+  };
+}
+
+/**
  * Who is already in, and everyone who could be. The roster carries each person's
  * coverage preview so the manager sees what a tap will spend before they make
  * it. Only people with a waiver on file appear: a `profiles` row IS the waiver
  * on file, and the check-in's foreign key says the same thing in the database.
  *
- * A plain function taking its client, so the manager agent API reads the same
- * board (`list_attendance`, `get_check_in_preview`); the caller checks the role.
+ * Who is already in is `loadClassAttendance`, the read the agent API's
+ * `list_attendance` makes; the caller checks the manager role.
  */
 export async function loadCheckInBoard(admin: CheckinClient, data: { event_id: string }) {
-  const { data: event, error: eErr } = await admin
-    .from("calendar_events")
-    .select("id, title, instructor_name, location, starts_at, ends_at, status")
-    .eq("id", data.event_id)
-    .maybeSingle();
-  if (eErr) throw new Error(eErr.message);
-  if (!event) throw new CheckInError("not_found", NO_SUCH_CLASS);
-
-  const [{ data: profiles, error: pErr }, { data: checkins, error: cErr }] = await Promise.all([
+  const [{ event, checkins }, { data: profiles, error: pErr }] = await Promise.all([
+    loadClassAttendance(admin, data),
     admin
       .from("profiles")
       .select("user_id, first_name, middle_name, last_name, preferred_name, date_of_birth")
       .limit(ROSTER_LIMIT),
-    admin
-      .from("session_checkins")
-      .select(BOARD_CHECKIN_COLUMNS)
-      .eq("event_id", data.event_id)
-      .order("checked_in_at", { ascending: false }),
   ]);
   if (pErr) throw new Error(pErr.message);
-  if (cErr) throw new Error(cErr.message);
   const people = profiles ?? [];
   if (people.length === ROSTER_LIMIT)
     console.warn(`[checkin] roster capped at ${ROSTER_LIMIT}; some people are not listed`);
@@ -630,22 +681,11 @@ export async function loadCheckInBoard(admin: CheckinClient, data: { event_id: s
     coverageCandidatesByUser(admin, userIds),
   ]);
 
-  const nameByUser = new Map(people.map((p) => [p.user_id, nameWithPreferred(p) || null]));
-  const planByMembership = new Map<string, string | null>();
-  for (const list of candidates.values())
-    for (const m of list) planByMembership.set(m.id, m.plan_name);
-
   const roster = people.map((p) =>
     rosterRow(p, emails.get(p.user_id), candidates.get(p.user_id) ?? [], event.starts_at),
   );
 
-  return {
-    event,
-    roster,
-    checkins: (checkins ?? []).map((c) =>
-      boardCheckIn(c, nameByUser.get(c.user_id) ?? null, planByMembership),
-    ),
-  };
+  return { event, roster, checkins };
 }
 
 export const getCheckInBoard = createServerFn({ method: "POST" })
@@ -666,27 +706,17 @@ export const getCheckInBoard = createServerFn({ method: "POST" })
  * membership in the club, and the roster's cap meant somebody past it would be
  * told they had no waiver when `check_in` would accept them.
  *
- * Refuses what `check_in` refuses, in the same words: a class that is not on
- * the calendar, a cancelled class, and somebody with no waiver on file. A
- * preview of what a check-in would spend, for a check-in that cannot happen,
- * would be the one thing a manager is asked to confirm that is not so.
+ * Refuses what `check_in` refuses, through the same `loadCheckableClass`: a
+ * class that is not on the calendar, a cancelled class, and somebody with no
+ * waiver on file. A preview of what a check-in would spend, for a check-in that
+ * cannot happen, would be the one thing a manager is asked to confirm that is
+ * not so.
  */
 export async function previewCheckInRow(
   admin: CheckinClient,
   data: { event_id: string; user_id: string },
 ) {
-  const { data: event, error: eErr } = await admin
-    .from("calendar_events")
-    .select("id, title, instructor_name, location, starts_at, ends_at, status")
-    .eq("id", data.event_id)
-    .maybeSingle();
-  if (eErr) throw new Error(eErr.message);
-  if (!event) throw new CheckInError("not_found", NO_SUCH_CLASS);
-  if (event.status === "cancelled")
-    throw new CheckInError(
-      "class_cancelled",
-      "That class was cancelled, so nobody can be checked in to it.",
-    );
+  const event = await loadCheckableClass(admin, data.event_id);
 
   const [{ data: profile, error: pErr }, { data: checkin, error: cErr }] = await Promise.all([
     admin
@@ -816,18 +846,7 @@ export async function checkInPersonRow(
   data: { event_id: string; user_id: string; note?: string },
   actingAs: string,
 ) {
-  const { data: event, error: eErr } = await admin
-    .from("calendar_events")
-    .select("id, starts_at, status")
-    .eq("id", data.event_id)
-    .maybeSingle();
-  if (eErr) throw new Error(eErr.message);
-  if (!event) throw new CheckInError("not_found", NO_SUCH_CLASS);
-  if (event.status === "cancelled")
-    throw new CheckInError(
-      "class_cancelled",
-      "That class was cancelled, so nobody can be checked in to it.",
-    );
+  const event = await loadCheckableClass(admin, data.event_id);
 
   const { data: profile, error: pErr } = await admin
     .from("profiles")
@@ -838,34 +857,42 @@ export async function checkInPersonRow(
   if (!profile)
     throw new CheckInError("no_waiver", "Only someone with a waiver on file can be checked in.");
 
-  const { data: inserted, error: iErr } = await admin
-    .from("session_checkins")
-    .insert({
-      event_id: data.event_id,
-      user_id: data.user_id,
-      checked_in_by: actingAs,
-      note: data.note?.trim() || null,
-    })
-    .select("id")
-    .maybeSingle();
+  // Two attempts, for one race: the insert collides with a check-in that is
+  // undone before we can read it back. Answering "already checked in" then
+  // would tell the caller somebody is on the list who is not on it any more,
+  // so the second attempt checks them in for real.
+  let inserted: { id: string } | null = null;
+  for (let attempt = 0; attempt < 2 && !inserted; attempt++) {
+    const { data: row, error: iErr } = await admin
+      .from("session_checkins")
+      .insert({
+        event_id: data.event_id,
+        user_id: data.user_id,
+        checked_in_by: actingAs,
+        note: data.note?.trim() || null,
+      })
+      .select("id")
+      .maybeSingle();
 
-  if (iErr) {
-    // Already on the list. Checking someone in twice is not an error at the
-    // desk, so say so and stop rather than touching their credits again.
-    // The existing row's id comes back with it, so a caller that was never
-    // told its first attempt landed (an agent retrying) can still undo or move
-    // the check-in it made.
-    if (iErr.code === "23505") {
-      const { data: existing, error: xErr } = await admin
-        .from("session_checkins")
-        .select("id")
-        .eq("event_id", data.event_id)
-        .eq("user_id", data.user_id)
-        .maybeSingle();
-      if (xErr) throw new Error(xErr.message);
-      return { already_checked_in: true, checkin_id: existing?.id ?? null, decision: null };
+    if (!iErr) {
+      inserted = row;
+      break;
     }
-    throw new Error(iErr.message);
+    if (iErr.code !== "23505") throw new Error(iErr.message);
+
+    // Already on the list. Checking someone in twice is not an error at the
+    // desk, so say so and stop rather than touching their credits again. The
+    // existing row's id comes back with it, so a caller that was never told
+    // its first attempt landed (an agent retrying) can still undo or move the
+    // check-in it made.
+    const { data: existing, error: xErr } = await admin
+      .from("session_checkins")
+      .select("id")
+      .eq("event_id", data.event_id)
+      .eq("user_id", data.user_id)
+      .maybeSingle();
+    if (xErr) throw new Error(xErr.message);
+    if (existing) return { already_checked_in: true, checkin_id: existing.id, decision: null };
   }
   if (!inserted) throw new Error("Could not record the check-in.");
 
@@ -907,7 +934,7 @@ export async function attachCheckInRow(
   if (row.coverage !== "none")
     throw new CheckInError(
       "already_covered",
-      "That check-in is already covered. Move it to another of their memberships to change what paid for it.",
+      "That check-in is already covered. To change what paid for it, move it from the person's page.",
     );
   if (data.membership_id) await assertMembershipIsTheirs(admin, data.membership_id, row.user_id);
 
@@ -1012,7 +1039,19 @@ export async function transferCheckInRow(
       "Someone else moved that check-in first. Reload to see where it landed.",
     );
 
-  await refundCheckInCredit(admin, row);
+  try {
+    await refundCheckInCredit(admin, row);
+  } catch (e) {
+    // Released, so the class is uncovered as well as the old membership being
+    // short. A move's caller has to be told both, or it reports only the
+    // missing session and nobody attaches the class to what was asked for.
+    if (e instanceof CheckInError && e.reason === "refund_failed")
+      throw new CheckInError(
+        "refund_failed",
+        "The class was taken off the old membership, but its session could not be given back, so that membership is one session short. The class is uncovered for now: attach it to the membership you wanted, and tell whoever looks after the club's records about the missing session. Moving it again will not fix either.",
+      );
+    throw e;
+  }
 
   // From here the check-in is released and the old membership has its session
   // back. A failure now must say so, not read as worth retrying: a retry finds
@@ -1110,6 +1149,7 @@ export async function undoCheckInRow(
 export async function refundCheckInCredit(
   admin: CheckinClient,
   row: {
+    id: string;
     membership_id: string | null;
     consumed_credit: boolean | null;
     closed_membership: boolean | null;
@@ -1124,7 +1164,7 @@ export async function refundCheckInCredit(
   // session back.
   const lost = (cause: unknown) => {
     console.error(
-      `[checkin] a session spent on membership ${membershipId} was not given back:`,
+      `[checkin] check-in ${row.id} was released but its session on membership ${membershipId} was not given back:`,
       cause,
     );
     return new CheckInError(

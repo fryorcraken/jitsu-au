@@ -226,7 +226,7 @@ import {
   checkInPersonRow,
   listCheckInEventRows,
   listUncoveredCheckInRows,
-  loadCheckInBoard,
+  loadClassAttendance,
   previewCheckInRow,
   transferCheckInRow,
   undoCheckInRow,
@@ -2594,13 +2594,34 @@ async function onCheckIn<T>(run: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The audit line every check-in write leaves in the server log. A check-in
- * spends or gives back a session, and the row records who put somebody on the
- * mat but not who later moved or removed it, so the log is where an agent's
- * hand in it is findable.
+ * Run one check-in write, leaving its audit line in the server log whichever
+ * way it ends. A check-in spends or gives back a session, and the row records
+ * who put somebody on the mat but not who later moved or removed it, so the
+ * log is where an agent's hand in it is findable. The failures matter most:
+ * `refund_failed` and `move_incomplete` leave records wrong, and are what
+ * somebody will reconstruct by hand, so they are logged with the request and
+ * the actor as well, under `failed`.
  */
-function checkInAudit(action: string, detail: Record<string, unknown>, actingAs: string) {
-  console.info(`[agent.${action}] audit`, JSON.stringify({ ...detail, actor: actingAs }));
+async function auditedCheckIn<T>(
+  action: string,
+  request: Record<string, unknown>,
+  actingAs: string,
+  run: () => Promise<T>,
+  outcome: (result: T) => Record<string, unknown>,
+): Promise<T> {
+  const audit = (detail: Record<string, unknown>) =>
+    console.info(
+      `[agent.${action}] audit`,
+      JSON.stringify({ ...request, ...detail, actor: actingAs }),
+    );
+  try {
+    const result = await onCheckIn(run);
+    audit(outcome(result));
+    return result;
+  } catch (e) {
+    audit({ failed: e instanceof AgentError ? e.code : "internal_error" });
+    throw e;
+  }
 }
 
 // ---- action: list_check_in_classes ----
@@ -2619,14 +2640,15 @@ async function handleListCheckInClasses(params: unknown) {
 async function handleListAttendance(params: unknown) {
   const input = agentListAttendanceSchema.parse(params ?? {});
   const db = await adminClient();
-  const board = await onCheckIn(() => loadCheckInBoard(db, input));
-  // The roster (everybody who COULD be checked in) is the screen's search list,
-  // not attendance; one person's view of it is get_check_in_preview.
+  // Here now's own read. The roster (everybody who COULD be checked in) is the
+  // screen's search list, not attendance; one person's view of it is
+  // get_check_in_preview.
+  const { event, checkins } = await onCheckIn(() => loadClassAttendance(db, input));
   return {
     time_zone: CLUB_TIME_ZONE,
-    event: projectAgentCheckInClass({ ...board.event, checked_in_count: board.checkins.length }),
-    count: board.checkins.length,
-    checkins: board.checkins,
+    event: projectAgentCheckInClass({ ...event, checked_in_count: checkins.length }),
+    count: checkins.length,
+    checkins,
   };
 }
 
@@ -2656,29 +2678,32 @@ async function handleCheckIn(params: unknown, actingAs: string) {
   const db = await adminClient();
   // `actingAs` is recorded as `checked_in_by`, as the screen records the
   // manager at the door: the token's owner vouched for this person being there.
-  const result = await onCheckIn(() => checkInPersonRow(db, input, actingAs));
-  checkInAudit(
+  return auditedCheckIn(
     "check_in",
-    {
-      eventId: input.event_id,
-      userId: input.user_id,
-      checkinId: result.checkin_id,
-      alreadyCheckedIn: result.already_checked_in,
-      coverage: result.decision?.coverage ?? null,
-      membershipId: result.decision?.membership_id ?? null,
-      consumedCredit: result.decision?.consumes_credit ?? false,
-    },
+    { eventId: input.event_id, userId: input.user_id },
     actingAs,
+    () => checkInPersonRow(db, input, actingAs),
+    (r) => ({
+      checkinId: r.checkin_id,
+      alreadyCheckedIn: r.already_checked_in,
+      coverage: r.decision?.coverage ?? null,
+      membershipId: r.decision?.membership_id ?? null,
+      consumedCredit: r.decision?.consumes_credit ?? false,
+    }),
   );
-  return result;
 }
 
 // ---- action: undo_check_in ----
 async function handleUndoCheckIn(params: unknown, actingAs: string) {
   const input = agentUndoCheckInSchema.parse(params ?? {});
   const db = await adminClient();
-  const result = await onCheckIn(() => undoCheckInRow(db, input.id));
-  checkInAudit("undo_check_in", { checkinId: input.id, ...result }, actingAs);
+  const result = await auditedCheckIn(
+    "undo_check_in",
+    { checkinId: input.id },
+    actingAs,
+    () => undoCheckInRow(db, input.id),
+    (r) => ({ ...r }),
+  );
   return {
     id: input.id,
     removed: result.removed,
@@ -2691,16 +2716,12 @@ async function handleUndoCheckIn(params: unknown, actingAs: string) {
 async function handleAttachCheckIn(params: unknown, actingAs: string) {
   const input = agentAttachCheckInSchema.parse(params ?? {});
   const db = await adminClient();
-  const result = await onCheckIn(() => attachCheckInRow(db, input));
-  checkInAudit(
+  const result = await auditedCheckIn(
     "attach_check_in",
-    {
-      checkinId: input.id,
-      asked: input.membership_id ?? null,
-      coverage: result.decision.coverage,
-      membershipId: result.decision.membership_id,
-    },
+    { checkinId: input.id, asked: input.membership_id ?? null },
     actingAs,
+    () => attachCheckInRow(db, input),
+    (r) => ({ coverage: r.decision.coverage, membershipId: r.decision.membership_id }),
   );
   return { id: input.id, decision: result.decision };
 }
@@ -2709,16 +2730,12 @@ async function handleAttachCheckIn(params: unknown, actingAs: string) {
 async function handleMoveCheckIn(params: unknown, actingAs: string) {
   const input = agentMoveCheckInSchema.parse(params ?? {});
   const db = await adminClient();
-  const result = await onCheckIn(() => transferCheckInRow(db, input));
-  checkInAudit(
+  const result = await auditedCheckIn(
     "move_check_in",
-    {
-      checkinId: input.id,
-      asked: input.membership_id,
-      coverage: result.decision.coverage,
-      membershipId: result.decision.membership_id,
-    },
+    { checkinId: input.id, asked: input.membership_id },
     actingAs,
+    () => transferCheckInRow(db, input),
+    (r) => ({ coverage: r.decision.coverage, membershipId: r.decision.membership_id }),
   );
   return { id: input.id, decision: result.decision };
 }

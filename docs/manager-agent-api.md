@@ -714,7 +714,8 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   agent's equivalent of `/manager/check-in` and the attendance controls on
   `/manager/users/<id>`. Every read and write goes through the plain functions
   in `src/lib/checkin.functions.ts` that those screens' server functions also
-  call (`listCheckInEventRows`, `loadCheckInBoard`, `listUncoveredCheckInRows`,
+  call (`listCheckInEventRows`, `loadClassAttendance`, `previewCheckInRow`,
+  `listUncoveredCheckInRows`,
   `checkInPersonRow`, `undoCheckInRow`, `attachCheckInRow`,
   `transferCheckInRow`), so a check-in an agent makes is the same row, spending
   the same session, as one made at the door. The product rules (what pays for
@@ -741,9 +742,12 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
     guardian and is never printed on the screen, so under a child's name it
     would read as the child's mailbox. `get_user` reports addresses with the
     caption that says whose they are.
-  - **`list_attendance` is the board without the roster.** The roster is
-    everybody who could be checked in, which is the screen's search list and
-    not attendance. One person's view of it is the preview.
+  - **`list_attendance` is Here now without the roster.** It reads through
+    `loadClassAttendance`, the part of the door screen's board that lists who
+    is in, so a question about one class reads that class's check-ins and not
+    the whole club. The roster is everybody who could be checked in, which is
+    the screen's search list and not attendance. One person's view of it is
+    the preview.
   - **`check_in` is safe to retry, and says which row it made.** The
     `UNIQUE (event_id, user_id)` constraint already made a second check-in a
     no-op that spends nothing; it now also returns the existing row's
@@ -762,8 +766,11 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
     door's own rules would spend a membership nobody asked for.
   - **Each write leaves an audit line** in the server log
     (`[agent.check_in]`, `[agent.undo_check_in]`, `[agent.attach_check_in]`,
-    `[agent.move_check_in]`) naming the actor. The row records who checked
-    somebody in, but not who later moved or removed it.
+    `[agent.move_check_in]`) naming the actor, and a failed one leaves it too,
+    with the request and `failed` set to the error code. The row records who
+    checked somebody in, but not who later moved or removed it, and the
+    failures that leave records wrong (`refund_failed`, `move_incomplete`) are
+    the ones somebody reconstructs by hand.
   - **The only email is the door's own**: a check-in drawn on a casual class
     credit sends that credit's invoice or receipt if it has not gone already
     (`ensureCasualInvoiceEmailed`), whichever door it came through. Nothing

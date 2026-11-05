@@ -1832,7 +1832,8 @@ failures come after the class was taken off the old membership, so never send
 the move again after either: `500 move_incomplete` (the old membership has its
 session back and the class is uncovered: `attach_check_in` it to the membership
 wanted) and `500 refund_failed` (the old membership did not get its session
-back: tell the manager).
+back, and the class is uncovered too: `attach_check_in` it to the membership
+wanted, and tell the manager about the missing session).
 
 ## Guidance
 
