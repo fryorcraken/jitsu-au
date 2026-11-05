@@ -326,8 +326,13 @@ describe("SOCIAL_IMAGE", () => {
     expect(SOCIAL_IMAGE.height).toBeGreaterThanOrEqual(157);
   });
 
-  it("points at the training1 asset checked into the repo, so the path is not a typo", () => {
-    const assetFile = join(import.meta.dirname, "..", "assets", "training1.jpg.asset.json");
+  it("points at the homepage hero asset checked into the repo, so the path is not a typo", () => {
+    const assetFile = join(
+      import.meta.dirname,
+      "..",
+      "assets",
+      "hero-dscf0691.jpg.asset.json",
+    );
     const asset = JSON.parse(readFileSync(assetFile, "utf8"));
     expect(SOCIAL_IMAGE.url).toBe(`${SITE_ORIGIN}${asset.url}`);
   });
