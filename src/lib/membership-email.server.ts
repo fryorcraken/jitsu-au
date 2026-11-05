@@ -415,7 +415,8 @@ export async function sendItemInvoicePaidEmail({
     });
     return { sent: true, skipped: false };
   } catch (e) {
-    console.error(`[item-invoice-email] failed to email ${memberEmail}:`, e);
+    // The address stays out of the log: the invoice id is enough to find it.
+    console.error(`[item-invoice-email] failed to send receipt for invoice ${invoiceId}:`, e);
     return { sent: false, skipped: false };
   }
 }
