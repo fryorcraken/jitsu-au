@@ -171,6 +171,26 @@ export function blogPostSeo(post: {
 }
 
 /**
+ * The share-card picture for a blog post: its cover photo when it has one,
+ * otherwise the homepage photo the root route already sets. Width and height
+ * are dropped for a cover because we do not know them, and a stale size from
+ * the root would make Facebook crop the picture wrongly.
+ */
+export function blogPostShareImageMeta(post: {
+  title: string;
+  cover_image_url: string | null;
+}): PageMetaTag[] {
+  const cover = post.cover_image_url?.trim();
+  if (!cover || !/^https:\/\//.test(cover)) return [];
+  return [
+    { property: "og:image", content: cover },
+    { property: "og:image:alt", content: post.title },
+    { name: "twitter:image", content: cover },
+    { name: "twitter:image:alt", content: post.title },
+  ];
+}
+
+/**
  * robots.txt body for the host the request came in on.
  *
  * Production gets the real rules plus the sitemap pointer. Every other host

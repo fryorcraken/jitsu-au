@@ -20,7 +20,7 @@ import {
 import { splitBlogContent } from "@/lib/blog-content";
 import { blogMarkdownComponents } from "@/lib/blog-markdown";
 import { useAuth } from "@/hooks/useAuth";
-import { blogPostSeo, buildPageMeta, canonicalUrl } from "@/lib/seo";
+import { blogPostSeo, blogPostShareImageMeta, buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { BLOG_POST_KIND_LABELS } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +41,11 @@ export const Route = createFileRoute("/blog/$slug")({
     const path = `/blog/${params.slug}`;
     const seo = blogPostSeo(post);
     return {
-      meta: buildPageMeta({ title: seo.title, description: seo.description, path }),
+      meta: [
+        ...buildPageMeta({ title: seo.title, description: seo.description, path }),
+        { property: "og:type", content: "article" },
+        ...blogPostShareImageMeta(post),
+      ],
       links: [{ rel: "canonical", href: canonicalUrl(path) }],
       scripts: [
         {
