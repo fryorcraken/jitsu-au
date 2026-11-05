@@ -16,8 +16,12 @@ vi.mock("@/lib/club-settings.server", () => ({
   readClubReplyTo,
 }));
 
-const { sendMembershipPaidEmail, sendMembershipPaymentEmail, sendItemInvoiceEmail, sendItemInvoicePaidEmail } =
-  await import("./membership-email.server");
+const {
+  sendMembershipPaidEmail,
+  sendMembershipPaymentEmail,
+  sendItemInvoiceEmail,
+  sendItemInvoicePaidEmail,
+} = await import("./membership-email.server");
 
 describe("membership emails without an API key", () => {
   const original = process.env.LOVABLE_API_KEY;
