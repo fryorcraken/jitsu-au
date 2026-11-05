@@ -10,6 +10,7 @@ import {
   SOCIAL_IMAGE,
   BLOG_DEFAULT_DESCRIPTION,
   blogPostSeo,
+  blogPostShareImageMeta,
   buildClubJsonLd,
   buildPageMeta,
   buildRobotsTxt,
@@ -327,12 +328,7 @@ describe("SOCIAL_IMAGE", () => {
   });
 
   it("points at the homepage hero asset checked into the repo, so the path is not a typo", () => {
-    const assetFile = join(
-      import.meta.dirname,
-      "..",
-      "assets",
-      "hero-dscf0691.jpg.asset.json",
-    );
+    const assetFile = join(import.meta.dirname, "..", "assets", "hero-dscf0691.jpg.asset.json");
     const asset = JSON.parse(readFileSync(assetFile, "utf8"));
     expect(SOCIAL_IMAGE.url).toBe(`${SITE_ORIGIN}${asset.url}`);
   });
@@ -799,5 +795,26 @@ describe("the old domain", () => {
     expect(caught("a.tsx", "{/* jitsu.au */}")).toBe(false);
     expect(caught("a.sh", "# the old jitsu.au")).toBe(false);
     expect(caught("a.html", "<!-- jitsu.au -->")).toBe(false);
+  });
+});
+
+describe("blogPostShareImageMeta", () => {
+  it("uses the post's cover photo when it has one", () => {
+    const tags = blogPostShareImageMeta({
+      title: "Grading day",
+      cover_image_url: "https://cdn.example.com/cover.jpg",
+    });
+    expect(tags).toContainEqual({
+      property: "og:image",
+      content: "https://cdn.example.com/cover.jpg",
+    });
+    expect(tags).toContainEqual({
+      name: "twitter:image",
+      content: "https://cdn.example.com/cover.jpg",
+    });
+  });
+
+  it("adds nothing without a cover, so the homepage photo from the root stays", () => {
+    expect(blogPostShareImageMeta({ title: "Grading day", cover_image_url: null })).toEqual([]);
   });
 });
