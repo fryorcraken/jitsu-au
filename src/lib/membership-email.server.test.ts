@@ -281,3 +281,69 @@ describe("a manager's resend of an invoice", () => {
     expect(payload.idempotency_key).toBe("membership-payment-m1:resend:click-1");
   });
 });
+
+// A failed send is logged so a manager can see the email never arrived, but the
+// log is read by people who have no business seeing a member's address. The
+// invoice id finds the row, and the row holds the address.
+describe("a failed item-invoice email keeps the address out of the log", () => {
+  const original = process.env.LOVABLE_API_KEY;
+  const admin = { from: vi.fn() } as unknown as SupabaseClient<Database>;
+
+  beforeEach(() => {
+    process.env.LOVABLE_API_KEY = "test-key";
+    sendLovableEmail.mockReset().mockRejectedValue(new Error("the mail service refused it"));
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.LOVABLE_API_KEY;
+    else process.env.LOVABLE_API_KEY = original;
+    vi.restoreAllMocks();
+  });
+
+  /** Everything the send failure wrote to the log, as one string. */
+  const logged = () =>
+    vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {})
+      .mock.calls.map((call) => call.map(String).join(" "))
+      .join("\n");
+
+  it("names the receipt by its invoice id, not by the member's address", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await sendItemInvoicePaidEmail({
+      invoiceId: "inv-9",
+      memberGreetingName: "Ada",
+      memberEmail: "ada@example.com",
+      reference: "UTSJ-ABC234",
+      summary: "1 x Gi belt",
+      amount: "$20",
+      admin,
+    });
+
+    expect(result).toEqual({ sent: false, skipped: false });
+    expect(err).toHaveBeenCalled();
+    const text = logged();
+    expect(text).toContain("inv-9");
+    expect(text).not.toContain("ada@example.com");
+  });
+
+  it("names an unpaid invoice by its invoice id too", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await sendItemInvoiceEmail({
+      invoiceId: "inv-9",
+      memberGreetingName: "Ada",
+      memberEmail: "ada@example.com",
+      lines: [{ description: "1 x Gi belt", amount: "$20" }],
+      total: "$20",
+      reference: "UTSJ-ABC234",
+      admin,
+    });
+
+    expect(result).toEqual({ sent: false, skipped: false });
+    expect(err).toHaveBeenCalled();
+    const text = logged();
+    expect(text).toContain("inv-9");
+    expect(text).not.toContain("ada@example.com");
+  });
+});
