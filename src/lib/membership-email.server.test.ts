@@ -299,13 +299,9 @@ describe("a failed item-invoice email keeps the address out of the log", () => {
     vi.restoreAllMocks();
   });
 
-  /** Everything the send failure wrote to the log, as one string. */
-  const logged = () =>
-    vi
-      .spyOn(console, "error")
-      .mockImplementation(() => {})
-      .mock.calls.map((call) => call.map(String).join(" "))
-      .join("\n");
+  /** Everything a send failure wrote to the log, as one string. */
+  const logged = (err: { mock: { calls: unknown[][] } }) =>
+    err.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
 
   it("names the receipt by its invoice id, not by the member's address", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -322,7 +318,7 @@ describe("a failed item-invoice email keeps the address out of the log", () => {
 
     expect(result).toEqual({ sent: false, skipped: false });
     expect(err).toHaveBeenCalled();
-    const text = logged();
+    const text = logged(err);
     expect(text).toContain("inv-9");
     expect(text).not.toContain("ada@example.com");
   });
@@ -342,7 +338,7 @@ describe("a failed item-invoice email keeps the address out of the log", () => {
 
     expect(result).toEqual({ sent: false, skipped: false });
     expect(err).toHaveBeenCalled();
-    const text = logged();
+    const text = logged(err);
     expect(text).toContain("inv-9");
     expect(text).not.toContain("ada@example.com");
   });
