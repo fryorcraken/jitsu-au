@@ -392,54 +392,12 @@ export async function saveKbArticle(
   let versionNumber: number | null = null;
 
   if (text) {
-    // A failed read here would number the new version 1 and collide with the
-    // existing version 1, so the save would fail on a duplicate-key message that
-    // says nothing about what went wrong. (Same guard as `saveWaiverTemplate`.)
-    const { data: maxRow, error: maxErr } = await db
-      .from("kb_article_versions")
-      .select("version")
-      .eq("article_id", article.id)
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (maxErr) throw new Error(maxErr.message);
-    const nextVersion = (maxRow?.version ?? 0) + 1;
-
-    // Write the new version as a draft, THEN promote it. The obvious order (clear
-    // `is_current`, then insert the row already current) leaves the article
-    // unreadable if the insert fails, with nothing to roll back to. This way a
-    // failed insert changes nothing, and a failed promotion leaves the previous
-    // version live with an unused draft behind it.
-    const { data: createdVersion, error: verErr } = await db
-      .from("kb_article_versions")
-      .insert({
-        article_id: article.id,
-        version: nextVersion,
-        title: text.title,
-        body_md: text.body_md,
-        change_note: input.change_note || null,
-        is_current: false,
-        created_by: actingAs,
-      })
-      .select("id, version")
-      .single();
-    if (verErr || !createdVersion) {
-      // A unique violation here is the version-number race, not a broken
-      // database: two saves read the same MAX(version) and both tried to write
-      // n+1. `MAX(version)+1` cannot be made atomic from PostgREST, so the job is
-      // to lose the race in words the caller can act on rather than surfacing
-      // `duplicate key value violates unique constraint ...`, which reads like a
-      // bug and tells an agent nothing about what to do next.
-      if (verErr && (verErr.code === "23505" || /duplicate key/i.test(verErr.message))) {
-        throw new Error(
-          "Someone else saved a version of this article a moment ago, so this save was not applied. Read it again before retrying.",
-        );
-      }
-      throw new Error(verErr?.message ?? "Could not save the article version.");
-    }
-
-    await promoteArticleVersion(db, createdVersion.id);
-    versionNumber = createdVersion.version;
+    versionNumber = await writeArticleVersion(
+      db,
+      article.id,
+      { ...text, change_note: input.change_note || null },
+      actingAs,
+    );
   }
 
   if (hasSettings && !narrowing) await patchSettings(writingText);
@@ -450,6 +408,71 @@ export async function saveKbArticle(
     article_id: article.id,
     created,
   };
+}
+
+/**
+ * Write a new version of an article's text and publish it.
+ *
+ * The version half of `saveKbArticle`, on its own so the syllabus can publish a
+ * belt page it has just put together through exactly the same steps a manager's
+ * save takes (`syllabus-admin.ts`). It checks nothing about WHICH article this
+ * is, so it is not for a caller acting on a request: `saveKbArticle` is, and its
+ * guards are what keep a belt page's text coming only from the syllabus.
+ */
+export async function writeArticleVersion(
+  db: KbClient,
+  articleId: string,
+  text: { title: string; body_md: string; change_note: string | null },
+  actingAs: string | null,
+): Promise<number> {
+  // A failed read here would number the new version 1 and collide with the
+  // existing version 1, so the save would fail on a duplicate-key message that
+  // says nothing about what went wrong. (Same guard as `saveWaiverTemplate`.)
+  const { data: maxRow, error: maxErr } = await db
+    .from("kb_article_versions")
+    .select("version")
+    .eq("article_id", articleId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (maxErr) throw new Error(maxErr.message);
+  const nextVersion = (maxRow?.version ?? 0) + 1;
+
+  // Write the new version as a draft, THEN promote it. The obvious order (clear
+  // `is_current`, then insert the row already current) leaves the article
+  // unreadable if the insert fails, with nothing to roll back to. This way a
+  // failed insert changes nothing, and a failed promotion leaves the previous
+  // version live with an unused draft behind it.
+  const { data: createdVersion, error: verErr } = await db
+    .from("kb_article_versions")
+    .insert({
+      article_id: articleId,
+      version: nextVersion,
+      title: text.title,
+      body_md: text.body_md,
+      change_note: text.change_note,
+      is_current: false,
+      created_by: actingAs,
+    })
+    .select("id, version")
+    .single();
+  if (verErr || !createdVersion) {
+    // A unique violation here is the version-number race, not a broken
+    // database: two saves read the same MAX(version) and both tried to write
+    // n+1. `MAX(version)+1` cannot be made atomic from PostgREST, so the job is
+    // to lose the race in words the caller can act on rather than surfacing
+    // `duplicate key value violates unique constraint ...`, which reads like a
+    // bug and tells an agent nothing about what to do next.
+    if (verErr && (verErr.code === "23505" || /duplicate key/i.test(verErr.message))) {
+      throw new Error(
+        "Someone else saved a version of this article a moment ago, so this save was not applied. Read it again before retrying.",
+      );
+    }
+    throw new Error(verErr?.message ?? "Could not save the article version.");
+  }
+
+  await promoteArticleVersion(db, createdVersion.id);
+  return createdVersion.version;
 }
 
 /**
