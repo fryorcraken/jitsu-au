@@ -11,6 +11,7 @@ import {
   topicTree,
   type SyllabusData,
   type SyllabusTopic,
+  type SyllabusTopicNode,
 } from "@/lib/syllabus";
 
 /** Edit one belt's every topic, or one topic across every belt. */
@@ -30,7 +31,7 @@ export type EditorCell = {
   stored: string;
 };
 
-export const cellKey = (belt: string, topic: string) => `${belt}/${topic}`;
+const cellKey = (belt: string, topic: string) => `${belt}/${topic}`;
 
 /**
  * The boxes for one selection, in reading order.
@@ -86,7 +87,11 @@ export function changedEntries(
     .map((cell) => ({ belt: cell.belt, topic: cell.topic, body_md: values[cell.key] ?? "" }));
 }
 
-/** Each changed box's problem, if it has one, so the screen can say which. */
+/**
+ * Each box's problem, if it has one, so the screen can say which. Every box,
+ * not just the edited ones: a stored block that breaks a rule (written before
+ * the rule, or through the API) still has to be fixed before it saves again.
+ */
 export function cellProblems(
   cells: EditorCell[],
   values: Record<string, string>,
@@ -100,34 +105,69 @@ export function cellProblems(
 }
 
 /**
- * Where a topic goes when moved one place up or down among its siblings.
+ * The topic tree with one topic moved one place up or down among its siblings,
+ * or null when it is already at that end. A sub-topic moves within its own
+ * topic; filing it under another topic is a separate edit.
  *
- * Positions are handed out in tens, so there is nearly always a free number
- * between the neighbour and the one beyond it, and the move is ONE save. Each
- * save of a topic republishes the belt pages it is on, so a swap (two saves)
- * would give every one of those pages two new versions for one click. Only
- * when there is no gap left does it fall back to swapping with the neighbour.
+ * Applied on screen straight away, before anything is saved, so a manager
+ * pressing the arrow three times sees it move three places at once rather than
+ * waiting a round of republishing per press (`positionChanges` is what is then
+ * saved, once, for the whole burst).
  */
-export function movedPosition(
-  siblings: Pick<SyllabusTopic, "slug" | "position">[],
+export function moveTopic(
+  tree: SyllabusTopicNode[],
   slug: string,
   direction: "up" | "down",
-): { position: number; swapWith?: { slug: string; position: number } } | null {
-  const ordered = [...siblings].sort((a, b) => a.position - b.position);
-  const index = ordered.findIndex((t) => t.slug === slug);
-  const neighbourIndex = direction === "up" ? index - 1 : index + 1;
-  if (index < 0 || neighbourIndex < 0 || neighbourIndex >= ordered.length) return null;
-  const neighbour = ordered[neighbourIndex];
-  const beyond = ordered[direction === "up" ? neighbourIndex - 1 : neighbourIndex + 1];
-  const limit =
-    beyond?.position ?? (direction === "up" ? neighbour.position - 20 : neighbour.position + 20);
-  const gap = Math.abs(neighbour.position - limit);
-  if (gap >= 2) {
-    const position = Math.round((neighbour.position + limit) / 2);
-    if (position >= 0) return { position };
-  }
-  return {
-    position: neighbour.position,
-    swapWith: { slug: neighbour.slug, position: ordered[index].position },
+): SyllabusTopicNode[] | null {
+  const swap = <T extends { slug: string }>(list: T[]): T[] | null => {
+    const i = list.findIndex((t) => t.slug === slug);
+    const j = direction === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= list.length) return null;
+    const next = [...list];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
   };
+  const roots = swap(tree);
+  if (roots) return roots;
+  for (const [index, root] of tree.entries()) {
+    const children = swap(root.children);
+    if (children) {
+      const next = [...tree];
+      next[index] = { ...root, children };
+      return next;
+    }
+  }
+  return null;
+}
+
+/**
+ * The stored topics with a set of position changes applied, for the screen to
+ * compare its next burst of moves against while the reload that would bring
+ * them is still out. Compared with the positions from before the save
+ * instead, a burst that undid it would look like no change and never be sent.
+ */
+export function withPositions(
+  stored: SyllabusTopic[],
+  changes: { slug: string; position: number }[],
+): SyllabusTopic[] {
+  const sent = new Map(changes.map((c) => [c.slug, c.position]));
+  return stored.map((t) => (sent.has(t.slug) ? { ...t, position: sent.get(t.slug)! } : t));
+}
+
+/**
+ * The positions that make the stored topics read in `tree`'s order: each
+ * sibling group renumbered 10, 20, 30, and only the topics whose number
+ * actually changes. Renumbering in tens keeps a gap for the next one added.
+ */
+export function positionChanges(
+  stored: SyllabusTopic[],
+  tree: SyllabusTopicNode[],
+): { slug: string; position: number }[] {
+  const current = new Map(stored.map((t) => [t.slug, t.position]));
+  const wanted: { slug: string; position: number }[] = [];
+  const number = (list: { slug: string }[]) =>
+    list.forEach((t, i) => wanted.push({ slug: t.slug, position: (i + 1) * 10 }));
+  number(tree);
+  tree.forEach((root) => number(root.children));
+  return wanted.filter((t) => current.get(t.slug) !== t.position);
 }

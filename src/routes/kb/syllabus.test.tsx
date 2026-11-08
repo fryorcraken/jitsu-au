@@ -39,7 +39,7 @@ const belt = (slug: string, name: string, position: number, visibility = "member
   visibility: visibility as "members" | "managers",
 });
 
-const DATA: SyllabusData & { viewer: { signed_in: boolean; is_manager: boolean } } = {
+const DATA: SyllabusData = {
   belts: [belt("yellow", "Yellow", 20), belt("orange", "Orange", 30), belt("green", "Green", 40)],
   topics: [
     { slug: "breakfalling", title: "Breakfalling", parent: null, position: 10 },
@@ -51,7 +51,6 @@ const DATA: SyllabusData & { viewer: { signed_in: boolean; is_manager: boolean }
     { belt: "green", topic: "breakfalling", body_md: "Judo rolls" },
     { belt: "orange", topic: "throws", body_md: "O Goshi" },
   ],
-  viewer: { signed_in: true, is_manager: false },
 };
 
 const ready = (data = DATA) => ({

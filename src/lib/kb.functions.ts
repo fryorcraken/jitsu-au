@@ -980,17 +980,23 @@ export const listManagerArticles = createServerFn({ method: "GET" }).handler(asy
   const db = await adminClient();
   await requireManagerViewer(db);
 
-  const [{ data: docs, error }, sectionRows] = await Promise.all([
-    db
-      .from("kb_articles")
-      .select(
-        "id, slug, visibility, annotations_enabled, updated_at, section_id, position, nav_title, link_path, belt_id",
-      )
-      .order("slug")
-      .limit(MANAGER_ARTICLES_LIMIT),
-    listKbSections(db),
-  ]);
+  const [{ data: docs, error }, sectionRows, { data: beltRows, error: beltErr }] =
+    await Promise.all([
+      db
+        .from("kb_articles")
+        .select(
+          "id, slug, visibility, annotations_enabled, updated_at, section_id, position, nav_title, link_path, belt_id",
+        )
+        .order("slug")
+        .limit(MANAGER_ARTICLES_LIMIT),
+      listKbSections(db),
+      db.from("belts").select("id, slug"),
+    ]);
   if (error) throw new Error(error.message);
+  // Only for the "edit this belt's syllabus" link, so a failure here costs
+  // that link its belt, not the manager the whole list.
+  if (beltErr) console.warn("[kb] could not read belts for the editor:", beltErr.message);
+  const beltSlugById = new Map((beltRows ?? []).map((b) => [b.id, b.slug]));
   const articles = (docs ?? []) as KbArticleListRow[];
   // Reported by SLUG, never by id: the slug is what a save takes back, so the
   // editor can move an article using exactly what it just read. Same rule the
@@ -1053,8 +1059,10 @@ export const listManagerArticles = createServerFn({ method: "GET" }).handler(asy
       nav_title: d.nav_title,
       link_path: d.link_path,
       // Set on a belt page, whose text is written on the syllabus screen rather
-      // than here. The editor shows that instead of a body to type into.
+      // than here. The editor shows that instead of a body to type into, and
+      // links to that belt on the syllabus screen.
       is_belt_page: d.belt_id !== null,
+      belt: d.belt_id ? (beltSlugById.get(d.belt_id) ?? null) : null,
     };
   });
 });

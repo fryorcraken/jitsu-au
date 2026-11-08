@@ -70,11 +70,35 @@ Three rules follow, and the code enforces each:
 - **Each save republishes each belt page it changed once.** Saving all ten of a
   belt's topics in one go is one new version of its page, not ten. The screen
   saves everything changed at once, and the agent API takes any number of
-  blocks per call.
+  blocks per call. The pages a save touches are republished side by side, not
+  one after another, so a change that reaches every belt takes about as long as
+  one that reaches a single belt.
+- **A change that only moves topics does not tell anybody the page updated.**
+  It is still a new version (the page reads in a new order), but when its
+  title is unchanged and it holds exactly the same blocks, every member who had
+  read the previous version is carried forward as having read this one
+  (`sameBlockSet`). Changing a word is a real update and is not carried.
 
 An older version of a belt page **cannot be put back live**: it would leave the
 page saying one thing and the syllabus another. A manager can still read an
 older version, copy what they need, and write it into the syllabus.
+
+### Which screen owns what
+
+A belt page is edited in two places, and each setting has one owner:
+
+| Setting                                        | Where                                                                                                                        |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Its text, title (from the belt) and place      | Syllabus screen only                                                                                                         |
+| Members or managers only                       | Either: the syllabus screen ("Open to members" / "Make it managers only", on the Write and Belts tabs) or the article editor |
+| Comments on or off, sidebar label              | Article editor                                                                                                               |
+| Reading members' comments, the version history | Article editor ("Comments and history" on each belt links there)                                                             |
+
+The article editor, on a belt page, shows no body or change note (a settings
+save writes no version, so a note would be dropped), labels its button "Save
+settings", and links back to that belt on the syllabus screen. The two link to
+each other by address: `/manager/syllabus?belt=green` opens that belt's
+boxes, `/manager/kb?article=green-belt` opens its page.
 
 A renamed topic keeps its anchor because the page writes the heading with the
 `{#slug}` attribute whenever the words no longer produce it
@@ -91,7 +115,8 @@ The belt pages live in one knowledge base section whose **kind** is
   without a drag handle, and the API refuses a `position` for one; move the belt
   instead);
 - an ordinary article cannot be filed there, and a belt page cannot be moved
-  out;
+  out. The manager editor will not show anything being dragged into it, and a
+  new article never defaults into it;
 - the section cannot be deleted, only renamed;
 - in the sidebar it opens with a link to the syllabus by topic.
 
@@ -145,7 +170,7 @@ member through the view either. A manager sees those belts, marked Draft.
 **A belt's first block makes its page, as a managers-only draft**, in the
 Syllabus section. Publishing a belt's syllabus to the members being graded on
 it the moment it has one line would be the wrong default. A manager opens it
-when it is ready: the Belts tab's "Open the page to members", behind a confirm
+when it is ready: "Open to members" on the syllabus screen, behind a confirm
 that says every member will be able to read it, or
 `save_kb_article { slug, visibility: "members" }` from an agent.
 
@@ -166,12 +191,17 @@ that says every member will be able to read it, or
     (`SaveFailure`), and switching to another belt or topic over unsaved work
     asks first.
 - **Belts**: rename, regrade, recolour, reorder, add, delete one made by
-  mistake (refused for a belt with a page or any text), and open a draft page to
-  members.
+  mistake (refused for a belt with a page or any text), open a draft page to
+  members or take it back to managers only. A new belt is refused if an article
+  already holds the address its page would get (`/kb/<belt>-belt`), and once
+  added the screen goes straight to writing its first block.
 - **Topics**: rename, move up or down, file under another topic, add, and delete
-  one nobody has written under (refused otherwise, naming the belts). A move is
-  one save where the numbering allows it, so each belt page gets one new version
-  per move rather than two.
+  one nobody has written under (refused otherwise, naming the belts). Arrows
+  move a topic on screen at once; the new order is saved a moment after the
+  last press, as one save (`reorder_syllabus_topics`), so pressing the arrow
+  three times is one new version of each belt page, not three. A line under the
+  list says whether the order is waiting, saving or saved, and Save and Delete
+  wait for it. A topic filed under another topic lands last in it.
 
 Last save wins, as with an article: two managers editing the same block at the
 same moment each overwrite the other. Every republish is a kept version of the
@@ -180,8 +210,8 @@ belt page, so nothing written is lost for good.
 ### From an agent
 
 `list_belts`, `save_belt`, `delete_belt`, `list_syllabus_topics`,
-`save_syllabus_topic`, `delete_syllabus_topic`, `get_syllabus` and
-`save_syllabus_entries`. The contract is in `docs/manager-agent-api.md`, and
+`save_syllabus_topic`, `reorder_syllabus_topics`, `delete_syllabus_topic`,
+`get_syllabus` and `save_syllabus_entries`. The contract is in `docs/manager-agent-api.md`, and
 the agent-facing guide in the `uts-manager-agent` skill. `get_syllabus` is the
 same view as `/kb/syllabus` (the same `syllabusView`), also returned as one
 markdown document.

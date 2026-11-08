@@ -11,6 +11,7 @@ import {
   deleteBelt,
   deleteSyllabusTopic,
   loadSyllabus,
+  reorderSyllabusTopics,
   saveBelt,
   saveSyllabusEntries,
   saveSyllabusTopic,
@@ -249,6 +250,25 @@ describe("saveBelt", () => {
       grade: null,
     });
   });
+
+  // Refused before anything is made: on its first block would be too late,
+  // with a box of text written that cannot be published.
+  it("refuses a new belt whose page address an article already has", async () => {
+    const tables = club();
+    tables.kb_articles.push({
+      id: "a-brown",
+      slug: "brown-belt",
+      visibility: "members",
+      belt_id: null,
+      section_id: null,
+      position: 0,
+      link_path: null,
+    });
+    await expect(
+      saveBelt(memoryDb(tables), { slug: "brown", name: "Brown", colour: "#7b4a2a" }, null),
+    ).rejects.toThrow(/already an article at \/kb\/brown-belt/);
+    expect(tables.belts.some((b) => b.slug === "brown")).toBe(false);
+  });
 });
 
 describe("deleteBelt", () => {
@@ -260,5 +280,124 @@ describe("deleteBelt", () => {
     const tables = club();
     await deleteBelt(memoryDb(tables), "white");
     expect(tables.belts.map((b) => b.slug)).toEqual(["yellow", "green"]);
+  });
+});
+
+describe("reorderSyllabusTopics", () => {
+  it("moves several topics at once and republishes each page once", async () => {
+    const tables = club();
+    const result = await reorderSyllabusTopics(
+      memoryDb(tables),
+      {
+        topics: [
+          { slug: "uke", position: 5 },
+          { slug: "breakfalling", position: 50 },
+        ],
+      },
+      "u-manager",
+    );
+    expect(result.moved).toBe(2);
+    expect(result.pages).toEqual([
+      { belt: "yellow", page: "yellow-belt", version: 2, created: false },
+    ]);
+    expect(live(tables, "a-yellow")).toMatchObject({
+      body_md: "## Uke\n\n- Open hands\n\n## Breakfalling\n\n- Peg leg",
+      change_note: "Topics reordered",
+    });
+  });
+
+  // Tied siblings read in whichever order the tie falls, which can change
+  // between saves and publish a page that moved for no reason.
+  it("refuses two siblings on one number, and writes nothing", async () => {
+    const tables = club();
+    await expect(
+      reorderSyllabusTopics(memoryDb(tables), { topics: [{ slug: "uke", position: 30 }] }, null),
+    ).rejects.toThrow(/"techniques" and "uke" would share position 30/);
+    expect(tables.syllabus_topics.find((t) => t.slug === "uke")?.position).toBe(40);
+    expect(tables.kb_article_versions).toHaveLength(1);
+  });
+
+  it("allows the same number under different topics", async () => {
+    const tables = club();
+    // Uke is 40 at the top level; Throws, under Techniques, can be 40 too.
+    const result = await reorderSyllabusTopics(
+      memoryDb(tables),
+      { topics: [{ slug: "throws", position: 40 }] },
+      null,
+    );
+    expect(result.moved).toBe(1);
+  });
+
+  // A reorder changes no word anybody read, so it must not tell them the page
+  // was updated: their read moves to the new version with it.
+  it("carries readers' progress to the reordered page", async () => {
+    const tables = club();
+    tables.kb_article_reads = [
+      { user_id: "u-member", article_id: "a-yellow", version: 1 },
+      { user_id: "u-other", article_id: "a-yellow", version: 0 },
+    ];
+    await reorderSyllabusTopics(memoryDb(tables), { topics: [{ slug: "uke", position: 5 }] }, null);
+    expect(tables.kb_article_reads).toEqual([
+      { user_id: "u-member", article_id: "a-yellow", version: 2 },
+      // Somebody who read an even older version had not read this wording.
+      { user_id: "u-other", article_id: "a-yellow", version: 0 },
+    ]);
+  });
+
+  it("does not carry progress over when the words changed", async () => {
+    const tables = club();
+    tables.kb_article_reads = [{ user_id: "u-member", article_id: "a-yellow", version: 1 }];
+    await saveSyllabusEntries(
+      memoryDb(tables),
+      { entries: [{ belt: "yellow", topic: "uke", body_md: "- Something new" }] },
+      null,
+    );
+    expect(tables.kb_article_reads[0].version).toBe(1);
+  });
+
+  it("writes nothing when no position changes", async () => {
+    const tables = club();
+    const result = await reorderSyllabusTopics(
+      memoryDb(tables),
+      { topics: [{ slug: "uke", position: 40 }] },
+      null,
+    );
+    expect(result).toEqual({ moved: 0, pages: [] });
+    expect(tables.kb_article_versions).toHaveLength(1);
+  });
+
+  it("refuses an unknown topic before moving anything", async () => {
+    const tables = club();
+    await expect(
+      reorderSyllabusTopics(
+        memoryDb(tables),
+        {
+          topics: [
+            { slug: "uke", position: 5 },
+            { slug: "weapons", position: 1 },
+          ],
+        },
+        null,
+      ),
+    ).rejects.toThrow('Nothing was moved: there is no topic "weapons"');
+    expect(tables.syllabus_topics.find((t) => t.slug === "uke")?.position).toBe(40);
+  });
+});
+
+describe("saveSyllabusTopic, moving under another topic", () => {
+  it("puts it last among its new siblings when no position is given", async () => {
+    const tables = club();
+    tables.syllabus_topics.push({
+      id: "t-locks",
+      slug: "locks",
+      title: "Locks",
+      parent_id: "t-tech",
+      position: 20,
+    });
+    await saveSyllabusTopic(memoryDb(tables), { slug: "uke", parent: "techniques" }, null);
+    expect(tables.syllabus_topics.find((t) => t.slug === "uke")).toMatchObject({
+      parent_id: "t-tech",
+      position: 30,
+    });
   });
 });

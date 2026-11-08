@@ -184,10 +184,15 @@ reader to the fees part of the grading article without them having to find it.
   passage: the reader is told which fragment could not be found and pointed at
   "On this page" for what the article has now, rather than being dropped
   silently at the top of a syllabus.
-- **Every heading offers its own link.** "Link to this section" sits under the
-  heading in the reader (always on a touch screen, on hover or focus on a wide
-  one) and copies the whole address, so a member can paste one into a message
-  and a manager can paste one into another article.
+- **Every heading offers its own link.** A "Link" button (announced as "Link to
+  this section") sits under the heading in the reader, in one row with the
+  heading's comment and, on a belt page, "Every belt up to …" (always on a
+  touch screen; on a wide one, in the right-hand corner of a heading with no
+  comments yet, on hover or focus). It copies the whole address, so a member can
+  paste one into a message and a manager can paste one into another article.
+  The row sits tight under its heading, and a page's blocks sit close, because
+  a belt page is a long run of short headed lists and the gaps between them were
+  most of what a phone showed.
 
 Two things to know before relying on it. Adding `{#anchor}` to a heading
 **changes that block's text**, so comments anchored to the heading itself detach
