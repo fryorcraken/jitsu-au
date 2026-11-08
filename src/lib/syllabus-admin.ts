@@ -47,7 +47,7 @@ type BeltPageRow = Pick<KbArticleRow, "id" | "slug" | "visibility" | "belt_id">;
 type EntryListRow = Pick<SyllabusEntryRow, "belt_id" | "topic_id" | "body_md" | "updated_at">;
 
 /** The slug the syllabus section is created under when there is none yet. */
-export const SYLLABUS_SECTION_SLUG = "syllabus";
+const SYLLABUS_SECTION_SLUG = "syllabus";
 
 /**
  * More blocks than this and the read is refused rather than truncated: a
@@ -68,7 +68,7 @@ export class SyllabusError extends Error {
 }
 
 /** Every row the syllabus is made of, read at once. */
-export async function loadSyllabusRows(db: KbClient) {
+async function loadSyllabusRows(db: KbClient) {
   const [beltsResult, topicsResult, entriesResult, pagesResult] = await Promise.all([
     db.from("belts").select("*"),
     db.from("syllabus_topics").select("*"),
@@ -106,7 +106,7 @@ type SyllabusRows = Awaited<ReturnType<typeof loadSyllabusRows>>;
  * answer opening the page itself gives them. Without one (the manager screen,
  * the agent API) everything is kept, including a belt with no page yet.
  */
-export function toSyllabusData(rows: SyllabusRows, viewer?: Viewer): SyllabusData {
+function toSyllabusData(rows: SyllabusRows, viewer?: Viewer): SyllabusData {
   const pageByBelt = new Map(rows.pages.map((p) => [p.belt_id, p]));
   const belts: (SyllabusBelt & { id: string })[] = rows.belts
     .map((b) => {
@@ -402,6 +402,22 @@ export async function saveBelt(
       throw new SyllabusError(
         `There is no belt "${input.slug}" yet, so creating it needs a name and a colour.`,
         "invalid",
+      );
+    }
+    // Its page will live at /kb/<slug>-belt. Refused now, while nothing has
+    // been made, rather than on its first block, when the manager has written
+    // a box of text that then cannot be published.
+    const pageSlug = beltPageSlug(input.slug);
+    const { data: taken, error: takenErr } = await db
+      .from("kb_articles")
+      .select("id")
+      .eq("slug", pageSlug)
+      .maybeSingle();
+    if (takenErr) throw new Error(takenErr.message);
+    if (taken) {
+      throw new SyllabusError(
+        `There is already an article at /kb/${pageSlug}, which is where this belt's page would go. Pick another short name for the belt, or give that article another URL key.`,
+        "conflict",
       );
     }
     let position = input.position;
@@ -804,9 +820,10 @@ export async function saveSyllabusEntries(
 }
 
 /**
- * Whether an article is a belt page, for the guards in `kb-admin.ts` and the
- * rollback path: a belt page's text comes from the syllabus, so restoring an
- * older version of it would put the page out of step with its own blocks.
+ * The belt (its id) whose page a version belongs to, or null for any other
+ * article's version. For the rollback guard in `kb.functions.ts`: a belt
+ * page's text comes from the syllabus, so restoring an older version of it
+ * would put the page out of step with its own blocks.
  */
 export async function beltOfVersion(db: KbClient, versionId: string): Promise<string | null> {
   const { data, error } = await db

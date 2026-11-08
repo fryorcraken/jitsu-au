@@ -40,8 +40,7 @@ export const getSyllabus = createServerFn({ method: "GET" }).handler(async () =>
     resolveViewer(db),
     import("@/lib/syllabus-admin"),
   ]);
-  const data = await loadSyllabus(db, viewer);
-  return { ...data, viewer: { signed_in: Boolean(viewer.userId), is_manager: viewer.isManager } };
+  return loadSyllabus(db, viewer);
 });
 
 /** Everything, for the manager screen: every belt (with a page or not), topic and block. */

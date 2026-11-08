@@ -31,7 +31,7 @@ export type EditorCell = {
   stored: string;
 };
 
-export const cellKey = (belt: string, topic: string) => `${belt}/${topic}`;
+const cellKey = (belt: string, topic: string) => `${belt}/${topic}`;
 
 /**
  * The boxes for one selection, in reading order.
@@ -87,7 +87,11 @@ export function changedEntries(
     .map((cell) => ({ belt: cell.belt, topic: cell.topic, body_md: values[cell.key] ?? "" }));
 }
 
-/** Each changed box's problem, if it has one, so the screen can say which. */
+/**
+ * Each box's problem, if it has one, so the screen can say which. Every box,
+ * not just the edited ones: a stored block that breaks a rule (written before
+ * the rule, or through the API) still has to be fixed before it saves again.
+ */
 export function cellProblems(
   cells: EditorCell[],
   values: Record<string, string>,

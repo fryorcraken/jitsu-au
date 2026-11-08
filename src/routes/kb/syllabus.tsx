@@ -2,7 +2,7 @@
 //
 // The page a member opens before a grading, and the page an instructor reads
 // down while testing somebody, so it is built for a phone held in one hand:
-// one column, scrolling down, a list of topics at the top to jump with, and a
+// one column, scrolling down, a row of topics that stays in view, and a
 // way to keep the screen from locking halfway through. The belt and the topic
 // live in the address (`?up_to=green&topic=breakfalling`), so the same view
 // can be sent to a group chat.
@@ -36,7 +36,7 @@ export const Route = createFileRoute("/kb/syllabus")({
   component: SyllabusPage,
 });
 
-/** The id a topic's heading gets on this page, for the jump list. */
+/** The id a topic's heading gets on this page, for the topic row's links. */
 const topicAnchor = (slug: string) => `topic-${slug}`;
 
 function SyllabusPage() {
@@ -351,7 +351,7 @@ function TopicSection({ section }: { section: ViewTopic }) {
     <section aria-labelledby={topicAnchor(section.slug)} className="space-y-3">
       <Heading
         id={topicAnchor(section.slug)}
-        // Clears the top bar and the sticky topic row when jumped to.
+        // Clears the top bar and the sticky topic row when linked to.
         className={cn(
           "scroll-mt-32 font-bold tracking-tight",
           section.depth === 2 ? "border-b pb-1.5 text-xl sm:text-2xl" : "pt-1 text-lg",
@@ -360,7 +360,7 @@ function TopicSection({ section }: { section: ViewTopic }) {
         {section.title}
       </Heading>
       {section.entries.map((entry) => (
-        <BeltBlock key={entry.belt.slug} entry={entry} topic={section.slug} />
+        <BeltBlock key={entry.belt.slug} entry={entry} section={section} />
       ))}
       {section.children.map((child) => (
         <TopicSection key={child.slug} section={child} />
@@ -375,8 +375,11 @@ function TopicSection({ section }: { section: ViewTopic }) {
  * a card per belt per topic was mostly border and padding around a two-line
  * list. The colour is decoration only; the name is always there.
  */
-function BeltBlock({ entry, topic }: { entry: ViewBeltEntry; topic: string }) {
+function BeltBlock({ entry, section }: { entry: ViewBeltEntry; section: ViewTopic }) {
   const { belt } = entry;
+  // One level under the topic it sits in, so the outline reads topic, then
+  // belt, under a main topic and under a sub-topic alike.
+  const Heading = section.depth === 2 ? "h3" : "h4";
   const components = useMemo(() => beltComponents(belt.page_slug), [belt.page_slug]);
   return (
     <article
@@ -385,19 +388,22 @@ function BeltBlock({ entry, topic }: { entry: ViewBeltEntry; topic: string }) {
       aria-label={beltPageTitle(belt)}
     >
       <div className="flex items-baseline gap-2">
-        <h4 className="font-semibold">
+        <Heading className="font-semibold">
           {belt.name}
           {belt.grade && (
             <span className="ml-1.5 text-sm font-normal text-muted-foreground">{belt.grade}</span>
           )}
-        </h4>
+        </Heading>
         {belt.visibility === "managers" && <Badge variant="secondary">Draft</Badge>}
         {belt.page_slug && (
           <Link
             to="/kb/$slug"
             params={{ slug: belt.page_slug }}
-            hash={topic}
-            className="ml-auto inline-flex min-h-8 items-center text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            hash={section.slug}
+            // Every block has one of these, so the visible "Belt page" needs
+            // the belt and topic in its name to be told apart in a list of links.
+            aria-label={`${beltPageTitle(belt)} page, ${section.title}`}
+            className="ml-auto inline-flex min-h-10 items-center text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
           >
             Belt page
           </Link>
