@@ -3147,3 +3147,120 @@ describe("manager agent route: the calendar", () => {
     },
   );
 });
+
+// The syllabus over the API. syllabus-admin.test.ts pins what each write does
+// to the tables; what the route owns, and these pin, is the envelope: which
+// refusal becomes which status, and that a belt page's text cannot be written
+// around the syllabus through save_kb_article.
+describe("manager agent route: the syllabus", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    const { memoryDb } = await import("@/lib/testing/memory-db");
+    const { syllabusClub } = await import("@/lib/testing/syllabus-club");
+    tables = syllabusClub();
+    currentAdmin = memoryDb(tables);
+  });
+  let tables: Record<string, Record<string, unknown>[]>;
+
+  const result = async (res: Response) => {
+    const body = await res.json();
+    return { status: res.status, body };
+  };
+
+  it("lists belts junior first, with each one's page", async () => {
+    const { status, body } = await result(await post({ action: "list_belts", params: {} }));
+    expect(status).toBe(200);
+    expect(body.result.belts.map((b: { slug: string }) => b.slug)).toEqual([
+      "white",
+      "yellow",
+      "green",
+    ]);
+    expect(body.result.belts[1]).toMatchObject({
+      page_url: "/kb/yellow-belt",
+      visibility: "members",
+    });
+  });
+
+  it("lists topics with each sub-topic straight after its topic", async () => {
+    const { body } = await result(await post({ action: "list_syllabus_topics", params: {} }));
+    expect(body.result.topics.map((t: { slug: string }) => t.slug)).toEqual([
+      "breakfalling",
+      "techniques",
+      "throws",
+      "uke",
+    ]);
+  });
+
+  it("reads everything up to a belt, as blocks and as one document", async () => {
+    const { status, body } = await result(
+      await post({ action: "get_syllabus", params: { up_to: "yellow", topic: "breakfalling" } }),
+    );
+    expect(status).toBe(200);
+    expect(body.result).toMatchObject({
+      up_to: "yellow",
+      topic: "breakfalling",
+      entries: [{ belt: "yellow", topic: "breakfalling", body_md: "- Peg leg" }],
+      markdown: "## Breakfalling\n\n**Yellow belt (7th Kyu)**\n\n- Peg leg",
+    });
+  });
+
+  it("is a 404, not the whole syllabus, for a belt it does not know", async () => {
+    const { status, body } = await result(
+      await post({ action: "get_syllabus", params: { up_to: "blue" } }),
+    );
+    expect(status).toBe(404);
+    expect(body.error.code).toBe("not_found");
+  });
+
+  it("saves blocks and reports the belt page it republished", async () => {
+    const { status, body } = await result(
+      await post({
+        action: "save_syllabus_entries",
+        params: { entries: [{ belt: "yellow", topic: "throws", body_md: "- O Goshi" }] },
+      }),
+    );
+    expect(status).toBe(200);
+    expect(body.result).toMatchObject({
+      saved: 1,
+      pages: [{ belt: "yellow", page: "yellow-belt", version: 2 }],
+    });
+  });
+
+  it("refuses a heading inside a block before anything is written", async () => {
+    const { status } = await result(
+      await post({
+        action: "save_syllabus_entries",
+        params: { entries: [{ belt: "yellow", topic: "uke", body_md: "## Sneaky\n- x" }] },
+      }),
+    );
+    expect(status).toBe(400);
+    expect(tables.syllabus_entries.find((e) => e.topic_id === "t-uke")?.body_md).toBe(
+      "- Open hands",
+    );
+  });
+
+  it("is a 409 to delete a belt that has a page", async () => {
+    const { status, body } = await result(
+      await post({ action: "delete_belt", params: { slug: "yellow" } }),
+    );
+    expect(status).toBe(409);
+    expect(body.error.message).toMatch(/has a syllabus page/);
+  });
+
+  it("will not take a belt page's text through save_kb_article", async () => {
+    const { status, body } = await result(
+      await post({
+        action: "save_kb_article",
+        params: { slug: "yellow-belt", title: "Yellow", body_md: "Hand-written" },
+      }),
+    );
+    expect(status).toBe(422);
+    expect(body.error.message).toMatch(/save_syllabus_entries/);
+    expect(tables.kb_article_versions).toHaveLength(1);
+  });
+
+  it("marks a belt page in list_kb_articles", async () => {
+    const { body } = await result(await post({ action: "list_kb_articles", params: {} }));
+    expect(body.result.articles[0]).toMatchObject({ slug: "yellow-belt", belt: "yellow" });
+  });
+});
