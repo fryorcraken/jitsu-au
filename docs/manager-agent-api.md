@@ -893,6 +893,9 @@ The action contract lives in **four** places — change all of them together, or
 the agent glue drifts from the deployed API:
 
 1. `src/lib/validation.ts` — `managerAgentActions` + the per-action Zod schemas.
+   (The club message schemas are the one exception: they sit in
+   `src/lib/club-message.ts`, because building them in `validation.ts` would
+   make the two modules import each other.)
 2. `src/lib/manager-agent.ts` — `AGENT_MANIFEST` (self-description) + projections.
 3. `src/routes/api/manager/agent.ts` — the request dispatch/handlers.
 4. `.claude/skills/uts-manager-agent/SKILL.md` — the agent-facing docs.

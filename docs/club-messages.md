@@ -75,6 +75,9 @@ number the confirm repeats.
   notice never makes a mail client fetch anything.
 - **The members' copy** is on `/notifications`, linking to `/messages/<id>`, which
   opens only for an inbox the message was sent to.
+  An applicant's login is still locked, so they cannot open that page: their
+  email carries the whole message, and if it fails to send, the morning
+  summary gives them the first 300 characters and a link they cannot use yet.
 
 ## How it is sent, and why
 

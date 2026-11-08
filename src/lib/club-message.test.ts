@@ -177,6 +177,12 @@ describe("plainExcerpt", () => {
     );
   });
 
+  it("keeps underscores and stars that are not formatting", () => {
+    expect(plainExcerpt("Email club_admin@example.com, room 5 * 3")).toBe(
+      "Email club_admin@example.com, room 5 * 3",
+    );
+  });
+
   it("cuts long text at a word boundary", () => {
     const out = plainExcerpt("word ".repeat(100), 20);
     expect(out.endsWith("...")).toBe(true);

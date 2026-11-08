@@ -220,7 +220,9 @@ export function plainExcerpt(markdown: string, max = 300): string {
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "")
-    .replace(/[*_`~]+/g, "")
+    // Emphasis markers only where they wrap a word, so `club_admin@x` and
+    // `5 * 3` keep their characters.
+    .replace(/(\*\*|__|\*|_|~~|`)(?=\S)([^]*?\S)\1/g, "$2")
     .replace(/\s+/g, " ")
     .trim();
   if (flat.length <= max) return flat;

@@ -36,7 +36,7 @@ import {
 } from "@/lib/club-message.functions";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { describeLoadError } from "@/lib/load-error";
-import { ANNOUNCE_SUBMIT, newSubmissionId } from "@/lib/submit-resilience";
+import { ANNOUNCE_SUBMIT, INTAKE_SUBMIT } from "@/lib/submit-resilience";
 
 export const Route = createFileRoute("/_authenticated/manager/messages")({
   head: () => ({
@@ -88,6 +88,10 @@ function Composer({ userId }: { userId: string | null }) {
   const sendTest = useServerFn(sendClubMessageTest);
   const { confirm, confirmDialog } = useConfirm();
   const submit = useResilientSubmit<SendResult>(ANNOUNCE_SUBMIT);
+  // A test is a write too (it sends an email), so it gets the same timeout and
+  // retry. One press keeps one id through its retries; the next press is a new
+  // test, so the id is reset after each.
+  const testSubmit = useResilientSubmit<{ to: string }>(INTAKE_SUBMIT);
 
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -165,8 +169,11 @@ function Composer({ userId }: { userId: string | null }) {
           if (seq === countSeq.current) setCount(c);
         })
         .catch((e) => {
-          if (seq === countSeq.current)
-            setCountError(describeLoadError(e, "Could not count who this goes to"));
+          if (seq !== countSeq.current) return;
+          // Drop the old number too: Send needs a count, and the confirm must
+          // never quote one for a different set of ticks.
+          setCount(null);
+          setCountError(describeLoadError(e, "Could not count who this goes to"));
         });
     }, 300);
     return () => clearTimeout(t);
@@ -215,14 +222,22 @@ function Composer({ userId }: { userId: string | null }) {
     if (p) return setFormError(p);
     setFormError(null);
     setTestState({ kind: "sending" });
-    try {
-      const res = await sendTest({
-        data: { kind: "notice", subject, body, client_submission_id: newSubmissionId() },
-      });
-      setTestState({ kind: "sent", to: res.to });
-    } catch (e) {
-      setTestState({ kind: "failed", message: describeLoadError(e, "The test did not send") });
-    }
+    const outcome = await testSubmit.submit({
+      run: (signal, clickId) =>
+        sendTest({
+          signal,
+          data: { kind: "notice", subject, body, client_submission_id: clickId },
+        }),
+    });
+    testSubmit.reset();
+    setTestState(
+      outcome.ok
+        ? { kind: "sent", to: outcome.value.to }
+        : {
+            kind: "failed",
+            message: describeLoadError(outcome.error, "The test did not send"),
+          },
+    );
   }
 
   async function deliver() {
@@ -250,7 +265,14 @@ function Composer({ userId }: { userId: string | null }) {
     if (!outcome.ok) return;
     setResult(outcome.value);
     loadHistory();
-    if (outcome.value.pending === 0) draft.clear();
+    if (outcome.value.pending === 0) {
+      // Gone, so it is no longer a draft. Emptying the boxes as well as the
+      // stored copy matters: the draft saver writes again on pagehide, and
+      // would otherwise offer a sent message back as unsent work.
+      draft.clear();
+      setSubject("");
+      setBody("");
+    }
   }
 
   async function onSend() {
