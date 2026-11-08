@@ -6,8 +6,20 @@ import type { ReactNode } from "react";
 import { KbArticleReader } from "./KbArticleReader";
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, search }: { children: ReactNode; search?: Record<string, string> }) => (
-    <a data-search={JSON.stringify(search)}>{children}</a>
+  Link: ({
+    children,
+    search,
+    to: _to,
+    ...rest
+  }: {
+    children: ReactNode;
+    search?: Record<string, string>;
+    to?: string;
+    [key: string]: unknown;
+  }) => (
+    <a href="#" data-search={JSON.stringify(search)} {...rest}>
+      {children}
+    </a>
   ),
 }));
 
@@ -39,16 +51,22 @@ describe("KbArticleReader on a belt page", () => {
   it("links a topic heading to that topic up to this belt, and only a topic heading", () => {
     renderReader((heading) =>
       heading.id === "breakfalling"
-        ? { topic: "breakfalling", upTo: "green", label: "Breakfalling, every belt up to Green" }
+        ? {
+            topic: "breakfalling",
+            upTo: "green",
+            label: "Breakfalling, every belt up to Green",
+            short: "Every belt up to Green",
+          }
         : null,
     );
-    const link = screen.getByText("Breakfalling, every belt up to Green").closest("a")!;
+    const link = screen.getByRole("link", { name: "Breakfalling, every belt up to Green" });
+    expect(link).toHaveTextContent("Every belt up to Green");
     expect(JSON.parse(link.dataset.search!)).toEqual({ up_to: "green", topic: "breakfalling" });
-    expect(screen.queryByText(/Notes, every belt/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Notes, every belt/ })).not.toBeInTheDocument();
   });
 
   it("adds nothing to an ordinary article", () => {
     renderReader();
-    expect(screen.queryByText(/every belt up to/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/every belt up to/i)).not.toBeInTheDocument();
   });
 });

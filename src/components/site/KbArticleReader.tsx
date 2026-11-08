@@ -88,7 +88,9 @@ type Props = {
    * one" link goes: null for a heading that is not a syllabus topic. Absent on
    * every other article.
    */
-  topicLink?: (heading: KbHeading) => { topic: string; upTo: string; label: string } | null;
+  topicLink?: (
+    heading: KbHeading,
+  ) => { topic: string; upTo: string; label: string; short: string } | null;
   annotations: ReaderAnnotation[];
   viewer: ReaderViewer;
   busy?: boolean;
@@ -138,7 +140,7 @@ export function KbArticleReader({
     // laptop leaves a reading column too narrow for a syllabus. Below `xl` the
     // rail drops under the article, which is what it already did on a phone.
     <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <article className="space-y-1">
+      <article className="space-y-2">
         {blocks.map((block) => {
           const onBlock = visible(resolved.anchored.get(block.id) ?? []);
           const shared = onBlock.filter((a) => a.visibility === "shared" && !a.parent_id).length;
@@ -151,6 +153,11 @@ export function KbArticleReader({
               id={heading?.id}
               className={cn(
                 "group relative scroll-mt-24 rounded-md border border-transparent px-3 py-1 transition-colors",
+                // The gap that marks a new section lives on the heading's own
+                // block. A top-level section gets more than a sub-section, and
+                // the text under a heading sits close to it.
+                heading?.depth === 2 && "mt-5",
+                heading && heading.depth > 2 && "mt-2",
                 isSelected ? "border-primary/40 bg-muted/60" : "hover:bg-muted/40",
               )}
             >
@@ -168,13 +175,32 @@ export function KbArticleReader({
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
               </button>
 
-              <ReactMarkdown components={kbMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
-                {block.markdown}
-              </ReactMarkdown>
+              {/* Each block is laid out by the space BETWEEN blocks, so the
+                  margin under its last paragraph, list or heading would only
+                  stack on top of that and double every gap. */}
+              <div className="[&>*:last-child]:mb-0">
+                <ReactMarkdown components={kbMarkdownComponents} remarkPlugins={kbRemarkPlugins}>
+                  {block.markdown}
+                </ReactMarkdown>
+              </div>
 
               {/* The controls under a passage: how many comments are on it, and,
                   when it opens a section, the link to that section. */}
-              <div className="flex flex-wrap items-center gap-4">
+              {/* On a wide screen a heading's links sit at the right of the
+                  heading line, out of the flow, instead of on a row of their
+                  own: that row was invisible there until hovered, and still
+                  put a line of empty space between every heading and its text.
+                  Below `xl` (touch screens) they stay under the heading, where
+                  a thumb can reach them. */}
+              <div
+                className={cn(
+                  "flex flex-wrap items-center gap-x-4",
+                  heading &&
+                    shared === 0 &&
+                    notes === 0 &&
+                    "xl:absolute xl:right-3 xl:top-1.5 xl:bg-background/90",
+                )}
+              >
                 {/* Always rendered when there is anything to show OR the reader
                     could add something. Gating this on `shared + notes > 0` (as
                     it used to be) left phone users with no way to start a
@@ -389,7 +415,10 @@ function SectionLink({ heading }: { heading: KbHeading }) {
       className="mt-1 flex items-center gap-1 text-xs text-muted-foreground opacity-100 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 xl:opacity-0"
     >
       {copied ? <Check className="h-3 w-3" /> : <Link2 className="h-3 w-3" />}
-      {copied ? "Link copied" : "Link to this section"}
+      {/* "Link" on screen, the full name for a screen reader: under every
+          heading on a phone, the long form pushed the heading's other links
+          onto a second row. */}
+      {copied ? "Link copied" : "Link"}
     </a>
   );
 }
@@ -403,17 +432,20 @@ function SectionLink({ heading }: { heading: KbHeading }) {
 function TopicAcrossBelts({
   link,
 }: {
-  link: { topic: string; upTo: string; label: string } | null;
+  link: { topic: string; upTo: string; label: string; short: string } | null;
 }) {
   if (!link) return null;
   return (
     <Link
       to="/kb/syllabus"
       search={{ up_to: link.upTo, topic: link.topic }}
+      aria-label={link.label}
       className="mt-1 flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
     >
       <ListTree className="h-3 w-3" aria-hidden="true" />
-      {link.label}
+      {/* The short form on screen ("Every belt up to Green"): it sits right
+          under the heading it names. The full one is its accessible name. */}
+      {link.short}
     </Link>
   );
 }
