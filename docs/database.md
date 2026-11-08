@@ -1554,7 +1554,11 @@ extended by `20260802100000_knowledge_base.sql`, and narrowed to members-only
 ### `kb_sections` — the groups, and the reading order
 
 `id` PK, `slug` (**unique**, lowercase kebab-case), `title`, `position` (lower
-sorts first), `created_at`, `updated_at`.
+sorts first), `kind` (`standard | syllabus`, default `standard`; a partial
+unique index allows at most one `syllabus`), `created_at`, `updated_at`.
+
+`kind = 'syllabus'` is the section that holds the belt pages, and only those
+(`docs/syllabus.md`). Added by `20261108000000_syllabus.sql`.
 
 A section holds no text and no secrets: it is a heading and a number. What makes
 it load-bearing is that `(section.position, article.position)` is the **only**
@@ -1573,9 +1577,17 @@ grant made unreachable; it was dropped in October 2026.
 `id` PK, `slug` (**unique**, CHECK'd to lowercase kebab-case so it never needs
 escaping in a URL), `visibility` (`members | managers`, default `members`),
 `annotations_enabled` (default true), `section_id → kb_sections(id)
-ON DELETE SET NULL`, `position`, `nav_title`, `link_path`, `created_at`,
+ON DELETE SET NULL`, `position`, `nav_title`, `link_path`, `belt_id →
+belts(id) ON DELETE RESTRICT` (**unique**, nullable), `created_at`,
 `updated_at`, `created_by → auth.users(id) ON DELETE SET NULL`. Index on
 `(section_id, position)`.
+
+`belt_id` marks a **belt page**: the article whose text is assembled from that
+belt's syllabus (`docs/syllabus.md`). `kb_articles_belt_page_is_not_a_link`
+keeps one from also being a link entry. Saving text onto a belt page, moving it
+out of the syllabus section or setting its position is refused in
+`saveKbArticle`, for the reason a CHECK cannot: the rule is about another
+table.
 
 Nothing here is rewritten when the text changes: a slug is a permanent URL, and
 the text lives on the versions below.
@@ -1710,6 +1722,55 @@ depth only** — there are no client grants (`REVOKE ALL` from anon/authenticate
 so nothing here is reachable from a browser and `client-grants-expected.txt`
 needs no entry. Every read and write runs through a server function on the
 service role, which enforces visibility in code.
+
+## Syllabus
+
+What each belt asks of each topic, one block of markdown per (belt, topic).
+Each belt's knowledge base page is assembled from its blocks and republished
+when they change. The product spec is **`docs/syllabus.md`**. Added by
+`20261108000000_syllabus.sql`, which also seeded the belts and topics and
+imported the existing belt pages into blocks.
+
+All three tables are **closed**: `REVOKE ALL` from `anon` and `authenticated`,
+RLS on, and a manager-only `FOR ALL` policy each (`has_role(auth.uid(),
+'manager')`) as defence in depth for the day a grant is added. Every read and
+write goes through `src/lib/syllabus-admin.ts` on the service role, which
+filters what a member may see in code (`toSyllabusData`), so
+`client-grants-expected.txt` has no line for any of them.
+
+### `belts` — the club's belts, in order
+
+`id` PK, `slug` (**unique**, kebab-case, up to 50), `name`, `grade` (nullable:
+"2nd Kyu"), `colour` (`#rrggbb`, CHECK'd), `position` (junior first; seeded in
+tens), `created_at`, `updated_at`.
+
+A belt's page is the `kb_articles` row whose `belt_id` names it; its title is
+built from `name` and `grade`. `ON DELETE RESTRICT` from both `kb_articles` and
+`syllabus_entries`: a belt with a page or with text cannot be deleted, because
+articles cannot be deleted and the page would describe a belt that no longer
+exists. Meant to be what members' belts are recorded against later.
+
+### `syllabus_topics` — what the syllabus is organised by
+
+`id` PK, `slug` (**unique**, kebab-case, up to 100, fixed once made: it is the
+heading anchor on every belt page), `title`, `parent_id → syllabus_topics(id)
+ON DELETE RESTRICT` (nullable), `position`, `created_at`, `updated_at`. CHECK
+that a topic is not its own parent; index on `(parent_id, position)`.
+
+**Two levels only**, enforced in `saveSyllabusTopic` rather than here because a
+CHECK cannot see the parent row: a parent must itself be top-level, and a topic
+with sub-topics cannot be moved under another.
+
+### `syllabus_entries` — one belt's text for one topic
+
+PK `(belt_id, topic_id)`, `belt_id → belts(id) ON DELETE RESTRICT`,
+`topic_id → syllabus_topics(id) ON DELETE RESTRICT`, `body_md` (1 to 20000
+characters after trimming), `updated_by → auth.users(id) ON DELETE SET NULL`,
+`created_at`, `updated_at`. Index on `topic_id`.
+
+No row means the belt has nothing on that topic; clearing a block deletes its
+row, so there is no empty-text state. Headings inside `body_md` are refused by
+the app (`entryProblem`), not here.
 
 ## Public intake (anon insert-only)
 

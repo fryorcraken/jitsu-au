@@ -157,13 +157,14 @@ enforces the three rules that make it safe to rely on:
 - **Dated.** Every entry carries a write time, so a caller can refuse one that
   is too old and a screen can say how old what it is showing is.
 
-| What                                | How long | Why that long                                                                                                                           |
-| ----------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Knowledge base sidebar and articles | 7 days   | The club's own handbooks and policies. They change a few times a year, and a member on the mat reading last week's copy is served well. |
-| Check-in class list and roster      | 24 hours | Carries members' names and emails, and memberships are raised between classes. Older than a day is a wrong answer, not a convenience.   |
-| Unsaved editor drafts               | 14 days  | Long enough to survive being forgotten about, short enough that an offer to restore is a rescue rather than a puzzle.                   |
-| Where the app was                   | 24 hours | See "Coming back to where you were".                                                                                                    |
-| The needs-attention check-in list   | never    | A worklist. A stale one sends a manager chasing check-ins somebody already fixed.                                                       |
+| What                                   | How long | Why that long                                                                                                                                                                                    |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Knowledge base sidebar and articles    | 7 days   | The club's own handbooks and policies. They change a few times a year, and a member on the mat reading last week's copy is served well.                                                          |
+| The syllabus by topic (`/kb/syllabus`) | 7 days   | The same reasoning, and the case it was built for: a member checking "everything up to green" on the mat, where reception is worst, with the belt and topic picked locally from the stored copy. |
+| Check-in class list and roster         | 24 hours | Carries members' names and emails, and memberships are raised between classes. Older than a day is a wrong answer, not a convenience.                                                            |
+| Unsaved editor drafts                  | 14 days  | Long enough to survive being forgotten about, short enough that an offer to restore is a rescue rather than a puzzle.                                                                            |
+| Where the app was                      | 24 hours | See "Coming back to where you were".                                                                                                                                                             |
+| The needs-attention check-in list      | never    | A worklist. A stale one sends a manager chasing check-ins somebody already fixed.                                                                                                                |
 
 `usePersistentQuery` is the seam: it seeds a React Query from the device during
 render (not in an effect, which would flash the spinner it exists to remove) and
