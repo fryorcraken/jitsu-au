@@ -80,8 +80,10 @@ search box is quicker than hunting through menus.
 **2. Create the browser API key.** APIs & Services → Credentials → Create
 credentials → API key, then Edit it:
 
-- **Application restrictions**: Websites, with `https://jitsu.au/*` and
-  `https://*.jitsu.au/*`. Referrer restrictions do accept wildcards.
+- **Application restrictions**: Websites, with `https://utsjitsu.com.au/*` and
+  `https://*.utsjitsu.com.au/*`. Referrer restrictions do accept wildcards.
+  This has to be the address the site is **served from**, not one that redirects
+  to it: `jitsu.au` only redirects, so a key restricted to it matches nothing.
 - **API restrictions**: Restrict key, and tick **both Picker API and Drive
   API**. Ticking Picker alone may starve the same call the missing key did, and
   the symptom is identical. To prove the key first, leave the key unrestricted
@@ -90,7 +92,7 @@ credentials → API key, then Edit it:
 
 **3. Check the OAuth client** (Credentials → the web client):
 
-- **Authorised JavaScript origins** needs `https://jitsu.au`. This is what lets
+- **Authorised JavaScript origins** needs `https://utsjitsu.com.au`. This is what lets
   the site ask Google for the token the picker runs on, and it is already right
   if the picker has ever opened. A missing origin does not look like this bug:
   sign-in fails with `origin_mismatch` and the folder window never opens.
@@ -116,7 +118,7 @@ if something is asking for one, do not widen to `drive` or `drive.readonly`.
 `VITE_SUPABASE_URL`, then **rebuild and redeploy**: until a new build ships,
 "Browse in Drive" stays greyed out no matter what the setting says.
 
-**6. Check it.** On `https://jitsu.au/account` as a manager, signed into the
+**6. Check it.** On `https://utsjitsu.com.au/account` as a manager, signed into the
 Google account Drive is connected as: Browse in Drive should be pressable, the
 folder window should open, and clicking a folder once and pressing Select
 should save it.

@@ -621,7 +621,7 @@ describe("/account", () => {
       const { getGoogleDriveStatus } = await import("@/lib/google-drive.functions");
       vi.mocked(getGoogleDriveStatus).mockResolvedValue({
         connected: true,
-        email: "club@jitsu.au",
+        email: "club@example.com",
         folderId: null,
         folderName: null,
       } as never);
@@ -681,7 +681,7 @@ describe("/account", () => {
         expect.objectContaining({
           clientId: "123456789012-abc.apps.googleusercontent.com",
           developerKey: "AIza-key",
-          connectedEmail: "club@jitsu.au",
+          connectedEmail: "club@example.com",
         }),
       );
     });

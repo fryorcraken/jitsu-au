@@ -229,14 +229,14 @@ describe("buildFolderPicker", () => {
       token: "tok-1",
       developerKey: "AIza-key",
       appId: "123456789012",
-      origin: "https://jitsu.au",
+      origin: "https://utsjitsu.com.au",
       onResponse: () => {},
     });
 
     expect(built.calls.developerKey).toBe("AIza-key");
     expect(built.calls.oauthToken).toBe("tok-1");
     expect(built.calls.appId).toBe("123456789012");
-    expect(built.calls.origin).toBe("https://jitsu.au");
+    expect(built.calls.origin).toBe("https://utsjitsu.com.au");
     expect(built.addedViews).toBe(3);
   });
 
@@ -247,7 +247,7 @@ describe("buildFolderPicker", () => {
       token: "tok-1",
       developerKey: "AIza-key",
       appId: null,
-      origin: "https://jitsu.au",
+      origin: "https://utsjitsu.com.au",
       onResponse: () => {},
     });
 
@@ -257,19 +257,19 @@ describe("buildFolderPicker", () => {
 
 describe("accountMismatchMessage", () => {
   it("names both accounts when the picker signed in as someone else", () => {
-    const message = accountMismatchMessage("personal@gmail.com", "club@jitsu.au");
-    expect(message).toContain("personal@gmail.com");
-    expect(message).toContain("club@jitsu.au");
+    const message = accountMismatchMessage("personal@example.com", "club@example.com");
+    expect(message).toContain("personal@example.com");
+    expect(message).toContain("club@example.com");
   });
 
   it("says nothing when the accounts match, whatever the casing", () => {
-    expect(accountMismatchMessage("Club@Jitsu.au", "club@jitsu.au ")).toBeNull();
+    expect(accountMismatchMessage("Club@Example.com", "club@example.com ")).toBeNull();
   });
 
   it("says nothing when either account is unknown", () => {
     // Drive not answering `about.get` is not a reason to block the manager.
-    expect(accountMismatchMessage(null, "club@jitsu.au")).toBeNull();
-    expect(accountMismatchMessage("club@jitsu.au", null)).toBeNull();
+    expect(accountMismatchMessage(null, "club@example.com")).toBeNull();
+    expect(accountMismatchMessage("club@example.com", null)).toBeNull();
   });
 });
 
@@ -332,12 +332,12 @@ describe("pickDriveFolder", () => {
   }
 
   it("hands back the folder the manager picked", async () => {
-    const { built } = stubGoogle({ accountEmail: "club@jitsu.au" });
+    const { built } = stubGoogle({ accountEmail: "club@example.com" });
 
     const pending = pickDriveFolder({
       clientId: "123456789012-abc.apps.googleusercontent.com",
       developerKey: "AIza-key",
-      connectedEmail: "club@jitsu.au",
+      connectedEmail: "club@example.com",
     });
     await vi.waitFor(() => expect(built.visible).toBe(true));
     built.respond({ action: "picked", docs: [{ id: "folder-1", name: "Waivers" }] });
@@ -348,30 +348,30 @@ describe("pickDriveFolder", () => {
   it("asks Google for the account the site is connected as", async () => {
     // Without the hint the popup silently uses the browser's default account,
     // and a pick made as the wrong one only fails later, server-side.
-    const { built, tokenConfig } = stubGoogle({ accountEmail: "club@jitsu.au" });
+    const { built, tokenConfig } = stubGoogle({ accountEmail: "club@example.com" });
 
     const pending = pickDriveFolder({
       clientId: "123456789012-abc.apps.googleusercontent.com",
       developerKey: "AIza-key",
-      connectedEmail: "club@jitsu.au",
+      connectedEmail: "club@example.com",
     });
     await vi.waitFor(() => expect(built.visible).toBe(true));
     built.respond({ action: "cancel" });
 
     await expect(pending).resolves.toBeNull();
-    expect(tokenConfig.login_hint).toBe("club@jitsu.au");
+    expect(tokenConfig.login_hint).toBe("club@example.com");
   });
 
   it("gives the caller a way to abandon the dialog once it is on screen", async () => {
     // Google's dialog only talks back on a pick or a cancel. When it refuses
     // the pick instead, this is the only thing that ends the browse.
-    const { built } = stubGoogle({ accountEmail: "club@jitsu.au" });
+    const { built } = stubGoogle({ accountEmail: "club@example.com" });
     let abandon: (() => void) | undefined;
 
     const pending = pickDriveFolder({
       clientId: "123456789012-abc.apps.googleusercontent.com",
       developerKey: "AIza-key",
-      connectedEmail: "club@jitsu.au",
+      connectedEmail: "club@example.com",
       onOpen: (close) => {
         abandon = close;
       },
@@ -386,12 +386,12 @@ describe("pickDriveFolder", () => {
   it("bounds the account check so a stalled request cannot hang the browse", async () => {
     // The check sits between the token and the dialog. A request that stalls
     // rather than fails is not caught by a try/catch, only by this signal.
-    const { built } = stubGoogle({ accountEmail: "club@jitsu.au" });
+    const { built } = stubGoogle({ accountEmail: "club@example.com" });
 
     const pending = pickDriveFolder({
       clientId: "123456789012-abc.apps.googleusercontent.com",
       developerKey: "AIza-key",
-      connectedEmail: "club@jitsu.au",
+      connectedEmail: "club@example.com",
     });
     await vi.waitFor(() => expect(built.visible).toBe(true));
     built.respond({ action: "cancel" });
@@ -436,7 +436,7 @@ describe("pickDriveFolder", () => {
     const pending = pickDriveFolder({
       clientId: "123456789012-abc.apps.googleusercontent.com",
       developerKey: "AIza-key",
-      connectedEmail: "club@jitsu.au",
+      connectedEmail: "club@example.com",
     });
     await vi.waitFor(() => expect(built.visible).toBe(true));
     built.respond({ action: "picked", docs: [{ id: "folder-1", name: "Waivers" }] });
@@ -445,15 +445,15 @@ describe("pickDriveFolder", () => {
   });
 
   it("refuses to open when Google signed the manager in as another account", async () => {
-    const { built } = stubGoogle({ accountEmail: "personal@gmail.com" });
+    const { built } = stubGoogle({ accountEmail: "personal@example.com" });
 
     await expect(
       pickDriveFolder({
         clientId: "123456789012-abc.apps.googleusercontent.com",
         developerKey: "AIza-key",
-        connectedEmail: "club@jitsu.au",
+        connectedEmail: "club@example.com",
       }),
-    ).rejects.toThrow(/personal@gmail\.com/);
+    ).rejects.toThrow(/personal@example\.com/);
     expect(built.visible).toBe(false);
   });
 });

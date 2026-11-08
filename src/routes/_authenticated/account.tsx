@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
+import { SaveFailure } from "@/components/site/SaveFailure";
+import { ActionFailure } from "@/components/site/ActionFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
@@ -389,7 +391,8 @@ function GoogleDriveCard() {
   const [folderNameInput, setFolderNameInput] = useState("");
   const [folderBusy, setFolderBusy] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
-  const [folderError, setFolderError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
   // Set while Google's dialog is on screen. Everything in that dialog is
   // Google's and it only talks back on a pick or a cancel, so this is the
   // manager's own way out if it refuses the pick or shows its own error.
@@ -476,18 +479,17 @@ function GoogleDriveCard() {
     }
   }
 
-  async function onSaveFolder(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveFolder() {
     const folderName = folderNameInput.trim();
     if (!folderName) return;
     setFolderBusy(true);
-    setFolderError(null);
+    setSaveError(null);
     try {
       const result = await setFolder({ data: { folderName } });
       setSavedFolderName(result.folderName);
       toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
-      setFolderError(e instanceof Error ? e.message : "Could not save the folder name. Try again.");
+      setSaveError(e instanceof Error ? e.message : "Could not save the folder name. Try again.");
     } finally {
       setFolderBusy(false);
     }
@@ -496,7 +498,7 @@ function GoogleDriveCard() {
   async function onBrowseFolder() {
     if (!picker) return;
     setPickerBusy(true);
-    setFolderError(null);
+    setPickError(null);
     try {
       const { pickDriveFolder } = await import("@/lib/google-picker");
       const picked = await pickDriveFolder({
@@ -510,7 +512,7 @@ function GoogleDriveCard() {
       setFolderNameInput(result.folderName);
       toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
-      setFolderError(
+      setPickError(
         e instanceof Error
           ? e.message
           : "Could not open the folder picker. Type the folder name instead.",
@@ -556,13 +558,22 @@ function GoogleDriveCard() {
                 {busy ? "Working..." : "Disconnect"}
               </Button>
             </div>
-            <form onSubmit={onSaveFolder} className="space-y-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveFolder();
+              }}
+              className="space-y-2"
+            >
               <Label htmlFor="drive-folder-name">Drive folder</Label>
               <div className="flex flex-wrap items-center gap-2">
                 <Input
                   id="drive-folder-name"
                   value={folderNameInput}
-                  onChange={(e) => setFolderNameInput(e.target.value)}
+                  onChange={(e) => {
+                    setFolderNameInput(e.target.value);
+                    setSaveError(null);
+                  }}
                   placeholder={DEFAULT_FOLDER_NAME}
                   className="max-w-xs"
                   disabled={folderBusy}
@@ -585,10 +596,23 @@ function GoogleDriveCard() {
                   </Button>
                 ) : null}
               </div>
-              {folderError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{folderError}</AlertDescription>
-                </Alert>
+              {saveError && (
+                <SaveFailure
+                  what="folder"
+                  message={saveError}
+                  onRetry={() => void saveFolder()}
+                  retrying={folderBusy}
+                  // This box is not backed by a draft, so the panel must not
+                  // promise the name is kept anywhere but on the screen.
+                  keptOnDevice={false}
+                />
+              )}
+              {pickError && (
+                <ActionFailure
+                  title="Choosing a folder did not finish."
+                  message={pickError}
+                  onDismiss={() => setPickError(null)}
+                />
               )}
               <p className="text-xs text-muted-foreground">
                 {savedFolderName
