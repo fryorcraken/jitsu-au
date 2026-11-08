@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import {
   Bell,
   BookOpen,
+  ListTree,
   CalendarDays,
   ChevronLeft,
   ClipboardCheck,
@@ -83,6 +84,8 @@ const managerNav: NavItem[] = [
   // "editor" in the label because the member group above already has a
   // "Knowledge base" entry pointing at the reader. Same content, two jobs.
   { to: "/manager/kb", label: "Knowledge base editor", icon: BookOpen },
+  // The belt pages in the knowledge base are written here, topic by topic.
+  { to: "/manager/syllabus", label: "Syllabus", icon: ListTree },
   { to: "/manager/blog", label: "Blog posts", icon: Newspaper },
   { to: "/manager/blog-comments", label: "Blog comments", icon: MessageSquare },
   { to: "/manager/contact-messages", label: "Contact messages", icon: Mail },

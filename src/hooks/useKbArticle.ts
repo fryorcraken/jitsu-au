@@ -126,7 +126,13 @@ export function useInvalidateKbReader(): () => void {
   return useCallback(() => {
     // Every reader's copy, not just this manager's: they are keyed by user id,
     // and a manager holds at most one of them anyway.
-    for (const key of [["kb-article"], ["kb-nav"], ["kb-search"], ["kb-annotations"]]) {
+    for (const key of [
+      ["kb-article"],
+      ["kb-nav"],
+      ["kb-search"],
+      ["kb-annotations"],
+      ["kb-syllabus"],
+    ]) {
       void queryClient.invalidateQueries({ queryKey: key });
     }
   }, [queryClient]);

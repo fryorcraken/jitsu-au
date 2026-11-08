@@ -22,7 +22,9 @@ description: >-
   code of conduct (and choose whether members must agree to it again), add or edit a membership
   window's start/end dates (and email every member about a plan), or edit a
   knowledge base article at /kb/<slug>, change the order members read them in,
-  and review the feedback left on them, or write, edit, publish or delete a
+  and review the feedback left on them, or read and edit the syllabus (what
+  each belt asks on each topic, "everything up to green", the club's belts and
+  the syllabus topics), or write, edit, publish or delete a
   blog post at /blog/<slug> (an article kept on top, or a club update) and
   upload its pictures, or see what is on the club
   calendar and who is coming, add a class or event (once or weekly), edit,
@@ -1232,6 +1234,106 @@ scripts/agent.sh list_kb_comments '{"slug":"our-history"}'
 > conversation, not everything anybody wrote — do not describe its output to a
 > manager as "all the feedback".
 
+### The syllabus
+
+What each belt asks of each topic: breakfalling, striking, techniques (with
+throws, locks, groundwork and the rest under it), and so on. It is stored as
+**one block of markdown per belt per topic**, and each belt's knowledge base
+page (`/kb/green-belt`) is **put together from that belt's blocks** and
+republished automatically when they change. So:
+
+- **Edit the syllabus, never the belt page.** `save_kb_article` refuses text for
+  a belt page (`list_kb_articles` marks one with `belt`). Change the blocks with
+  `save_syllabus_entries` and the page follows.
+- **The topics are the headings.** A block holds content only (lists,
+  sentences, bold, links). A heading inside one is refused.
+- **Members see a belt only once its page is open to them.** A belt's first
+  block makes its page at `managers` visibility, as a draft. Open it when it is
+  ready with `save_kb_article '{"slug":"brown-belt","visibility":"members"}'`;
+  that is the one save a belt page still takes. Confirm with the manager first:
+  it publishes that belt's syllabus to every member.
+
+Members read it two ways: each belt's own page, and **`/kb/syllabus`**, which
+shows everything up to a belt topic by topic (`/kb/syllabus?up_to=green`,
+`/kb/syllabus?up_to=green&topic=breakfalling`). Hand a manager those links when
+they want to send a group "everything for your next grading".
+
+### `get_syllabus` — everything up to a belt
+
+```bash
+# Everything, every belt:
+scripts/agent.sh get_syllabus '{}'
+# Breakfalling, yellow to green (the junior belts are always included):
+scripts/agent.sh get_syllabus '{"up_to":"green","topic":"breakfalling"}'
+```
+
+Returns `belts` (the ones included, junior first), `topics` (every topic, each
+followed by its sub-topics), `entries` (`{ belt, topic, body_md }`, in topic
+then belt order; a belt with nothing on a topic has no entry) and `markdown`
+(the same as one document, ready to read out). A topic with sub-topics
+(`techniques`) includes them. An unknown belt or topic is `404`. As a manager
+you also get belts whose page is still managers-only: check each belt's
+`visibility` before telling anybody "members can see this".
+
+### `save_syllabus_entries` — write or clear blocks
+
+```bash
+# One topic across several belts, in one call:
+scripts/agent.sh save_syllabus_entries '{
+  "entries": [
+    {"belt":"yellow","topic":"breakfalling","body_md":"- Kneeling breakfalling\n- Peg leg"},
+    {"belt":"orange","topic":"breakfalling","body_md":"- Standing forward, sideways"}
+  ],
+  "change_note": "Breakfalling progression tidied"
+}'
+# Clear a block (the belt then has nothing on that topic):
+scripts/agent.sh save_syllabus_entries '{"entries":[{"belt":"brown","topic":"drills","body_md":""}]}'
+```
+
+> [!IMPORTANT]
+>
+> - **Each `body_md` REPLACES that block.** Read it with `get_syllabus` first and
+>   edit what comes back.
+> - **Send a whole edit in one call.** Each belt page that changed is
+>   republished once per call, so editing ten topics of one belt in ten calls
+>   gives that page ten versions.
+> - **Unknown belts or topics refuse the whole call** and nothing is written.
+>   List them first if you are unsure of a slug.
+> - **`503 belt_pages_not_updated`** means the blocks ARE saved and a belt page
+>   could not be republished. Send the same call again: a page already up to
+>   date writes nothing.
+> - **Last save wins**, like an article. Every republish is a kept version of
+>   the belt page, so nothing is lost for good.
+
+### `list_belts` / `save_belt` / `delete_belt` — the club's belts
+
+```bash
+scripts/agent.sh list_belts '{}'
+scripts/agent.sh save_belt '{"slug":"brown","grade":"1st Kyu"}'
+scripts/agent.sh save_belt '{"slug":"black","name":"Black","colour":"#111827","position":90,"expect_new":true}'
+```
+
+Junior first by `position` (the seeded belts use tens, white at 10). Renaming
+or regrading a belt republishes its page, whose title is built from both
+("Green belt (5th Kyu)"). `delete_belt` is for a belt made by mistake: a belt
+with a page or any syllabus text is a `409`.
+
+### `list_syllabus_topics` / `save_syllabus_topic` / `delete_syllabus_topic` — the topics
+
+```bash
+scripts/agent.sh list_syllabus_topics '{}'
+# Rename: the slug, and every link to that heading, stays.
+scripts/agent.sh save_syllabus_topic '{"slug":"breakfalling","title":"Breakfalling (Ukemi)"}'
+# A new sub-topic under Techniques:
+scripts/agent.sh save_syllabus_topic '{"slug":"weapons","title":"Weapons","parent":"techniques","expect_new":true}'
+```
+
+Two levels only: a topic, and sub-topics under it. A topic's `slug` is its
+heading's anchor on every belt page (`/kb/green-belt#breakfalling`), fixed once
+made. Renaming or moving a topic republishes every belt page it is on.
+`delete_syllabus_topic` is refused (`409`) while the topic has sub-topics or any
+belt has text on it; clear those blocks first, and only if the manager asked.
+
 ### The blog
 
 Posts at `/blog/<slug>`, written in Markdown. These are the same saves the
@@ -1929,7 +2031,7 @@ scripts/agent.sh list_club_messages '{}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"36"`), and its
+- The manifest's `version` tells generations apart (currently `"37"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

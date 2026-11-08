@@ -21,6 +21,12 @@ import {
   agentPublishWaiverTemplateSchema,
   agentSaveWaiverTemplateSchema,
   deleteKbSectionSchema,
+  deleteBeltSchema,
+  deleteSyllabusTopicSchema,
+  getSyllabusSchema,
+  saveBeltSchema,
+  saveSyllabusEntriesSchema,
+  saveSyllabusTopicSchema,
   getKbArticleSchema,
   listAgentInvoicesSchema,
   listAgentUsersSchema,
@@ -134,6 +140,22 @@ import {
   saveKbSection,
 } from "@/lib/kb-admin";
 import type { KbAnnotationRow, KbArticleRow } from "@/lib/kb-types";
+import {
+  SyllabusError,
+  deleteBelt,
+  deleteSyllabusTopic,
+  loadSyllabus,
+  saveBelt,
+  saveSyllabusEntries,
+  saveSyllabusTopic,
+} from "@/lib/syllabus-admin";
+import {
+  flattenTopics,
+  syllabusView,
+  syllabusViewMarkdown,
+  topicTree,
+  type SyllabusBelt,
+} from "@/lib/syllabus";
 import { DocumentVersionError } from "@/lib/document-versions";
 import {
   filePaperWaiver,
@@ -1664,7 +1686,12 @@ async function handleListKbSections() {
   const sections = await listKbSections(db);
   return {
     count: sections.length,
-    sections: sections.map((s) => ({ slug: s.slug, title: s.title, position: s.position })),
+    sections: sections.map((s) => ({
+      slug: s.slug,
+      title: s.title,
+      position: s.position,
+      kind: s.kind,
+    })),
   };
 }
 
@@ -1716,7 +1743,12 @@ async function handleListKbArticles() {
   // one. Those differ whenever a manager has rolled back to an earlier version,
   // and reporting the newest as live would have an agent read version 9, edit
   // it, and publish it over the version 4 the club deliberately went back to.
-  const [{ data: docs, error }, { data: versions, error: vErr }, sections] = await Promise.all([
+  const [
+    { data: docs, error },
+    { data: versions, error: vErr },
+    sections,
+    { data: belts, error: bErr },
+  ] = await Promise.all([
     db.from("kb_articles").select("*").order("slug").limit(ARTICLES_LIMIT),
     db
       .from("kb_article_versions")
@@ -1724,9 +1756,12 @@ async function handleListKbArticles() {
       .eq("is_current", true)
       .limit(ARTICLES_LIMIT),
     listKbSections(db),
+    db.from("belts").select("id, slug"),
   ]);
   if (error) throw new AgentError(500, "db_error", error.message);
   if (vErr) throw new AgentError(500, "db_error", vErr.message);
+  if (bErr) throw new AgentError(500, "db_error", bErr.message);
+  const beltSlugById = new Map((belts ?? []).map((b) => [b.id, b.slug]));
 
   // Articles report their section by SLUG, never by id: the slug is what
   // `save_kb_article` takes back, so an agent can move an article using exactly
@@ -1759,6 +1794,7 @@ async function handleListKbArticles() {
       liveByDoc.get(d.id),
       d.section_id ? (sectionSlugById.get(d.section_id) ?? null) : null,
       countByDoc.get(d.id) ?? 0,
+      d.belt_id ? (beltSlugById.get(d.belt_id) ?? null) : null,
     ),
   );
   return { count: articles.length, articles };
@@ -1840,6 +1876,152 @@ async function handleListKbComments(params: unknown) {
 
   const projected = annotations.map((a) => projectAnnotation(a, nameByUser.get(a.user_id) ?? null));
   return { count: projected.length, slug: doc.slug, annotations: projected };
+}
+
+// ---- The syllabus (docs/syllabus.md) ----
+//
+// Every handler goes through `syllabus-admin.ts`, the same module the manager's
+// Syllabus screen and the member's page call, so there is no query here of its
+// own. A belt page is assembled from the syllabus and republished by those
+// functions; nothing here writes an article.
+
+/** A refusal from the syllabus, in the endpoint's error envelope. */
+function syllabusFailure(e: unknown, code: string, fallback: string): AgentError {
+  if (e instanceof AgentError) return e;
+  if (e instanceof SyllabusError) {
+    if (e.code === "not_found") return new AgentError(404, "not_found", e.message);
+    if (e.code === "conflict") return new AgentError(409, "conflict", e.message);
+    // The text IS saved; only a page lags. Safe to send again unchanged, which
+    // is what the Retry-After says.
+    if (e.code === "not_published") {
+      return new AgentError(503, "belt_pages_not_updated", e.message, undefined, 5);
+    }
+    return new AgentError(422, code, e.message);
+  }
+  return new AgentError(422, code, e instanceof Error ? e.message : fallback);
+}
+
+function projectAgentBelt(belt: SyllabusBelt) {
+  return {
+    slug: belt.slug,
+    name: belt.name,
+    grade: belt.grade,
+    colour: belt.colour,
+    position: belt.position,
+    page: belt.page_slug,
+    page_url: belt.page_slug ? `/kb/${belt.page_slug}` : null,
+    visibility: belt.visibility,
+  };
+}
+
+async function readSyllabus() {
+  try {
+    return await loadSyllabus(await adminClient());
+  } catch (e) {
+    throw new AgentError(500, "db_error", e instanceof Error ? e.message : "Could not read it.");
+  }
+}
+
+// ---- action: list_belts ----
+async function handleListBelts(params: unknown) {
+  agentNoCheckInParamsSchema.parse(params ?? {});
+  const data = await readSyllabus();
+  return { count: data.belts.length, belts: data.belts.map(projectAgentBelt) };
+}
+
+// ---- action: list_syllabus_topics ----
+async function handleListSyllabusTopics(params: unknown) {
+  agentNoCheckInParamsSchema.parse(params ?? {});
+  const data = await readSyllabus();
+  const topics = flattenTopics(topicTree(data.topics));
+  return { count: topics.length, topics };
+}
+
+// ---- action: get_syllabus ----
+async function handleGetSyllabus(params: unknown) {
+  const input = getSyllabusSchema.parse(params ?? {});
+  const data = await readSyllabus();
+  const view = syllabusView(data, { upTo: input.up_to, topic: input.topic });
+  // The member's page tells a reader about an unknown belt and shows them the
+  // whole syllabus. An agent asked for "up to blue" gets a 404 instead: it
+  // would otherwise read the whole syllabus back as if it were what it asked.
+  if (view.unknownUpTo) {
+    throw new AgentError(
+      404,
+      "not_found",
+      `There is no belt "${view.unknownUpTo}" with a syllabus page. list_belts shows the belts.`,
+    );
+  }
+  if (view.unknownTopic) {
+    throw new AgentError(
+      404,
+      "not_found",
+      `There is no topic "${view.unknownTopic}". list_syllabus_topics shows the topics.`,
+    );
+  }
+  const entries = view.sections.flatMap((section) =>
+    [section, ...section.children].flatMap((topic) =>
+      topic.entries.map((e) => ({ belt: e.belt.slug, topic: topic.slug, body_md: e.body_md })),
+    ),
+  );
+  return {
+    up_to: view.upTo?.slug ?? null,
+    topic: view.topic?.slug ?? null,
+    belts: view.belts.map(projectAgentBelt),
+    topics: flattenTopics(view.allTopics),
+    entries,
+    markdown: syllabusViewMarkdown(view),
+  };
+}
+
+// ---- action: save_syllabus_entries ----
+async function handleSaveSyllabusEntries(params: unknown, actingAs: string) {
+  const input = saveSyllabusEntriesSchema.parse(params);
+  try {
+    return await saveSyllabusEntries(await adminClient(), input, actingAs);
+  } catch (e) {
+    throw syllabusFailure(e, "save_syllabus_entries_failed", "Could not save the syllabus.");
+  }
+}
+
+// ---- action: save_belt ----
+async function handleSaveBelt(params: unknown, actingAs: string) {
+  const input = saveBeltSchema.parse(params);
+  try {
+    return await saveBelt(await adminClient(), input, actingAs);
+  } catch (e) {
+    throw syllabusFailure(e, "save_belt_failed", "Could not save the belt.");
+  }
+}
+
+// ---- action: delete_belt ----
+async function handleDeleteBelt(params: unknown) {
+  const input = deleteBeltSchema.parse(params);
+  try {
+    return await deleteBelt(await adminClient(), input.slug);
+  } catch (e) {
+    throw syllabusFailure(e, "delete_belt_failed", "Could not delete the belt.");
+  }
+}
+
+// ---- action: save_syllabus_topic ----
+async function handleSaveSyllabusTopic(params: unknown, actingAs: string) {
+  const input = saveSyllabusTopicSchema.parse(params);
+  try {
+    return await saveSyllabusTopic(await adminClient(), input, actingAs);
+  } catch (e) {
+    throw syllabusFailure(e, "save_syllabus_topic_failed", "Could not save the topic.");
+  }
+}
+
+// ---- action: delete_syllabus_topic ----
+async function handleDeleteSyllabusTopic(params: unknown) {
+  const input = deleteSyllabusTopicSchema.parse(params);
+  try {
+    return await deleteSyllabusTopic(await adminClient(), input.slug);
+  } catch (e) {
+    throw syllabusFailure(e, "delete_syllabus_topic_failed", "Could not delete the topic.");
+  }
 }
 
 // ---- action: get_club_settings ----
@@ -2882,6 +3064,22 @@ export async function dispatch(
       return handleSaveKbArticle(params, actingAs);
     case "list_kb_comments":
       return handleListKbComments(params);
+    case "list_belts":
+      return handleListBelts(params);
+    case "save_belt":
+      return handleSaveBelt(params, actingAs);
+    case "delete_belt":
+      return handleDeleteBelt(params);
+    case "list_syllabus_topics":
+      return handleListSyllabusTopics(params);
+    case "save_syllabus_topic":
+      return handleSaveSyllabusTopic(params, actingAs);
+    case "delete_syllabus_topic":
+      return handleDeleteSyllabusTopic(params);
+    case "get_syllabus":
+      return handleGetSyllabus(params);
+    case "save_syllabus_entries":
+      return handleSaveSyllabusEntries(params, actingAs);
     case "list_items":
       return handleListItems();
     case "save_item":

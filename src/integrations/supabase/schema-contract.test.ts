@@ -369,11 +369,35 @@ export type _KbArticleColumns = RequireColumns<
   | "position"
   | "nav_title"
   | "link_path"
+  | "belt_id"
 >;
 
 export type _KbSectionColumns = RequireColumns<
   Tables["kb_sections"]["Row"],
-  "id" | "slug" | "title" | "position" | "created_at" | "updated_at"
+  "id" | "slug" | "title" | "position" | "kind" | "created_at" | "updated_at"
+>;
+
+/**
+ * The syllabus (`20261108120000_syllabus.sql`, docs/syllabus.md). Hand-added to
+ * `types.ts` ahead of the live schema while that migration waits for approval;
+ * the merge step regenerates the file, which replaces them with the
+ * generator's identical lines.
+ */
+export type _BeltColumns = RequireColumns<
+  Tables["belts"]["Row"],
+  "id" | "slug" | "name" | "grade" | "colour" | "position" | "updated_at"
+>;
+export type _SyllabusTopicColumns = RequireColumns<
+  Tables["syllabus_topics"]["Row"],
+  "id" | "slug" | "title" | "parent_id" | "position" | "updated_at"
+>;
+export type _SyllabusEntryColumns = RequireColumns<
+  Tables["syllabus_entries"]["Row"],
+  "belt_id" | "topic_id" | "body_md" | "updated_by" | "updated_at"
+>;
+/** A belt page names at most one belt, and most articles name none. */
+export type _KbArticleBeltIsNullable = Expect<
+  Equals<Tables["kb_articles"]["Row"]["belt_id"], string | null>
 >;
 
 export type _KbArticleVersionColumns = RequireColumns<

@@ -43,6 +43,8 @@ const navSection = z.object({
   slug: z.string(),
   title: z.string(),
   position: z.number(),
+  // Soft: a copy stored before sections had a kind is still a good sidebar.
+  kind: z.enum(["standard", "syllabus"]).catch("standard"),
 });
 
 const navEntry = z.object({
@@ -95,6 +97,37 @@ export const kbArticleCacheSchema = z.object({
       can_annotate: z.boolean(),
     })
     .nullable(),
+  // Soft, for the same reason: a stored article from before belt pages knew
+  // their belt is still readable, just without the links to the syllabus.
+  syllabus: z
+    .object({ belt: z.string(), belt_name: z.string(), topics: z.array(z.string()) })
+    .nullable()
+    .catch(null),
+});
+
+const syllabusBelt = z.object({
+  slug: z.string(),
+  name: z.string(),
+  grade: z.string().nullable(),
+  colour: z.string(),
+  position: z.number(),
+  page_slug: z.string().nullable(),
+  visibility: visibility.nullable(),
+});
+
+/** The member's syllabus, kept on the device so it opens on the mat with no signal. */
+export const syllabusCacheSchema = z.object({
+  belts: z.array(syllabusBelt),
+  topics: z.array(
+    z.object({
+      slug: z.string(),
+      title: z.string(),
+      parent: z.string().nullable(),
+      position: z.number(),
+    }),
+  ),
+  entries: z.array(z.object({ belt: z.string(), topic: z.string(), body_md: z.string() })),
+  viewer: z.object({ signed_in: z.boolean(), is_manager: z.boolean() }),
 });
 
 /**

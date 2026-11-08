@@ -40,6 +40,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
 import { splitBlocks } from "../src/lib/kb.ts";
+import { beltPageSlug, beltPageTitle, composeBeltPage } from "../src/lib/syllabus.ts";
 import { isLocalSupabase } from "./local-supabase.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -117,6 +118,8 @@ function id(n) {
 
 const BLOG = { welcome: id(21), grading: id(22), draft: id(23), article: id(24) };
 const KB_ARTICLE = { welcome: id(41), etiquette: id(42) };
+/** The three belt pages the syllabus fixture writes. */
+const BELT_PAGE = { yellow: id(43), orange: id(44), green: id(45) };
 const SERIES = id(51);
 const IMPORT_BATCH = id(71);
 /** The manager's own year of cover, ending inside the 14-day reminder window. */
@@ -908,6 +911,84 @@ await insert("kb_article_versions", [
     created_by: users.manager,
   },
 ]);
+
+// The syllabus. The migrations seed the belts, the topics and the Syllabus
+// section; this writes a few blocks for three belts and their pages, so the
+// tour photographs a syllabus with something in it: the member's "up to belt
+// X" view, a belt page with its topic links, and the manager's editor. Green
+// is left a managers-only draft, which is how a belt being written looks.
+//
+// The pages are assembled by the same `composeBeltPage` the app republishes
+// them with, so the fixture is a faithful copy of what a save produces. The
+// text is synthetic, written for the fixture: not the club's real syllabus.
+const fixtureBelts = await select("belts", "id, slug, name, grade, position");
+const fixtureTopics = await select("syllabus_topics", "id, slug, title, parent_id, position");
+const [syllabusSection] = await select("kb_sections", "id", (query) =>
+  query.eq("kind", "syllabus"),
+);
+if (!syllabusSection) failures.push("no syllabus section: check the migrations");
+const beltBySlug = new Map(fixtureBelts.map((b) => [b.slug, b]));
+const topicBySlug = new Map(fixtureTopics.map((t) => [t.slug, t]));
+const SYLLABUS_TEXT = [
+  [
+    "yellow",
+    "breakfalling",
+    "- Kneeling breakfalls: forward, backward, sideways\n- Standing backward",
+  ],
+  ["yellow", "throws", "- O Soto Gari\n- Ko Soto Gari"],
+  ["yellow", "locks", "- **Arm lock**: straight arm, from a wrist grab"],
+  ["yellow", "uke", "- Deliver a straight open hand on target, with control."],
+  ["orange", "breakfalling", "- Standing forward and sideways\n- Over the belt"],
+  ["orange", "throws", "- O Goshi\n- Single leg takedown"],
+  ["orange", "scenarios", "- **Striking attacker**: close the distance, take a grip, take down."],
+  ["green", "breakfalling", "- Judo rolls\n- Front drop"],
+  ["green", "groundwork-ne-waza", "- Hold and escape from the mount"],
+];
+const syllabusEntries = SYLLABUS_TEXT.flatMap(([belt, topic, body_md]) => {
+  const beltRow = beltBySlug.get(belt);
+  const topicRow = topicBySlug.get(topic);
+  if (!beltRow || !topicRow) {
+    failures.push(
+      `syllabus fixture names a belt or topic the migrations did not seed: ${belt}/${topic}`,
+    );
+    return [];
+  }
+  return [{ belt_id: beltRow.id, topic_id: topicRow.id, body_md, updated_by: users.manager }];
+});
+await insert("syllabus_entries", syllabusEntries);
+
+const pureTopics = fixtureTopics.map((t) => ({
+  slug: t.slug,
+  title: t.title,
+  parent: fixtureTopics.find((p) => p.id === t.parent_id)?.slug ?? null,
+  position: t.position,
+}));
+const pureEntries = SYLLABUS_TEXT.map(([belt, topic, body_md]) => ({ belt, topic, body_md }));
+const fixtureBeltPages = Object.entries(BELT_PAGE).filter(([slug]) => beltBySlug.has(slug));
+await insert(
+  "kb_articles",
+  fixtureBeltPages.map(([slug, articleId]) => ({
+    id: articleId,
+    slug: beltPageSlug(slug),
+    section_id: syllabusSection?.id ?? null,
+    position: beltBySlug.get(slug).position,
+    belt_id: beltBySlug.get(slug).id,
+    visibility: slug === "green" ? "managers" : "members",
+    annotations_enabled: true,
+    created_by: users.manager,
+  })),
+);
+await insert(
+  "kb_article_versions",
+  fixtureBeltPages.map(([slug, articleId]) => ({
+    article_id: articleId,
+    version: 1,
+    is_current: true,
+    title: beltPageTitle(beltBySlug.get(slug)),
+    body_md: composeBeltPage(slug, pureTopics, pureEntries),
+    created_by: users.manager,
+  })),
+);
 
 // Anchored to the passage it is about, exactly as the reader anchors one: a
 // hash of that block's own text (see `blockId` in src/lib/kb.ts). Left null it

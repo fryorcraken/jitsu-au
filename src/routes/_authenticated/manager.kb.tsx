@@ -440,6 +440,13 @@ function KnowledgeBaseManager() {
           },
     [stored, newBaseline],
   );
+  // A belt's syllabus page. Its text is written on the syllabus screen and put
+  // together from there, so this editor offers only its settings (who can read
+  // it, comments, the sidebar label) and saves only those: the server refuses
+  // text for a belt page, which would otherwise be overwritten without a word
+  // by the next syllabus save.
+  const beltPage = !creating && articles.find((a) => a.slug === slug)?.is_belt_page === true;
+
   const kbDraft = useEditorDraft<KbDraftFields>({
     kind: "kb-entry",
     // A new entry has no slug yet, so it gets its own slot. Once it is saved
@@ -904,22 +911,29 @@ function KnowledgeBaseManager() {
         nav_title: navTitle.trim(),
       };
       const res = await save({
-        data: isLink
-          ? { slug: targetSlug, link_path: linkPath.trim(), ...placement, expect_new: creating }
-          : {
+        data: beltPage
+          ? {
               slug: targetSlug,
-              title,
-              body_md: body,
               visibility,
               annotations_enabled: annotationsEnabled,
-              change_note: changeNote,
-              ...placement,
-              // Only when this save is converting a link entry into an article.
-              // Sending it otherwise would be a no-op on an article and a
-              // schema error the moment the text fields are empty.
-              ...(stored?.link_path ? { link_path: "" } : {}),
-              expect_new: creating,
-            },
+              nav_title: navTitle.trim(),
+            }
+          : isLink
+            ? { slug: targetSlug, link_path: linkPath.trim(), ...placement, expect_new: creating }
+            : {
+                slug: targetSlug,
+                title,
+                body_md: body,
+                visibility,
+                annotations_enabled: annotationsEnabled,
+                change_note: changeNote,
+                ...placement,
+                // Only when this save is converting a link entry into an article.
+                // Sending it otherwise would be a no-op on an article and a
+                // schema error the moment the text fields are empty.
+                ...(stored?.link_path ? { link_path: "" } : {}),
+                expect_new: creating,
+              },
       });
       // Report the save the moment it succeeds. Refreshing the lists is a second
       // round trip, and reporting after it announced a successful save as a
@@ -932,7 +946,9 @@ function KnowledgeBaseManager() {
             : "Link saved"
           : res.created
             ? `Created "${targetSlug}" and published version ${res.version}`
-            : `Saved version ${res.version}, now live`,
+            : res.version === null
+              ? "Settings saved"
+              : `Saved version ${res.version}, now live`,
       );
       // What members are reading has just changed, so drop the reader side's
       // cached copies. This screen keeps its own state and never goes through
@@ -1561,7 +1577,12 @@ function KnowledgeBaseManager() {
                             // leaves the list showing the old order over rows
                             // that were already written.
                             disabled={saving || promoting || busy || ordering}
-                            dragDisabled={ordering}
+                            // Belt pages are ordered by belt, on the syllabus
+                            // screen, so they have no handle here.
+                            dragDisabled={
+                              ordering ||
+                              articles.find((a) => a.slug === entry.slug)?.is_belt_page === true
+                            }
                             onOpen={() => void openDocument(entry.slug)}
                           />
                         ))}
@@ -1774,6 +1795,18 @@ function KnowledgeBaseManager() {
                     </p>
                   )}
                 </div>
+              ) : beltPage ? (
+                <div className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm">
+                  <p className="font-medium">This is a belt&apos;s syllabus page.</p>
+                  <p className="text-muted-foreground">
+                    Its text is put together from the syllabus, topic by topic, so it is written on
+                    the syllabus screen and this page follows. Here you can change who can read it
+                    and whether it takes comments.
+                  </p>
+                  <Button asChild size="sm" variant="outline">
+                    <Link to="/manager/syllabus">Edit the syllabus</Link>
+                  </Button>
+                </div>
               ) : (
                 <>
                   <div>
@@ -1971,21 +2004,23 @@ function KnowledgeBaseManager() {
                           >
                             Read
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            // Every one of these reads "Publish" or "Restore", so
-                            // without a label a screen reader announces a column of
-                            // identical buttons.
-                            aria-label={`${
-                              versionLabel(v, liveVersion) === "Previous" ? "Restore" : "Publish"
-                            } version ${v.version}`}
-                            disabled={promoting || saving || busy}
-                            onClick={() => void onPromote(v)}
-                          >
-                            {versionLabel(v, liveVersion) === "Previous" ? "Restore" : "Publish"}
-                          </Button>
+                          {!beltPage && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              // Every one of these reads "Publish" or "Restore", so
+                              // without a label a screen reader announces a column of
+                              // identical buttons.
+                              aria-label={`${
+                                versionLabel(v, liveVersion) === "Previous" ? "Restore" : "Publish"
+                              } version ${v.version}`}
+                              disabled={promoting || saving || busy}
+                              onClick={() => void onPromote(v)}
+                            >
+                              {versionLabel(v, liveVersion) === "Previous" ? "Restore" : "Publish"}
+                            </Button>
+                          )}
                         </>
                       )}
                     </span>

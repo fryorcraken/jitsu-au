@@ -32,6 +32,7 @@ export type AgentKbArticle = {
   visibility: string;
   annotations_enabled: boolean;
   updated_at: string;
+  belt_id?: string | null;
 };
 
 /** The live version of an article, when it has one. */
@@ -60,6 +61,8 @@ export function projectAgentKbArticle(
   live: AgentKbVersion | undefined,
   sectionSlug: string | null,
   versions: number,
+  /** The belt this is the syllabus page for, or null for an ordinary article. */
+  beltSlug: string | null = null,
 ) {
   return {
     slug: article.slug,
@@ -75,6 +78,9 @@ export function projectAgentKbArticle(
     url: article.link_path ?? `/kb/${article.slug}`,
     change_note: live?.change_note ?? null,
     updated_at: live?.created_at ?? article.updated_at,
+    // A belt page's text is assembled from the syllabus, so save_kb_article
+    // refuses text for it: this is how an agent knows before it tries.
+    belt: beltSlug,
   };
 }
 
@@ -502,7 +508,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "36",
+  version: "37",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -516,12 +522,25 @@ export const AGENT_MANIFEST: {
   // new response field — which is what these notes name.
   changes: [
     {
-      version: "36",
+      version: "37",
       // New actions, and nothing that worked before changes.
       breaking: false,
       notes: [
         "Club notices, the agent's equivalent of the manager's Messages screen, through the same functions it calls. New read actions: list_club_messages and get_club_message (what was sent and how far it got), list_message_leads (the leads a notice can go to, the last 90 days marked preselected) and get_club_message_audience (how many emails a choice of groups and leads would send).",
         "New change actions: send_club_message_test (a test copy to the acting manager only) and send_club_message (emails everyone ticked; read the count back to the manager first). A notice is facts about training only; promotions are not available.",
+      ],
+    },
+    {
+      version: "36",
+      // One refusal that is new: text sent to a belt page through
+      // save_kb_article, which until now would have been accepted.
+      breaking: true,
+      notes: [
+        "The syllabus, the agent's equivalent of the manager's Syllabus screen and of the member's 'up to belt X' page, through the same functions both call. The syllabus is one block of markdown per belt per topic; each belt's knowledge base page (/kb/green-belt) is assembled from its blocks and republished whenever they change.",
+        "New read actions: list_belts (the club's belts, junior first, with each one's page and who can read it), list_syllabus_topics (topics and their sub-topics, in order) and get_syllabus (everything up to and including one belt, optionally for one topic, as blocks and as one markdown document).",
+        "New change actions: save_syllabus_entries (save or clear blocks, any number at once; each belt page that changed is republished once), save_belt / delete_belt and save_syllabus_topic / delete_syllabus_topic. A belt's first block makes its page at managers visibility; open it to members with save_kb_article { slug, visibility: 'members' }.",
+        "BREAKING: save_kb_article refuses title/body_md for a belt page (its text comes from the syllabus), moving one out of the syllabus section or setting its position (it follows the belt), filing an ordinary article in the syllabus section, and the slug 'syllabus'. delete_kb_section refuses the syllabus section. Settings-only saves of a belt page (visibility, nav_title, annotations_enabled) still work.",
+        "list_kb_articles reports `belt` on each article: the belt's slug for a belt page, null otherwise. list_kb_sections reports `kind`: 'syllabus' for the section holding the belt pages, 'standard' otherwise.",
       ],
     },
     {
@@ -1603,6 +1622,142 @@ export const AGENT_MANIFEST: {
           name: "limit",
           required: false,
           description: "Max comments to return (1-500, default 200).",
+        },
+      ],
+    },
+    {
+      name: "list_belts",
+      method: "POST",
+      summary:
+        "List the club's belts, junior first: slug, name, grade, colour, position, and each belt's syllabus page (page_url, null while it has none) with who can read it. White has no page and is not in the syllabus; it is there for a member who has not graded yet.",
+      params: [],
+    },
+    {
+      name: "save_belt",
+      method: "POST",
+      summary:
+        "Create a belt, or rename, regrade, recolour or move one. An unknown slug creates it (needs name and colour). An omitted field is left alone. A new name or grade republishes the belt's page, since its title is built from both ('Green belt (5th Kyu)'); a new position moves the page in the sidebar without telling readers it was updated.",
+      params: [
+        {
+          name: "slug",
+          required: true,
+          description:
+            "URL key: lowercase letters, numbers and single hyphens (dark-blue). Fixed once made.",
+        },
+        { name: "name", required: false, description: "Dark Blue. Required when creating." },
+        {
+          name: "grade",
+          required: false,
+          description: "2nd Kyu. An empty string clears it, for a belt with no grade of its own.",
+        },
+        {
+          name: "colour",
+          required: false,
+          description: "Hex colour for the belt's swatch, e.g. #16a34a. Required when creating.",
+        },
+        {
+          name: "position",
+          required: false,
+          description:
+            "Junior first. The seeded belts use 10, 20, 30... so one can go between two others. 'Up to green' means every belt at or below green's position.",
+        },
+        {
+          name: "expect_new",
+          required: false,
+          description:
+            "Set true when creating: refused if the slug is taken, rather than changing that belt.",
+        },
+      ],
+    },
+    {
+      name: "delete_belt",
+      method: "POST",
+      summary:
+        "Delete a belt made by mistake. Refused (409) for a belt with a syllabus page or with any syllabus text, since pages are kept for good: rename it instead.",
+      params: [{ name: "slug", required: true, description: "The belt's slug, e.g. black." }],
+    },
+    {
+      name: "list_syllabus_topics",
+      method: "POST",
+      summary:
+        "List the syllabus topics in reading order: each topic followed by its sub-topics (parent names the topic a sub-topic sits under). A topic's slug is also its heading's anchor on every belt page (/kb/green-belt#breakfalling) and the topic in get_syllabus.",
+      params: [],
+    },
+    {
+      name: "save_syllabus_topic",
+      method: "POST",
+      summary:
+        "Create a topic or sub-topic, rename it, move it, or put it under another topic. An unknown slug creates it (needs title). Renaming changes the title only: the slug, and so every link to that heading, stays. Two levels only: a sub-topic cannot have sub-topics, and a topic with sub-topics cannot go under another. A rename or move republishes every belt page the topic is on.",
+      params: [
+        {
+          name: "slug",
+          required: true,
+          description:
+            "URL key, fixed once made (groundwork-ne-waza). Becomes the heading anchor on belt pages.",
+        },
+        { name: "title", required: false, description: "The heading. Required when creating." },
+        {
+          name: "parent",
+          required: false,
+          description:
+            "Slug of the topic this sits under, for a sub-topic (techniques). An empty string makes it a top-level topic. Omit to leave it where it is.",
+        },
+        {
+          name: "position",
+          required: false,
+          description: "Order among its siblings, lower first. A new one goes last when omitted.",
+        },
+        {
+          name: "change_note",
+          required: false,
+          description:
+            "Shown on the belt pages this republishes. A plain description is used when omitted.",
+        },
+        { name: "expect_new", required: false, description: "Set true when creating." },
+      ],
+    },
+    {
+      name: "delete_syllabus_topic",
+      method: "POST",
+      summary:
+        "Delete a topic made by mistake. Refused (409) while it has sub-topics or any belt has text on it, naming the belts, so it can never take part of the syllabus with it. Clear its blocks with save_syllabus_entries first.",
+      params: [{ name: "slug", required: true, description: "The topic's slug." }],
+    },
+    {
+      name: "get_syllabus",
+      method: "POST",
+      summary:
+        "Everything up to and including one belt, topic by topic, as the member's syllabus page shows it: `belts` (the belts included, junior first), `topics` (every topic in order), `entries` (each belt's block for each topic, in topic then belt order; a belt with nothing on a topic has no entry) and `markdown` (the same as one document). As a manager this includes belts whose page is still managers-only; each belt's `visibility` says so. Read this before save_syllabus_entries.",
+      params: [
+        {
+          name: "up_to",
+          required: false,
+          description: "Belt slug to stop at (green). Omit for every belt. An unknown slug is 404.",
+        },
+        {
+          name: "topic",
+          required: false,
+          description:
+            "Topic slug to show alone (breakfalling). A topic with sub-topics includes them. Omit for every topic. An unknown slug is 404.",
+        },
+      ],
+    },
+    {
+      name: "save_syllabus_entries",
+      method: "POST",
+      summary:
+        "Save or clear blocks of syllabus text: one belt's text for one topic each. Any number at once (up to 300), and each belt page that changed is republished ONCE, so edit a whole belt, or one topic across every belt, in one call. Each body_md REPLACES that block; send an empty string to clear it. No headings inside a block: the topic is the heading. Unknown belts or topics refuse the whole call, writing nothing. A belt's first block makes its page at managers visibility. Last save wins; every republish is a kept version of the page.",
+      params: [
+        {
+          name: "entries",
+          required: true,
+          description:
+            "[{ belt, topic, body_md }]. Markdown (lists, bold, links to /kb/<slug>#<anchor> with previews), up to 20000 characters each. Each belt+topic once.",
+        },
+        {
+          name: "change_note",
+          required: false,
+          description: "What changed, shown on each republished belt page.",
         },
       ],
     },

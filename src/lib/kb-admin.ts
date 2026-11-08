@@ -168,11 +168,19 @@ export async function deleteKbSection(
 ): Promise<{ slug: string; displaced: number }> {
   const { data: section, error: findErr } = await db
     .from("kb_sections")
-    .select("id")
+    .select("id, kind")
     .eq("slug", slug)
     .maybeSingle();
   if (findErr) throw new Error(findErr.message);
   if (!section) throw new Error(`There is no section "${slug}".`);
+  // The belt pages live here and nowhere else: deleting it would drop all of
+  // them into "Everything else" and leave the syllabus with no section to put
+  // a new belt page in. Rename it instead.
+  if (section.kind === "syllabus") {
+    throw new Error(
+      `"${slug}" is the syllabus section, which holds the belt pages, so it cannot be deleted. Rename it instead.`,
+    );
+  }
 
   // Counted BEFORE the delete: afterwards the rows no longer name it.
   const { count, error: cntErr } = await db
@@ -195,15 +203,15 @@ export async function deleteKbSection(
  * sidebar — a typo there is otherwise invisible until someone notices an article
  * has gone missing from its group.
  */
-async function resolveSectionId(
+async function resolveSection(
   db: KbClient,
   section: string | undefined,
-): Promise<string | null | undefined> {
+): Promise<{ id: string; kind: string } | null | undefined> {
   if (section === undefined) return undefined;
   if (section === "") return null;
   const { data, error } = await db
     .from("kb_sections")
-    .select("id")
+    .select("id, kind")
     .eq("slug", section)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -212,7 +220,60 @@ async function resolveSectionId(
       `There is no section "${section}". Create it with save_kb_section, or list the sections first.`,
     );
   }
-  return data.id;
+  // `kind` is read defensively: a row from before the syllabus migration has
+  // none, and is an ordinary section.
+  return { id: data.id, kind: data.kind ?? "standard" };
+}
+
+/**
+ * The URL keys no article may take, because a page of the knowledge base
+ * already answers there. `/kb/syllabus` is the "up to belt X" view.
+ */
+export const RESERVED_ARTICLE_SLUGS = new Set(["syllabus"]);
+
+/**
+ * The rules that keep a belt page's text coming from the syllabus alone, and
+ * the syllabus section holding belt pages alone (docs/syllabus.md).
+ *
+ * A belt page is an ordinary article in every way a reader can see, which is
+ * the point, so nothing else stops a manager or an agent from saving text onto
+ * one through the article editor. That text would be overwritten, without a
+ * word, the next time anybody touched that belt's syllabus.
+ */
+function refuseBeltPageEdits(
+  input: SaveKbArticleInput,
+  article: Pick<KbArticleRow, "belt_id"> | null,
+  section: { id: string; kind: string } | null | undefined,
+  writingText: boolean,
+): void {
+  if (!article && RESERVED_ARTICLE_SLUGS.has(input.slug)) {
+    throw new Error(
+      `/kb/${input.slug} is where the knowledge base shows the syllabus by topic, so an article cannot use that URL key. Pick another.`,
+    );
+  }
+  if (article?.belt_id) {
+    if (writingText || input.link_path) {
+      throw new Error(
+        `"${input.slug}" is a belt's syllabus page. Its text is put together from the syllabus, so change it there (save_syllabus_entries, or the syllabus screen) rather than here.`,
+      );
+    }
+    if (section !== undefined && section?.kind !== "syllabus") {
+      throw new Error(
+        `"${input.slug}" is a belt's syllabus page, so it stays in the syllabus section.`,
+      );
+    }
+    if (input.position !== undefined) {
+      throw new Error(
+        `"${input.slug}" is a belt's syllabus page, and belt pages are ordered by belt. Move the belt instead (save_belt, or the syllabus screen).`,
+      );
+    }
+    return;
+  }
+  if (section?.kind === "syllabus") {
+    throw new Error(
+      "The syllabus section holds belt pages only. A belt page is made by writing that belt's syllabus; file this article in another section.",
+    );
+  }
 }
 
 /**
@@ -234,7 +295,8 @@ export async function saveKbArticle(
   input: SaveKbArticleInput,
   actingAs: string | null,
 ): Promise<{ slug: string; version: number | null; article_id: string; created: boolean }> {
-  const sectionId = await resolveSectionId(db, input.section);
+  const section = await resolveSection(db, input.section);
+  const sectionId = section === undefined ? undefined : (section?.id ?? null);
 
   const { data: existing, error: findErr } = await db
     .from("kb_articles")
@@ -251,6 +313,8 @@ export async function saveKbArticle(
   // leaves `string | undefined` reaching a `string` column.
   const text = input.title && input.body_md ? { title: input.title, body_md: input.body_md } : null;
   const writingText = text !== null;
+
+  refuseBeltPageEdits(input, article, section, writingText);
 
   // The caller believed it was creating this article. It is not, and carrying on
   // would add a version to somebody else's page and patch its visibility to
@@ -392,54 +456,12 @@ export async function saveKbArticle(
   let versionNumber: number | null = null;
 
   if (text) {
-    // A failed read here would number the new version 1 and collide with the
-    // existing version 1, so the save would fail on a duplicate-key message that
-    // says nothing about what went wrong. (Same guard as `saveWaiverTemplate`.)
-    const { data: maxRow, error: maxErr } = await db
-      .from("kb_article_versions")
-      .select("version")
-      .eq("article_id", article.id)
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (maxErr) throw new Error(maxErr.message);
-    const nextVersion = (maxRow?.version ?? 0) + 1;
-
-    // Write the new version as a draft, THEN promote it. The obvious order (clear
-    // `is_current`, then insert the row already current) leaves the article
-    // unreadable if the insert fails, with nothing to roll back to. This way a
-    // failed insert changes nothing, and a failed promotion leaves the previous
-    // version live with an unused draft behind it.
-    const { data: createdVersion, error: verErr } = await db
-      .from("kb_article_versions")
-      .insert({
-        article_id: article.id,
-        version: nextVersion,
-        title: text.title,
-        body_md: text.body_md,
-        change_note: input.change_note || null,
-        is_current: false,
-        created_by: actingAs,
-      })
-      .select("id, version")
-      .single();
-    if (verErr || !createdVersion) {
-      // A unique violation here is the version-number race, not a broken
-      // database: two saves read the same MAX(version) and both tried to write
-      // n+1. `MAX(version)+1` cannot be made atomic from PostgREST, so the job is
-      // to lose the race in words the caller can act on rather than surfacing
-      // `duplicate key value violates unique constraint ...`, which reads like a
-      // bug and tells an agent nothing about what to do next.
-      if (verErr && (verErr.code === "23505" || /duplicate key/i.test(verErr.message))) {
-        throw new Error(
-          "Someone else saved a version of this article a moment ago, so this save was not applied. Read it again before retrying.",
-        );
-      }
-      throw new Error(verErr?.message ?? "Could not save the article version.");
-    }
-
-    await promoteArticleVersion(db, createdVersion.id);
-    versionNumber = createdVersion.version;
+    versionNumber = await writeArticleVersion(
+      db,
+      article.id,
+      { ...text, change_note: input.change_note || null },
+      actingAs,
+    );
   }
 
   if (hasSettings && !narrowing) await patchSettings(writingText);
@@ -450,6 +472,71 @@ export async function saveKbArticle(
     article_id: article.id,
     created,
   };
+}
+
+/**
+ * Write a new version of an article's text and publish it.
+ *
+ * The version half of `saveKbArticle`, on its own so the syllabus can publish a
+ * belt page it has just put together through exactly the same steps a manager's
+ * save takes (`syllabus-admin.ts`). It checks nothing about WHICH article this
+ * is, so it is not for a caller acting on a request: `saveKbArticle` is, and its
+ * guards are what keep a belt page's text coming only from the syllabus.
+ */
+export async function writeArticleVersion(
+  db: KbClient,
+  articleId: string,
+  text: { title: string; body_md: string; change_note: string | null },
+  actingAs: string | null,
+): Promise<number> {
+  // A failed read here would number the new version 1 and collide with the
+  // existing version 1, so the save would fail on a duplicate-key message that
+  // says nothing about what went wrong. (Same guard as `saveWaiverTemplate`.)
+  const { data: maxRow, error: maxErr } = await db
+    .from("kb_article_versions")
+    .select("version")
+    .eq("article_id", articleId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (maxErr) throw new Error(maxErr.message);
+  const nextVersion = (maxRow?.version ?? 0) + 1;
+
+  // Write the new version as a draft, THEN promote it. The obvious order (clear
+  // `is_current`, then insert the row already current) leaves the article
+  // unreadable if the insert fails, with nothing to roll back to. This way a
+  // failed insert changes nothing, and a failed promotion leaves the previous
+  // version live with an unused draft behind it.
+  const { data: createdVersion, error: verErr } = await db
+    .from("kb_article_versions")
+    .insert({
+      article_id: articleId,
+      version: nextVersion,
+      title: text.title,
+      body_md: text.body_md,
+      change_note: text.change_note,
+      is_current: false,
+      created_by: actingAs,
+    })
+    .select("id, version")
+    .single();
+  if (verErr || !createdVersion) {
+    // A unique violation here is the version-number race, not a broken
+    // database: two saves read the same MAX(version) and both tried to write
+    // n+1. `MAX(version)+1` cannot be made atomic from PostgREST, so the job is
+    // to lose the race in words the caller can act on rather than surfacing
+    // `duplicate key value violates unique constraint ...`, which reads like a
+    // bug and tells an agent nothing about what to do next.
+    if (verErr && (verErr.code === "23505" || /duplicate key/i.test(verErr.message))) {
+      throw new Error(
+        "Someone else saved a version of this article a moment ago, so this save was not applied. Read it again before retrying.",
+      );
+    }
+    throw new Error(verErr?.message ?? "Could not save the article version.");
+  }
+
+  await promoteArticleVersion(db, createdVersion.id);
+  return createdVersion.version;
 }
 
 /**

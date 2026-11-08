@@ -747,3 +747,96 @@ describe("loadKbArticleVersion", () => {
     expect(await loadKbArticle(db, "belts")).toBeNull();
   });
 });
+
+// A belt's page is an ordinary article to every reader, which is the point, so
+// nothing but these guards stops its text being written through the article
+// editor or the agent's save_kb_article, where it would be overwritten without
+// a word the next time anybody touched that belt's syllabus (docs/syllabus.md).
+describe("saveKbArticle and the syllabus", () => {
+  const BELT_PAGE = {
+    id: "a-yellow",
+    slug: "yellow-belt",
+    visibility: "managers",
+    annotations_enabled: true,
+    belt_id: "b-yellow",
+    section_id: "s-syl",
+    position: 20,
+    nav_title: null,
+    link_path: null,
+  };
+
+  function harness(opts: { article: unknown; section?: unknown }) {
+    return fakeClient((op) => {
+      if (op.table === "kb_sections" && op.verb === "select") return ok(opts.section ?? null);
+      if (op.table === "kb_articles" && op.verb === "select") return ok(opts.article);
+      if (op.table === "kb_articles" && op.verb === "update") return ok(opts.article);
+      return ok(null);
+    });
+  }
+
+  it("refuses new text on a belt page, writing nothing", async () => {
+    const { db, calls } = harness({ article: BELT_PAGE });
+    await expect(
+      saveKbArticle(db, { slug: "yellow-belt", title: "Yellow", body_md: "## Hand-written" }, "u1"),
+    ).rejects.toThrow(/put together from the syllabus/);
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("refuses moving a belt page out of the syllabus section", async () => {
+    const { db, calls } = harness({
+      article: BELT_PAGE,
+      section: { id: "s-other", kind: "standard" },
+    });
+    await expect(
+      saveKbArticle(db, { slug: "yellow-belt", section: "start-here" }, "u1"),
+    ).rejects.toThrow(/stays in the syllabus section/);
+    await expect(saveKbArticle(db, { slug: "yellow-belt", section: "" }, "u1")).rejects.toThrow(
+      /stays in the syllabus section/,
+    );
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("refuses reordering a belt page, which follows the belt order", async () => {
+    const { db } = harness({ article: BELT_PAGE });
+    await expect(saveKbArticle(db, { slug: "yellow-belt", position: 5 }, "u1")).rejects.toThrow(
+      /ordered by belt/,
+    );
+  });
+
+  // Opening a finished belt to members is a settings-only save, and must work.
+  it("still lets a manager change who can read a belt page", async () => {
+    const { db, calls } = harness({ article: BELT_PAGE });
+    await saveKbArticle(db, { slug: "yellow-belt", visibility: "members" }, "u1");
+    const updates = calls.filter((c) => c.verb === "update" && c.table === "kb_articles");
+    expect(updates[0]?.patch).toMatchObject({ visibility: "members" });
+    expect(inserts(calls, "kb_article_versions")).toHaveLength(0);
+  });
+
+  it("keeps ordinary articles out of the syllabus section", async () => {
+    const { db, calls } = harness({
+      article: { ...BELT_PAGE, slug: "house-rules", belt_id: null },
+      section: { id: "s-syl", kind: "syllabus" },
+    });
+    await expect(
+      saveKbArticle(db, { slug: "house-rules", section: "syllabus" }, "u1"),
+    ).rejects.toThrow(/belt pages only/);
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it("will not create an article at /kb/syllabus, where the by-topic view lives", async () => {
+    const { db } = harness({ article: null });
+    await expect(
+      saveKbArticle(db, { slug: "syllabus", title: "Syllabus", body_md: "Text" }, "u1"),
+    ).rejects.toThrow(/syllabus by topic/);
+  });
+});
+
+describe("deleteKbSection and the syllabus", () => {
+  it("refuses to delete the syllabus section", async () => {
+    const { db, calls } = fakeClient((op) =>
+      op.table === "kb_sections" ? ok({ id: "s-syl", kind: "syllabus" }) : ok(null),
+    );
+    await expect(deleteKbSection(db, "syllabus")).rejects.toThrow(/cannot be deleted/);
+    expect(writes(calls)).toHaveLength(0);
+  });
+});

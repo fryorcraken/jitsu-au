@@ -35,7 +35,7 @@ import { KbLayout } from "./KbLayout";
 
 /** One section, so the sidebar has something to render around. */
 function navWith(entries: KbNavSection["entries"]): KbNavSection[] {
-  return [{ slug: "start-here", title: "Start here", entries }];
+  return [{ slug: "start-here", title: "Start here", kind: "standard", entries }];
 }
 
 const article = (over: Partial<KbNavSection["entries"][number]> & { slug: string }) => ({
