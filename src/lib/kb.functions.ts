@@ -75,7 +75,10 @@ async function adminClient(): Promise<KbClient> {
  * the screen would tell them they have no articles. In strict mode a failed
  * identity or role lookup is raised as itself.
  */
-async function resolveViewer(db: KbClient, opts: { strict?: boolean } = {}): Promise<Viewer> {
+export async function resolveViewer(
+  db: KbClient,
+  opts: { strict?: boolean } = {},
+): Promise<Viewer> {
   const getHeader = await requestHeaderGetter();
   const bearer = getHeader("authorization")?.replace(/^Bearer\s+/i, "") || null;
   if (!bearer) return { userId: null, isManager: false };
@@ -146,6 +149,7 @@ type KbArticleListRow = Pick<
   | "position"
   | "nav_title"
   | "link_path"
+  | "belt_id"
 >;
 
 /** What search selects: enough to label a hit and decide where it goes. */
@@ -161,6 +165,27 @@ type KbSearchArticleRow = Pick<
  * `.select()` never asked for reads as `undefined` at runtime and typechecks.
  */
 type KbNavArticleRow = Omit<KbArticleListRow, "annotations_enabled">;
+
+/**
+ * What the reader needs to know about a belt page: which belt, and which topic
+ * slugs exist, so a heading whose anchor is a topic can link to that topic
+ * across the belts. Best effort: the page reads fine without it, so a failure
+ * here costs the links and nothing else.
+ */
+async function beltPageContext(
+  db: KbClient,
+  beltId: string,
+): Promise<{ belt: string; belt_name: string; topics: string[] } | null> {
+  const [{ data: belt, error: beltErr }, { data: topics, error: topicErr }] = await Promise.all([
+    db.from("belts").select("slug, name").eq("id", beltId).maybeSingle(),
+    db.from("syllabus_topics").select("slug"),
+  ]);
+  if (beltErr || topicErr || !belt) {
+    console.warn("[kb] could not read the belt behind a belt page:", beltErr ?? topicErr);
+    return null;
+  }
+  return { belt: belt.slug, belt_name: belt.name, topics: (topics ?? []).map((t) => t.slug) };
+}
 
 /**
  * Read one article, always the LIVE version.
@@ -194,13 +219,20 @@ export const getKbArticle = createServerFn({ method: "POST" })
     }
 
     // `loadKbArticleVersion`, not `loadKbArticle`: the row is already here, and
-    // asking by slug again would re-read it.
-    const loaded = await loadKbArticleVersion(db, row);
+    // asking by slug again would re-read it. A belt page also says which belt
+    // it is and which of its headings are syllabus topics, so the reader can
+    // offer "this topic, every belt up to this one" under each of them. Both at
+    // once, and the second only for a belt page.
+    const [loaded, syllabus] = await Promise.all([
+      loadKbArticleVersion(db, row),
+      row.belt_id ? beltPageContext(db, row.belt_id) : null,
+    ]);
     if (!loaded) throw new Error(NOT_FOUND);
 
     return {
       redirect_to: null,
       article: projectArticle(loaded),
+      syllabus,
       viewer: {
         signed_in: Boolean(viewer.userId),
         user_id: viewer.userId,
@@ -228,7 +260,7 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
   // sidebar wait for it added that latency to every page of the knowledge base.
   const [viewer, sectionsResult, articlesResult] = await Promise.all([
     resolveViewer(db),
-    db.from("kb_sections").select("id, slug, title, position"),
+    db.from("kb_sections").select("id, slug, title, position, kind"),
     db
       .from("kb_articles")
       .select("id, slug, visibility, section_id, position, nav_title, link_path, updated_at")
@@ -249,6 +281,9 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
     slug: s.slug,
     title: s.title,
     position: s.position,
+    // The syllabus section shows the "by topic" view at its top. Read
+    // defensively: a row from before the syllabus migration has no kind.
+    kind: s.kind === "syllabus" ? ("syllabus" as const) : ("standard" as const),
   }));
 
   // Titles live on the version, not the article, so the nav needs the live
@@ -926,7 +961,7 @@ const MANAGER_ARTICLES_LIMIT = 500;
  * redirected anyway), so a swallowed lookup failure would leave a real manager
  * staring at an empty articles list with no error to act on.
  */
-async function requireManagerViewer(db: KbClient): Promise<Viewer> {
+export async function requireManagerViewer(db: KbClient): Promise<Viewer> {
   const viewer = await resolveViewer(db, { strict: true });
   if (!viewer.isManager) throw new Error("Forbidden");
   return viewer;
@@ -948,7 +983,7 @@ export const listManagerArticles = createServerFn({ method: "GET" }).handler(asy
     db
       .from("kb_articles")
       .select(
-        "id, slug, visibility, annotations_enabled, updated_at, section_id, position, nav_title, link_path",
+        "id, slug, visibility, annotations_enabled, updated_at, section_id, position, nav_title, link_path, belt_id",
       )
       .order("slug")
       .limit(MANAGER_ARTICLES_LIMIT),
@@ -1016,6 +1051,9 @@ export const listManagerArticles = createServerFn({ method: "GET" }).handler(asy
       position: d.position,
       nav_title: d.nav_title,
       link_path: d.link_path,
+      // Set on a belt page, whose text is written on the syllabus screen rather
+      // than here. The editor shows that instead of a body to type into.
+      is_belt_page: d.belt_id !== null,
     };
   });
 });
@@ -1025,7 +1063,12 @@ export const listManagerSections = createServerFn({ method: "GET" }).handler(asy
   const db = await adminClient();
   await requireManagerViewer(db);
   const sections = await listKbSections(db);
-  return sections.map((s) => ({ slug: s.slug, title: s.title, position: s.position }));
+  return sections.map((s) => ({
+    slug: s.slug,
+    title: s.title,
+    position: s.position,
+    kind: s.kind === "syllabus" ? ("syllabus" as const) : ("standard" as const),
+  }));
 });
 
 /**
@@ -1117,6 +1160,15 @@ export const setCurrentArticleVersion = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);
+    // A belt page's text comes from the syllabus. Putting an older version back
+    // live would leave the page saying one thing and the syllabus another, and
+    // the next syllabus save would silently overwrite the restored text anyway.
+    const { beltOfVersion } = await import("@/lib/syllabus-admin");
+    if (await beltOfVersion(db, data.id)) {
+      throw new Error(
+        "This is a belt's syllabus page, so an older version cannot be put back here. Open that version, copy what you need, and write it into the syllabus.",
+      );
+    }
     const { promoteArticleVersion } = await import("@/lib/kb-admin");
     const { version } = await promoteArticleVersion(db, data.id);
     return { ok: true as const, version };

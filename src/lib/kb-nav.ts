@@ -13,6 +13,8 @@ export type KbSectionInput = {
   slug: string;
   title: string;
   position: number;
+  /** `syllabus` for the one section that holds the belt pages. */
+  kind?: "standard" | "syllabus";
 };
 
 /**
@@ -48,6 +50,11 @@ export type KbNavSection = {
   /** Null for the catch-all group of articles that belong to no section. */
   slug: string | null;
   title: string;
+  /**
+   * `syllabus` for the section that holds the belt pages, which the sidebar
+   * heads with a link to the syllabus by topic.
+   */
+  kind: "standard" | "syllabus";
   entries: KbNavEntry[];
 };
 
@@ -113,6 +120,7 @@ export function buildKbNav(
     .map((section) => ({
       slug: section.slug,
       title: section.title,
+      kind: section.kind ?? "standard",
       entries: sortEntries(bySection.get(section.slug) ?? []),
     }))
     // An empty section is a heading with nothing under it. A manager who has
@@ -121,7 +129,12 @@ export function buildKbNav(
 
   const loose = bySection.get(null);
   if (loose?.length) {
-    nav.push({ slug: null, title: UNSECTIONED_TITLE, entries: sortEntries(loose) });
+    nav.push({
+      slug: null,
+      title: UNSECTIONED_TITLE,
+      kind: "standard",
+      entries: sortEntries(loose),
+    });
   }
   return nav;
 }

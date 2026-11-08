@@ -168,11 +168,19 @@ export async function deleteKbSection(
 ): Promise<{ slug: string; displaced: number }> {
   const { data: section, error: findErr } = await db
     .from("kb_sections")
-    .select("id")
+    .select("id, kind")
     .eq("slug", slug)
     .maybeSingle();
   if (findErr) throw new Error(findErr.message);
   if (!section) throw new Error(`There is no section "${slug}".`);
+  // The belt pages live here and nowhere else: deleting it would drop all of
+  // them into "Everything else" and leave the syllabus with no section to put
+  // a new belt page in. Rename it instead.
+  if (section.kind === "syllabus") {
+    throw new Error(
+      `"${slug}" is the syllabus section, which holds the belt pages, so it cannot be deleted. Rename it instead.`,
+    );
+  }
 
   // Counted BEFORE the delete: afterwards the rows no longer name it.
   const { count, error: cntErr } = await db
@@ -195,15 +203,15 @@ export async function deleteKbSection(
  * sidebar — a typo there is otherwise invisible until someone notices an article
  * has gone missing from its group.
  */
-async function resolveSectionId(
+async function resolveSection(
   db: KbClient,
   section: string | undefined,
-): Promise<string | null | undefined> {
+): Promise<{ id: string; kind: string } | null | undefined> {
   if (section === undefined) return undefined;
   if (section === "") return null;
   const { data, error } = await db
     .from("kb_sections")
-    .select("id")
+    .select("id, kind")
     .eq("slug", section)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -212,7 +220,60 @@ async function resolveSectionId(
       `There is no section "${section}". Create it with save_kb_section, or list the sections first.`,
     );
   }
-  return data.id;
+  // `kind` is read defensively: a row from before the syllabus migration has
+  // none, and is an ordinary section.
+  return { id: data.id, kind: data.kind ?? "standard" };
+}
+
+/**
+ * The URL keys no article may take, because a page of the knowledge base
+ * already answers there. `/kb/syllabus` is the "up to belt X" view.
+ */
+export const RESERVED_ARTICLE_SLUGS = new Set(["syllabus"]);
+
+/**
+ * The rules that keep a belt page's text coming from the syllabus alone, and
+ * the syllabus section holding belt pages alone (docs/syllabus.md).
+ *
+ * A belt page is an ordinary article in every way a reader can see, which is
+ * the point, so nothing else stops a manager or an agent from saving text onto
+ * one through the article editor. That text would be overwritten, without a
+ * word, the next time anybody touched that belt's syllabus.
+ */
+function refuseBeltPageEdits(
+  input: SaveKbArticleInput,
+  article: Pick<KbArticleRow, "belt_id"> | null,
+  section: { id: string; kind: string } | null | undefined,
+  writingText: boolean,
+): void {
+  if (!article && RESERVED_ARTICLE_SLUGS.has(input.slug)) {
+    throw new Error(
+      `/kb/${input.slug} is where the knowledge base shows the syllabus by topic, so an article cannot use that URL key. Pick another.`,
+    );
+  }
+  if (article?.belt_id) {
+    if (writingText || input.link_path) {
+      throw new Error(
+        `"${input.slug}" is a belt's syllabus page. Its text is put together from the syllabus, so change it there (save_syllabus_entries, or the syllabus screen) rather than here.`,
+      );
+    }
+    if (section !== undefined && section?.kind !== "syllabus") {
+      throw new Error(
+        `"${input.slug}" is a belt's syllabus page, so it stays in the syllabus section.`,
+      );
+    }
+    if (input.position !== undefined) {
+      throw new Error(
+        `"${input.slug}" is a belt's syllabus page, and belt pages are ordered by belt. Move the belt instead (save_belt, or the syllabus screen).`,
+      );
+    }
+    return;
+  }
+  if (section?.kind === "syllabus") {
+    throw new Error(
+      "The syllabus section holds belt pages only. A belt page is made by writing that belt's syllabus; file this article in another section.",
+    );
+  }
 }
 
 /**
@@ -234,7 +295,8 @@ export async function saveKbArticle(
   input: SaveKbArticleInput,
   actingAs: string | null,
 ): Promise<{ slug: string; version: number | null; article_id: string; created: boolean }> {
-  const sectionId = await resolveSectionId(db, input.section);
+  const section = await resolveSection(db, input.section);
+  const sectionId = section === undefined ? undefined : (section?.id ?? null);
 
   const { data: existing, error: findErr } = await db
     .from("kb_articles")
@@ -251,6 +313,8 @@ export async function saveKbArticle(
   // leaves `string | undefined` reaching a `string` column.
   const text = input.title && input.body_md ? { title: input.title, body_md: input.body_md } : null;
   const writingText = text !== null;
+
+  refuseBeltPageEdits(input, article, section, writingText);
 
   // The caller believed it was creating this article. It is not, and carrying on
   // would add a version to somebody else's page and patch its visibility to
