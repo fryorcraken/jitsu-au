@@ -11,7 +11,7 @@ import {
 } from "@/lib/kb-cache";
 
 const nav = {
-  sections: [{ slug: "getting-started", title: "Getting started", position: 10 }],
+  sections: [{ slug: "getting-started", title: "Getting started", position: 10, kind: "standard" }],
   entries: [
     {
       slug: "your-first-class",
@@ -106,6 +106,21 @@ describe("cacheReviver", () => {
     expect(revive(nav)).toEqual(nav);
     expect(revive(undefined)).toBeNull();
     expect(revive({ sections: "no" })).toBeNull();
+  });
+});
+
+describe("stored copies from before the syllabus", () => {
+  it("reads a section with no kind as an ordinary one", () => {
+    const old = {
+      ...nav,
+      sections: [{ slug: "getting-started", title: "Getting started", position: 10 }],
+    };
+    expect(kbNavCacheSchema.parse(old).sections[0].kind).toBe("standard");
+  });
+
+  it("reads an article with no syllabus field as a page with no belt", () => {
+    const old = { redirect_to: "/faq", article: null, viewer: null };
+    expect(kbArticleCacheSchema.parse(old).syllabus).toBeNull();
   });
 });
 

@@ -109,6 +109,24 @@ function ArticlePage() {
 
   const headings = useMemo(() => (article ? extractHeadings(article.body_md) : []), [article]);
 
+  // On a belt page, each heading that is a syllabus topic links to that topic
+  // for every belt up to this one: the next thing somebody preparing for this
+  // grading wants. A heading's anchor IS the topic's slug (the syllabus writes
+  // the pages that way), so no lookup beyond the list of topic slugs is needed.
+  const syllabus = articleQ.data?.syllabus ?? null;
+  const topicLink = useMemo(() => {
+    if (!syllabus) return undefined;
+    const topics = new Set(syllabus.topics);
+    return (heading: { id: string; text: string }) =>
+      topics.has(heading.id)
+        ? {
+            topic: heading.id,
+            upTo: syllabus.belt,
+            label: `${heading.text}, every belt up to ${syllabus.belt_name}`,
+          }
+        : null;
+  }, [syllabus]);
+
   /**
    * The `#section` a reader arrived with, and the heading it names.
    *
@@ -386,6 +404,7 @@ function ArticlePage() {
       <CurrentKbArticle.Provider value={slug}>
         <KbArticleReader
           article={article}
+          topicLink={topicLink}
           annotations={annotationsQ.data ?? []}
           viewer={viewer}
           busy={busy || annotationsQ.isFetching}

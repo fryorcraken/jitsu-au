@@ -433,6 +433,14 @@ Core tables:
   `is_current` per article). Managers edit all of this at `/manager/kb` or
   through the manager agent API, which do the same things to the same data.
   Product flows: `docs/knowledge-base.md`.
+- `belts` / `syllabus_topics` / `syllabus_entries` — the **syllabus**: one
+  block of markdown per belt per topic (topics two levels deep). Each belt's
+  knowledge base page is an ordinary article whose text is **assembled** from
+  its blocks and republished when they change, so its text is never written
+  through the article editor or `save_kb_article` (both refuse). Members read it
+  belt by belt, or topic by topic up to any belt at `/kb/syllabus`; managers
+  write it at `/manager/syllabus` or through the agent API. Product flows:
+  `docs/syllabus.md`.
 - `notifications` / `notification_preferences` / `notification_tokens` — the
   `/notifications` page, the sidebar badge and the emails behind them. One
   `notifications` row per person per event drives **both** the in-app list

@@ -86,6 +86,16 @@ exists lands there rather than disappearing.
 A section with nothing in it is not shown at all: a heading with no articles
 under it is noise to a member and tells them nothing.
 
+## The syllabus section
+
+The belt pages (`/kb/yellow-belt` and the rest) live in a section of their own
+whose kind is `syllabus`. Their text is not written here: it is assembled from
+the syllabus, which is kept as one block per belt per topic, and republished
+when the syllabus changes. The same syllabus is readable topic by topic, up to
+any belt, at `/kb/syllabus`, which the section links to at its top. The editor
+shows a belt page's settings only, without a drag handle, and the API refuses
+text for one. All of that is **`docs/syllabus.md`**.
+
 ## Link entries: pointing at the rest of the site
 
 Some of what a new member needs is already answered on the public site, written
@@ -689,6 +699,7 @@ it as a marketing page or a blog post instead.
 | Article fetch, its cache, prefetching       | `src/hooks/useKbArticle.ts`                         |
 | Manager screen                              | `src/routes/_authenticated/manager.kb.tsx`          |
 | Manager API actions                         | `src/routes/api/manager/agent.ts`                   |
+| The syllabus and the belt pages             | `docs/syllabus.md` (its own table)                  |
 
 `src/lib/kb-types.ts` aliases the generated
 `src/integrations/supabase/types.ts`, with one narrowing: `visibility` is a text

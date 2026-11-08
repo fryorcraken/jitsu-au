@@ -405,6 +405,27 @@ locked | already_verified` (the record has moved on, checked again at the send);
   `## How grading works {#grading}` pins its anchor so the rewording does not
   break the link; the suffix is stripped before a reader sees it, and
   `sections[].pinned` says which anchors were set that way.
+- `list_belts` / `save_belt` / `delete_belt` / `list_syllabus_topics` /
+  `save_syllabus_topic` / `delete_syllabus_topic` / `get_syllabus` /
+  `save_syllabus_entries` (`"36"`) — the syllabus, the agent's equivalent of
+  `/manager/syllabus` and of the member's `/kb/syllabus`. All of them go
+  through `src/lib/syllabus-admin.ts`, which those screens call too, so there
+  is no query in the handlers. The product rules are `docs/syllabus.md`; the
+  ones that shape the contract:
+  - **A belt page's text comes from the syllabus.** `save_kb_article` refuses
+    `title`/`body_md` for an article with a `belt` (that is the one breaking
+    change in `"36"`), and every syllabus write republishes the belt pages it
+    changed, once each per call, through the same `writeArticleVersion` a
+    manager's save uses. A page that would say the same thing block for block
+    writes no version, so a retry is safe.
+  - **`503 belt_pages_not_updated` is "saved, page lagging"**, with a
+    `Retry-After`: the blocks are written and the same call is safe to send
+    again. Refusals are `404` (unknown belt or topic in a read), `409`
+    (deleting something still in use) and `422` (anything else, with the
+    reason in words). A save naming an unknown belt or topic writes nothing.
+  - **`get_syllabus` 404s on an unknown `up_to` or `topic`**, where the member's
+    page shows the whole syllabus with a notice. An agent would otherwise read
+    everything back as if it were what it asked for.
 - `list_waiver_templates` / `get_waiver_template` / `save_waiver_template` /
   `publish_waiver_template` — the waiver everyone signs, the agent's equivalent
   of `/manager/waiver-template`. They go through `listWaiverTemplateRows`,
@@ -891,7 +912,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"35"`.
+test so the bump is a deliberate edit, and the current value is `"36"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

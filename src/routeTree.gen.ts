@@ -41,6 +41,7 @@ import { Route as EmailSettingsIndexRouteImport } from './routes/email-settings/
 import { Route as EmailSettingsTokenRouteImport } from './routes/email-settings/$token'
 import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as KbSlugRouteImport } from './routes/kb/$slug'
+import { Route as KbSyllabusRouteImport } from './routes/kb/syllabus'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as AuthenticatedAccountUserIdRouteImport } from './routes/_authenticated/account_.$userId'
 import { Route as AuthenticatedManagerIndexRouteImport } from './routes/_authenticated/manager.index'
@@ -58,6 +59,7 @@ import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_a
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
 import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
 import { Route as AuthenticatedManagerSiteBannerRouteImport } from './routes/_authenticated/manager.site-banner'
+import { Route as AuthenticatedManagerSyllabusRouteImport } from './routes/_authenticated/manager.syllabus'
 import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
@@ -234,6 +236,11 @@ const KbSlugRoute = KbSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => KbRouteRoute,
 } as any)
+const KbSyllabusRoute = KbSyllabusRouteImport.update({
+  id: '/syllabus',
+  path: '/syllabus',
+  getParentRoute: () => KbRouteRoute,
+} as any)
 const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
   id: '/.lovable/oauth/consent',
   path: '/.lovable/oauth/consent',
@@ -332,6 +339,12 @@ const AuthenticatedManagerSiteBannerRoute =
   AuthenticatedManagerSiteBannerRouteImport.update({
     id: '/manager/site-banner',
     path: '/manager/site-banner',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedManagerSyllabusRoute =
+  AuthenticatedManagerSyllabusRouteImport.update({
+    id: '/manager/syllabus',
+    path: '/manager/syllabus',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedManagerUsersRoute =
@@ -441,6 +454,7 @@ export interface FileRoutesByFullPath {
   '/blog/$slug': typeof BlogSlugRoute
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
+  '/kb/syllabus': typeof KbSyllabusRoute
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
@@ -460,6 +474,7 @@ export interface FileRoutesByFullPath {
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
+  '/manager/syllabus': typeof AuthenticatedManagerSyllabusRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -504,6 +519,7 @@ export interface FileRoutesByTo {
   '/blog/$slug': typeof BlogSlugRoute
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
+  '/kb/syllabus': typeof KbSyllabusRoute
   '/blog': typeof BlogIndexRoute
   '/email-settings': typeof EmailSettingsIndexRoute
   '/kb': typeof KbIndexRoute
@@ -523,6 +539,7 @@ export interface FileRoutesByTo {
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
+  '/manager/syllabus': typeof AuthenticatedManagerSyllabusRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -570,6 +587,7 @@ export interface FileRoutesById {
   '/blog/$slug': typeof BlogSlugRoute
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
+  '/kb/syllabus': typeof KbSyllabusRoute
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
@@ -589,6 +607,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/_authenticated/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/_authenticated/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
+  '/_authenticated/manager/syllabus': typeof AuthenticatedManagerSyllabusRoute
   '/_authenticated/manager/users': typeof AuthenticatedManagerUsersRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -636,6 +655,7 @@ export interface FileRouteTypes {
     | '/blog/$slug'
     | '/email-settings/$token'
     | '/kb/$slug'
+    | '/kb/syllabus'
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
@@ -655,6 +675,7 @@ export interface FileRouteTypes {
     | '/manager/reconciliation'
     | '/manager/settings'
     | '/manager/site-banner'
+    | '/manager/syllabus'
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
@@ -699,6 +720,7 @@ export interface FileRouteTypes {
     | '/blog/$slug'
     | '/email-settings/$token'
     | '/kb/$slug'
+    | '/kb/syllabus'
     | '/blog'
     | '/email-settings'
     | '/kb'
@@ -718,6 +740,7 @@ export interface FileRouteTypes {
     | '/manager/reconciliation'
     | '/manager/settings'
     | '/manager/site-banner'
+    | '/manager/syllabus'
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
@@ -764,6 +787,7 @@ export interface FileRouteTypes {
     | '/blog/$slug'
     | '/email-settings/$token'
     | '/kb/$slug'
+    | '/kb/syllabus'
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
@@ -783,6 +807,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/reconciliation'
     | '/_authenticated/manager/settings'
     | '/_authenticated/manager/site-banner'
+    | '/_authenticated/manager/syllabus'
     | '/_authenticated/manager/users'
     | '/_authenticated/manager/waiver-template'
     | '/_authenticated/manager/waivers'
@@ -1064,6 +1089,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KbSlugRouteImport
       parentRoute: typeof KbRouteRoute
     }
+    '/kb/syllabus': {
+      id: '/kb/syllabus'
+      path: '/syllabus'
+      fullPath: '/kb/syllabus'
+      preLoaderRoute: typeof KbSyllabusRouteImport
+      parentRoute: typeof KbRouteRoute
+    }
     '/.lovable/oauth/consent': {
       id: '/.lovable/oauth/consent'
       path: '/.lovable/oauth/consent'
@@ -1181,6 +1213,13 @@ declare module '@tanstack/react-router' {
       path: '/manager/site-banner'
       fullPath: '/manager/site-banner'
       preLoaderRoute: typeof AuthenticatedManagerSiteBannerRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/manager/syllabus': {
+      id: '/_authenticated/manager/syllabus'
+      path: '/manager/syllabus'
+      fullPath: '/manager/syllabus'
+      preLoaderRoute: typeof AuthenticatedManagerSyllabusRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/manager/users': {
@@ -1303,6 +1342,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
   AuthenticatedManagerSettingsRoute: typeof AuthenticatedManagerSettingsRoute
   AuthenticatedManagerSiteBannerRoute: typeof AuthenticatedManagerSiteBannerRoute
+  AuthenticatedManagerSyllabusRoute: typeof AuthenticatedManagerSyllabusRoute
   AuthenticatedManagerUsersRoute: typeof AuthenticatedManagerUsersRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
   AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
@@ -1336,6 +1376,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedManagerReconciliationRoute,
   AuthenticatedManagerSettingsRoute: AuthenticatedManagerSettingsRoute,
   AuthenticatedManagerSiteBannerRoute: AuthenticatedManagerSiteBannerRoute,
+  AuthenticatedManagerSyllabusRoute: AuthenticatedManagerSyllabusRoute,
   AuthenticatedManagerUsersRoute: AuthenticatedManagerUsersRoute,
   AuthenticatedManagerWaiverTemplateRoute:
     AuthenticatedManagerWaiverTemplateRoute,
@@ -1353,11 +1394,13 @@ const AuthenticatedRouteRouteWithChildren =
 
 interface KbRouteRouteChildren {
   KbSlugRoute: typeof KbSlugRoute
+  KbSyllabusRoute: typeof KbSyllabusRoute
   KbIndexRoute: typeof KbIndexRoute
 }
 
 const KbRouteRouteChildren: KbRouteRouteChildren = {
   KbSlugRoute: KbSlugRoute,
+  KbSyllabusRoute: KbSyllabusRoute,
   KbIndexRoute: KbIndexRoute,
 }
 

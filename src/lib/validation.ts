@@ -11,6 +11,9 @@ import { resendKinds } from "./email-resend";
 // permission rules are written in; importing it here keeps the wire schema and
 // those rules from drifting into two different lists of visibilities.
 import { annotationVisibilities, articleVisibilities } from "./kb";
+// And for the syllabus: `syllabus.ts` owns the rule about what a block of text
+// may contain, so the wire schema asks it rather than restating it.
+import { entryProblem } from "./syllabus";
 import { siteBannerLocalHref } from "./site-banner";
 // Same idea for the gi/belt size charts: `kit-sizes.ts` owns the two code sets
 // (and the CHECK constraints on `profiles` mirror them), so the wire schemas
@@ -3138,6 +3141,14 @@ export const managerAgentActions = [
   "get_kb_article",
   "save_kb_article",
   "list_kb_comments",
+  "list_belts",
+  "save_belt",
+  "delete_belt",
+  "list_syllabus_topics",
+  "save_syllabus_topic",
+  "delete_syllabus_topic",
+  "get_syllabus",
+  "save_syllabus_entries",
   "list_items",
   "save_item",
   "delete_item",
@@ -4225,6 +4236,158 @@ export const listKbCommentsSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
 });
 export type ListKbCommentsInput = z.infer<typeof listKbCommentsSchema>;
+
+// ---- Syllabus (see docs/syllabus.md) ----
+//
+// Belts, topics, and one block of markdown per (belt, topic). The rules about
+// order and assembly live in `src/lib/syllabus.ts`; this only validates what
+// crosses the wire. Like the knowledge base, an unknown slug creates the thing
+// and an omitted field is left alone.
+
+/** A belt's or a topic's URL key, mirroring the CHECKs on `belts` and `syllabus_topics`. */
+const syllabusSlugSchema = (max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .regex(
+      /^[a-z0-9]+(-[a-z0-9]+)*$/,
+      "Use lowercase letters, numbers and single hyphens, e.g. dark-blue.",
+    );
+
+export const beltSlugSchema = syllabusSlugSchema(50);
+export const topicSlugSchema = syllabusSlugSchema(100);
+
+/** `#rrggbb`, stored lowercase so the CHECK and every comparison agree. */
+const beltColourSchema = z
+  .string()
+  .trim()
+  .regex(/^#[0-9a-fA-F]{6}$/, "Use a hex colour, e.g. #16a34a.")
+  .transform((value) => value.toLowerCase());
+
+const positionSchema = z.number().int().min(0).max(100000);
+
+/**
+ * Create a belt, rename it, regrade it, recolour it, or move it.
+ *
+ * Creating one needs a name and a colour. Renaming or regrading a belt that has
+ * a page republishes that page, since its title is built from both.
+ */
+export const saveBeltSchema = z
+  .object({
+    slug: beltSlugSchema,
+    name: z.string().trim().min(1).max(50).optional(),
+    /** "2nd Kyu". An empty string clears it. */
+    grade: z.string().trim().max(50).optional(),
+    colour: beltColourSchema.optional(),
+    /** Junior first. The seeded belts use tens. */
+    position: positionSchema.optional(),
+    /** "I believe this belt is new": refused if the slug is taken. */
+    expect_new: z.boolean().optional(),
+  })
+  .strict();
+export type SaveBeltInput = z.infer<typeof saveBeltSchema>;
+
+export const deleteBeltSchema = z.object({ slug: beltSlugSchema }).strict();
+export type DeleteBeltInput = z.infer<typeof deleteBeltSchema>;
+
+/**
+ * Create a topic, rename it, move it, or file it under another topic.
+ *
+ * `parent` is the topic it sits under; an empty string makes it a top-level
+ * topic. Only one level of nesting: a sub-topic cannot have sub-topics.
+ */
+export const saveSyllabusTopicSchema = z
+  .object({
+    slug: topicSlugSchema,
+    title: z.string().trim().min(1).max(100).optional(),
+    parent: topicSlugSchema.optional().or(z.literal("")),
+    position: positionSchema.optional(),
+    change_note: z.string().trim().max(500).optional().or(z.literal("")),
+    expect_new: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => value.parent === undefined || value.parent !== value.slug, {
+    path: ["parent"],
+    message: "A topic cannot sit under itself.",
+  });
+export type SaveSyllabusTopicInput = z.infer<typeof saveSyllabusTopicSchema>;
+
+export const deleteSyllabusTopicSchema = z.object({ slug: topicSlugSchema }).strict();
+export type DeleteSyllabusTopicInput = z.infer<typeof deleteSyllabusTopicSchema>;
+
+/** The longest one block may be, mirroring the CHECK on `syllabus_entries`. */
+export const MAX_SYLLABUS_ENTRY = 20000;
+
+/** One block: a belt's text for a topic. An empty `body_md` clears it. */
+const syllabusEntryInputSchema = z
+  .object({
+    belt: beltSlugSchema,
+    topic: topicSlugSchema,
+    body_md: z.string().max(MAX_SYLLABUS_ENTRY),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const problem = entryProblem(value.body_md);
+    if (problem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["body_md"], message: problem });
+  });
+
+/**
+ * Save one or more blocks at once.
+ *
+ * Several at once is the normal case, not a bulk extra: editing a belt changes
+ * a block per topic, and editing a topic changes a block per belt. Each belt
+ * page that changed is republished ONCE for the whole call, so editing all ten
+ * of a belt's topics is one new version of its page rather than ten.
+ */
+export const saveSyllabusEntriesSchema = z
+  .object({
+    entries: z.array(syllabusEntryInputSchema).min(1).max(300),
+    /** Shown with each republished belt page, as an article's change note is. */
+    change_note: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const seen = new Set<string>();
+    value.entries.forEach((entry, index) => {
+      const key = `${entry.belt}/${entry.topic}`;
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["entries", index],
+          message: `${key} appears twice. Send each belt and topic once.`,
+        });
+      }
+      seen.add(key);
+    });
+  });
+export type SaveSyllabusEntriesInput = z.infer<typeof saveSyllabusEntriesSchema>;
+
+/**
+ * Read the syllabus, optionally "up to" one belt and for one topic. The same
+ * two choices the member's page takes from its address.
+ */
+export const getSyllabusSchema = z
+  .object({
+    up_to: beltSlugSchema.optional(),
+    topic: topicSlugSchema.optional(),
+  })
+  .strict();
+export type GetSyllabusInput = z.infer<typeof getSyllabusSchema>;
+
+/**
+ * The member's `/kb/syllabus?up_to=green&topic=breakfalling`. Lenient on
+ * purpose: this arrives from a link somebody pasted into a group chat, so a
+ * malformed value is dropped (the page then shows everything) rather than
+ * failing the route, and a well-formed one that names nothing is reported on
+ * the page by `syllabusView`.
+ */
+export const syllabusSearchSchema = z.object({
+  up_to: z.string().trim().max(50).optional().catch(undefined),
+  topic: z.string().trim().max(100).optional().catch(undefined),
+});
+export type SyllabusSearch = z.infer<typeof syllabusSearchSchema>;
 
 /**
  * Write an annotation.
