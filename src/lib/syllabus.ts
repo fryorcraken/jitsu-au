@@ -178,6 +178,24 @@ export function sameBlocks(a: string, b: string): boolean {
 }
 
 /**
+ * Whether two versions of a page hold exactly the same blocks, in any order.
+ *
+ * True when the only difference is the ORDER of the topics, which is what
+ * moving a topic does. A reader who read the old version has read every word
+ * of the new one, so their progress is carried over to it rather than the page
+ * telling them it was updated (`republishBeltPages`).
+ */
+export function sameBlockSet(a: string, b: string): boolean {
+  const sorted = (markdown: string) =>
+    splitBlocks(markdown)
+      .map((block) => normalizeBlockText(block.markdown))
+      .sort();
+  const left = sorted(a);
+  const right = sorted(b);
+  return left.length === right.length && left.every((text, i) => text === right[i]);
+}
+
+/**
  * A block's text with blank lines and trailing space dropped from either end,
  * but NEVER the indentation on its first line. A plain `.trim()` would turn a
  * block that opens with an indented code sample into a paragraph, the same

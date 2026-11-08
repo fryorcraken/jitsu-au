@@ -23,6 +23,7 @@ import {
   deleteKbSectionSchema,
   deleteBeltSchema,
   deleteSyllabusTopicSchema,
+  reorderSyllabusTopicsSchema,
   getSyllabusSchema,
   saveBeltSchema,
   saveSyllabusEntriesSchema,
@@ -144,6 +145,7 @@ import {
   SyllabusError,
   deleteBelt,
   deleteSyllabusTopic,
+  reorderSyllabusTopics,
   loadSyllabus,
   saveBelt,
   saveSyllabusEntries,
@@ -2014,6 +2016,16 @@ async function handleSaveSyllabusTopic(params: unknown, actingAs: string) {
   }
 }
 
+// ---- action: reorder_syllabus_topics ----
+async function handleReorderSyllabusTopics(params: unknown, actingAs: string) {
+  const input = reorderSyllabusTopicsSchema.parse(params);
+  try {
+    return await reorderSyllabusTopics(await adminClient(), input, actingAs);
+  } catch (e) {
+    throw syllabusFailure(e, "reorder_syllabus_topics_failed", "Could not reorder the topics.");
+  }
+}
+
 // ---- action: delete_syllabus_topic ----
 async function handleDeleteSyllabusTopic(params: unknown) {
   const input = deleteSyllabusTopicSchema.parse(params);
@@ -3074,6 +3086,8 @@ export async function dispatch(
       return handleListSyllabusTopics(params);
     case "save_syllabus_topic":
       return handleSaveSyllabusTopic(params, actingAs);
+    case "reorder_syllabus_topics":
+      return handleReorderSyllabusTopics(params, actingAs);
     case "delete_syllabus_topic":
       return handleDeleteSyllabusTopic(params);
     case "get_syllabus":
