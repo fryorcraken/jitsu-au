@@ -508,7 +508,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "38",
+  version: "39",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -522,13 +522,24 @@ export const AGENT_MANIFEST: {
   // new response field — which is what these notes name.
   changes: [
     {
-      version: "38",
+      version: "39",
       // A group's meaning narrows: `visitors` stops including lapsed members.
       breaking: true,
       notes: [
         'BREAKING: the club message group `visitors` no longer includes lapsed members. They are their own group, `lapsed` (used to pay for training, and their membership ended). A call that sent to `visitors` now reaches fewer people; send `["visitors", "lapsed"]` for the old meaning.',
         "People can be picked one by one: get_club_message_audience and send_club_message take person_ids (user ids from the new read action list_message_people, which lists everybody each group reaches, by name, with whose inbox a child's email goes to). groups, person_ids and lead_ids all default to none; at least one is needed to send.",
         "Contact-form senders are leads too. list_message_leads reports source (which form the newest entry came from) and sources (every form the address has used); its registration_id may be a contact message's id, and send_club_message takes it in lead_ids the same way. list_users reports lead_sources on a lead (how many entries of each form are under the address) and lists contact-form senders as leads.",
+      ],
+    },
+    {
+      version: "38",
+      // A new action and two quieter behaviours. Nothing that worked before
+      // changes, and nothing that succeeded now fails.
+      breaking: false,
+      notes: [
+        "New action reorder_syllabus_topics: put several topics in a new order in one call ({ topics: [{ slug, position }] }), republishing each belt page once. Use it instead of one save_syllabus_topic per topic when reordering.",
+        "A belt page republished only because topics moved (the same blocks in a new order) carries members' reading progress over, so they are not told it was updated.",
+        "save_syllabus_topic: a topic moved under another topic with no position given now goes last among its new siblings, instead of keeping its old number.",
       ],
     },
     {
@@ -1724,6 +1735,25 @@ export const AGENT_MANIFEST: {
             "Shown on the belt pages this republishes. A plain description is used when omitted.",
         },
         { name: "expect_new", required: false, description: "Set true when creating." },
+      ],
+    },
+    {
+      name: "reorder_syllabus_topics",
+      method: "POST",
+      summary:
+        "Put several topics in a new order at once: send each moved topic's new position, and every belt page is republished once for the whole call (moving topics one save at a time republishes every page each time). Positions only; titles and parents are changed with save_syllabus_topic. Unknown slugs, or two siblings left on the same position, refuse the whole call. A page that only changed order keeps members' reading progress.",
+      params: [
+        {
+          name: "topics",
+          required: true,
+          description:
+            "[{ slug, position }], each topic once. Positions order siblings (topics under the same parent, or the top level), lower first; renumbering a sibling group in tens is the simple way.",
+        },
+        {
+          name: "change_note",
+          required: false,
+          description: "Shown on the republished belt pages. Defaults to 'Topics reordered'.",
+        },
       ],
     },
     {

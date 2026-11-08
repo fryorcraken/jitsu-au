@@ -3153,6 +3153,7 @@ export const managerAgentActions = [
   "delete_belt",
   "list_syllabus_topics",
   "save_syllabus_topic",
+  "reorder_syllabus_topics",
   "delete_syllabus_topic",
   "get_syllabus",
   "save_syllabus_entries",
@@ -4328,6 +4329,26 @@ export const saveSyllabusTopicSchema = z
   });
 export type SaveSyllabusTopicInput = z.infer<typeof saveSyllabusTopicSchema>;
 
+/**
+ * Put topics in a new order: the positions a burst of moves on the screen
+ * produced, saved together so the belt pages are republished once. Each topic
+ * once; positions only.
+ */
+export const reorderSyllabusTopicsSchema = z
+  .object({
+    topics: z
+      .array(z.object({ slug: topicSlugSchema, position: positionSchema }).strict())
+      .min(1)
+      .max(200),
+    change_note: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .strict()
+  .refine((value) => new Set(value.topics.map((t) => t.slug)).size === value.topics.length, {
+    path: ["topics"],
+    message: "Each topic once.",
+  });
+export type ReorderSyllabusTopicsInput = z.infer<typeof reorderSyllabusTopicsSchema>;
+
 export const deleteSyllabusTopicSchema = z.object({ slug: topicSlugSchema }).strict();
 export type DeleteSyllabusTopicInput = z.infer<typeof deleteSyllabusTopicSchema>;
 
@@ -4402,6 +4423,20 @@ export const syllabusSearchSchema = z.object({
   topic: z.string().trim().max(100).optional().catch(undefined),
 });
 export type SyllabusSearch = z.infer<typeof syllabusSearchSchema>;
+
+/**
+ * The manager's `/manager/syllabus?belt=green`: open on that belt. Lenient for
+ * the same reason as the member's page: it arrives from a link (the knowledge
+ * base editor's "Edit the syllabus"), and a bad value just opens the default.
+ */
+export const manageSyllabusSearchSchema = z.object({
+  belt: z.string().trim().max(50).optional().catch(undefined),
+});
+
+/** The manager's `/manager/kb?article=green-belt`: open on that article. */
+export const manageKbSearchSchema = z.object({
+  article: z.string().trim().max(100).optional().catch(undefined),
+});
 
 /**
  * Write an annotation.

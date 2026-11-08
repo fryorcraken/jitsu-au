@@ -1328,6 +1328,17 @@ scripts/agent.sh save_syllabus_topic '{"slug":"breakfalling","title":"Breakfalli
 scripts/agent.sh save_syllabus_topic '{"slug":"weapons","title":"Weapons","parent":"techniques","expect_new":true}'
 ```
 
+To change the ORDER, send every moved topic in one call, which republishes each
+belt page once (one `save_syllabus_topic` per topic republishes every page each
+time). Renumbering a sibling group in tens is the simple way:
+
+```bash
+scripts/agent.sh reorder_syllabus_topics '{"topics":[{"slug":"drills","position":45},{"slug":"concepts","position":90}]}'
+```
+
+A page that only changed order keeps members' reading progress: they are not
+told it was updated.
+
 Two levels only: a topic, and sub-topics under it. A topic's `slug` is its
 heading's anchor on every belt page (`/kb/green-belt#breakfalling`), fixed once
 made. Renaming or moving a topic republishes every belt page it is on.
@@ -2038,7 +2049,7 @@ scripts/agent.sh list_club_messages '{}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"38"`), and its
+- The manifest's `version` tells generations apart (currently `"39"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

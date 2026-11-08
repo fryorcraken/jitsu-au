@@ -14,6 +14,7 @@ import { requireManagerViewer, resolveViewer } from "@/lib/kb.functions";
 import {
   deleteBeltSchema,
   deleteSyllabusTopicSchema,
+  reorderSyllabusTopicsSchema,
   saveBeltSchema,
   saveSyllabusEntriesSchema,
   saveSyllabusTopicSchema,
@@ -39,8 +40,7 @@ export const getSyllabus = createServerFn({ method: "GET" }).handler(async () =>
     resolveViewer(db),
     import("@/lib/syllabus-admin"),
   ]);
-  const data = await loadSyllabus(db, viewer);
-  return { ...data, viewer: { signed_in: Boolean(viewer.userId), is_manager: viewer.isManager } };
+  return loadSyllabus(db, viewer);
 });
 
 /** Everything, for the manager screen: every belt (with a page or not), topic and block. */
@@ -99,4 +99,14 @@ export const deleteManagerSyllabusTopic = createServerFn({ method: "POST" })
     await requireManagerViewer(db);
     const { deleteSyllabusTopic } = await import("@/lib/syllabus-admin");
     return deleteSyllabusTopic(db, data.slug);
+  });
+
+/** Put several topics in a new order and republish the belt pages once. */
+export const reorderManagerSyllabusTopics = createServerFn({ method: "POST" })
+  .validator((d: unknown) => reorderSyllabusTopicsSchema.parse(d))
+  .handler(async ({ data }) => {
+    const db = await adminClient();
+    const viewer = await requireManagerViewer(db);
+    const { reorderSyllabusTopics } = await import("@/lib/syllabus-admin");
+    return reorderSyllabusTopics(db, data, viewer.userId);
   });

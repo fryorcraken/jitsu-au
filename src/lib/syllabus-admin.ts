@@ -23,6 +23,7 @@ import {
   composeBeltPage,
   orderBelts,
   sameBlocks,
+  sameBlockSet,
   tidyBlock,
   type SyllabusBelt,
   type SyllabusData,
@@ -30,6 +31,7 @@ import {
   type SyllabusTopic,
 } from "@/lib/syllabus";
 import type {
+  ReorderSyllabusTopicsInput,
   SaveBeltInput,
   SaveSyllabusEntriesInput,
   SaveSyllabusTopicInput,
@@ -45,7 +47,7 @@ type BeltPageRow = Pick<KbArticleRow, "id" | "slug" | "visibility" | "belt_id">;
 type EntryListRow = Pick<SyllabusEntryRow, "belt_id" | "topic_id" | "body_md" | "updated_at">;
 
 /** The slug the syllabus section is created under when there is none yet. */
-export const SYLLABUS_SECTION_SLUG = "syllabus";
+const SYLLABUS_SECTION_SLUG = "syllabus";
 
 /**
  * More blocks than this and the read is refused rather than truncated: a
@@ -66,7 +68,7 @@ export class SyllabusError extends Error {
 }
 
 /** Every row the syllabus is made of, read at once. */
-export async function loadSyllabusRows(db: KbClient) {
+async function loadSyllabusRows(db: KbClient) {
   const [beltsResult, topicsResult, entriesResult, pagesResult] = await Promise.all([
     db.from("belts").select("*"),
     db.from("syllabus_topics").select("*"),
@@ -104,7 +106,7 @@ type SyllabusRows = Awaited<ReturnType<typeof loadSyllabusRows>>;
  * answer opening the page itself gives them. Without one (the manager screen,
  * the agent API) everything is kept, including a belt with no page yet.
  */
-export function toSyllabusData(rows: SyllabusRows, viewer?: Viewer): SyllabusData {
+function toSyllabusData(rows: SyllabusRows, viewer?: Viewer): SyllabusData {
   const pageByBelt = new Map(rows.pages.map((p) => [p.belt_id, p]));
   const belts: (SyllabusBelt & { id: string })[] = rows.belts
     .map((b) => {
@@ -242,6 +244,29 @@ async function createBeltPage(
 }
 
 /**
+ * Mark everybody who had read `from` as having read `to`.
+ *
+ * Only for a new version holding exactly the blocks the old one did, in a new
+ * order: the reader has read every word of it already, and telling them the
+ * page was "updated since you read it" because a manager moved a topic would
+ * spend the one signal that is meant to say the words changed. Best effort: if
+ * it fails, readers see the page as updated, which is the safe direction.
+ */
+async function carryReadsForward(
+  db: KbClient,
+  articleId: string,
+  from: number,
+  to: number,
+): Promise<void> {
+  const { error } = await db
+    .from("kb_article_reads")
+    .update({ version: to })
+    .eq("article_id", articleId)
+    .eq("version", from);
+  if (error) console.warn("[syllabus] could not carry reading progress forward:", error.message);
+}
+
+/**
  * Put each named belt's page back together from its blocks, and publish the
  * ones that now say something different.
  *
@@ -270,25 +295,34 @@ export async function republishBeltPages(
     const page = pageByBelt.get(b.id);
     return page ? [page.id] : [];
   });
-  const liveByPage = new Map<string, { title: string; body_md: string }>();
+  const liveByPage = new Map<string, { title: string; body_md: string; version: number }>();
   if (pageIds.length) {
     const { data: liveRows, error } = await db
       .from("kb_article_versions")
-      .select("article_id, title, body_md")
+      .select("article_id, title, body_md, version")
       .in("article_id", pageIds)
       .eq("is_current", true);
     if (error) throw new Error(error.message);
     for (const row of liveRows ?? []) liveByPage.set(row.article_id, row);
   }
 
-  const results: BeltPageResult[] = [];
-  const failures: string[] = [];
-  for (const belt of orderBelts(scope)) {
-    try {
+  // The section a new page goes in, made once up front if needed: two belts
+  // each making it at the same moment below would race on its unique slug.
+  if (opts.create && scope.some((b) => !pageByBelt.has(b.id) && hasText.has(b.id))) {
+    await ensureSyllabusSection(db);
+  }
+
+  // Every belt at once. Each page is its own article with its own versions, so
+  // nothing here is shared between them, and done one after another a topic
+  // moved on seven belt pages took about eight seconds: six round trips per
+  // page, back to back.
+  const ordered = orderBelts(scope);
+  const outcomes = await Promise.allSettled(
+    ordered.map(async (belt): Promise<BeltPageResult | null> => {
       let page = pageByBelt.get(belt.id) ?? null;
       let created = false;
       if (!page) {
-        if (!opts.create || !hasText.has(belt.id)) continue;
+        if (!opts.create || !hasText.has(belt.id)) return null;
         page = await createBeltPage(db, belt, opts.actingAs);
         created = true;
       }
@@ -297,8 +331,7 @@ export async function republishBeltPages(
       const body = composeBeltPage(belt.slug, data.topics, data.entries);
       const live = liveByPage.get(page.id);
       if (live && live.title === title && sameBlocks(live.body_md, body)) {
-        results.push({ belt: belt.slug, page: page.slug, version: null, created });
-        continue;
+        return { belt: belt.slug, page: page.slug, version: null, created };
       }
 
       const version = await writeArticleVersion(
@@ -307,11 +340,25 @@ export async function republishBeltPages(
         { title, body_md: body, change_note: opts.changeNote },
         opts.actingAs,
       );
-      results.push({ belt: belt.slug, page: page.slug, version, created });
-    } catch (e) {
-      failures.push(`${beltPageTitle(belt)}: ${e instanceof Error ? e.message : String(e)}`);
+      if (live && live.title === title && sameBlockSet(live.body_md, body)) {
+        await carryReadsForward(db, page.id, live.version, version);
+      }
+      return { belt: belt.slug, page: page.slug, version, created };
+    }),
+  );
+
+  const results: BeltPageResult[] = [];
+  const failures: string[] = [];
+  outcomes.forEach((outcome, i) => {
+    if (outcome.status === "fulfilled") {
+      if (outcome.value) results.push(outcome.value);
+    } else {
+      const reason = outcome.reason;
+      failures.push(
+        `${beltPageTitle(ordered[i])}: ${reason instanceof Error ? reason.message : String(reason)}`,
+      );
     }
-  }
+  });
 
   if (failures.length) {
     throw new SyllabusError(
@@ -356,6 +403,22 @@ export async function saveBelt(
       throw new SyllabusError(
         `There is no belt "${input.slug}" yet, so creating it needs a name and a colour.`,
         "invalid",
+      );
+    }
+    // Its page will live at /kb/<slug>-belt. Refused now, while nothing has
+    // been made, rather than on its first block, when the manager has written
+    // a box of text that then cannot be published.
+    const pageSlug = beltPageSlug(input.slug);
+    const { data: taken, error: takenErr } = await db
+      .from("kb_articles")
+      .select("id")
+      .eq("slug", pageSlug)
+      .maybeSingle();
+    if (takenErr) throw new Error(takenErr.message);
+    if (taken) {
+      throw new SyllabusError(
+        `There is already an article at /kb/${pageSlug}, which is where this belt's page would go. Pick another short name for the belt, or give that article another URL key.`,
+        "conflict",
       );
     }
     let position = input.position;
@@ -531,17 +594,7 @@ export async function saveSyllabusTopic(
         "invalid",
       );
     }
-    let position = input.position;
-    if (position === undefined) {
-      let query = db.from("syllabus_topics").select("position");
-      query = parentId ? query.eq("parent_id", parentId) : query.is("parent_id", null);
-      const { data: last, error } = await query
-        .order("position", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      position = (last?.position ?? 0) + 10;
-    }
+    const position = input.position ?? (await nextTopicPosition(db, parentId ?? null));
     const { error } = await db.from("syllabus_topics").insert({
       slug: input.slug,
       title: input.title,
@@ -555,7 +608,13 @@ export async function saveSyllabusTopic(
 
   const patch: Partial<SyllabusTopicRow> = {};
   if (input.title !== undefined && input.title !== existing.title) patch.title = input.title;
-  if (parentId !== undefined && parentId !== existing.parent_id) patch.parent_id = parentId;
+  if (parentId !== undefined && parentId !== existing.parent_id) {
+    patch.parent_id = parentId;
+    // Filed under another topic with no position given, it goes LAST among its
+    // new siblings. Keeping its old number would drop it wherever that number
+    // happens to fall in a list it was never ordered against.
+    if (input.position === undefined) patch.position = await nextTopicPosition(db, parentId);
+  }
   if (input.position !== undefined && input.position !== existing.position) {
     patch.position = input.position;
   }
@@ -572,6 +631,97 @@ export async function saveSyllabusTopic(
     actingAs,
   });
   return { slug: input.slug, created: false, pages };
+}
+
+/** The position after the last topic under `parentId` (null: the top level). */
+async function nextTopicPosition(db: KbClient, parentId: string | null): Promise<number> {
+  let query = db.from("syllabus_topics").select("position");
+  query = parentId ? query.eq("parent_id", parentId) : query.is("parent_id", null);
+  const { data: last, error } = await query
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (last?.position ?? 0) + 10;
+}
+
+/**
+ * Put several topics in a new order at once, then republish the belt pages
+ * ONCE.
+ *
+ * The screen's arrows used to save each press as its own topic save, and each
+ * one republished every belt page: three presses to move Drills up three places
+ * was three rounds of new versions on every page, and three waits. The screen
+ * now collects a burst of moves and sends the resulting positions here.
+ *
+ * Positions only: a topic's title and parent are changed with
+ * `saveSyllabusTopic`. Unknown slugs refuse the whole call before anything is
+ * written, naming each.
+ */
+export async function reorderSyllabusTopics(
+  db: KbClient,
+  input: ReorderSyllabusTopicsInput,
+  actingAs: string | null,
+): Promise<{ moved: number; pages: BeltPageResult[] }> {
+  const slugs = input.topics.map((t) => t.slug);
+  // Every topic, not just the ones named: a few dozen rows, and the only way
+  // to see whether the new numbers collide with a sibling left where it was.
+  const { data: rows, error } = await db
+    .from("syllabus_topics")
+    .select("id, slug, position, parent_id");
+  if (error) throw new Error(error.message);
+  const bySlug = new Map((rows ?? []).map((r) => [r.slug, r]));
+  const unknown = slugs.filter((slug) => !bySlug.has(slug));
+  if (unknown.length) {
+    throw new SyllabusError(
+      `Nothing was moved: there is no topic ${unknown.map((s) => `"${s}"`).join(", ")}.`,
+      "invalid",
+    );
+  }
+
+  // Two siblings on one number read in whichever order the tie falls, which
+  // can differ between saves: refused, naming them, before anything is written.
+  const wanted = new Map(input.topics.map((t) => [t.slug, t.position]));
+  const seen = new Map<string, string>();
+  for (const row of rows ?? []) {
+    const key = `${row.parent_id ?? ""}/${wanted.get(row.slug) ?? row.position}`;
+    const other = seen.get(key);
+    // A tie already stored between two topics this call does not move is not
+    // this call's to refuse: positionChanges renumbers whole groups anyway.
+    if (other && (wanted.has(row.slug) || wanted.has(other))) {
+      throw new SyllabusError(
+        `Nothing was moved: "${other}" and "${row.slug}" would share position ${wanted.get(row.slug) ?? row.position}. Give each topic its own.`,
+        "invalid",
+      );
+    }
+    seen.set(key, row.slug);
+  }
+
+  const changes = input.topics.filter((t) => bySlug.get(t.slug)!.position !== t.position);
+  if (!changes.length) return { moved: 0, pages: [] };
+  const now = new Date().toISOString();
+  const writes = await Promise.all(
+    changes.map((t) =>
+      db
+        .from("syllabus_topics")
+        .update({ position: t.position, updated_at: now })
+        .eq("id", bySlug.get(t.slug)!.id),
+    ),
+  );
+  // Republished even when some writes failed: the pages then match what IS
+  // stored, part-moved or not, rather than an order nothing holds any more.
+  const failed = writes.filter((w) => w.error).length;
+  const pages = await republishBeltPages(db, "all", {
+    changeNote: input.change_note || "Topics reordered",
+    actingAs,
+  });
+  if (failed) {
+    throw new SyllabusError(
+      `${failed} of ${changes.length} topics could not be moved. The belt pages show the order that is saved now; move them again to finish.`,
+      "not_published",
+    );
+  }
+  return { moved: changes.length, pages };
 }
 
 function defaultTopicNote(existing: SyllabusTopicRow, patch: Partial<SyllabusTopicRow>): string {
@@ -696,9 +846,10 @@ export async function saveSyllabusEntries(
 }
 
 /**
- * Whether an article is a belt page, for the guards in `kb-admin.ts` and the
- * rollback path: a belt page's text comes from the syllabus, so restoring an
- * older version of it would put the page out of step with its own blocks.
+ * The belt (its id) whose page a version belongs to, or null for any other
+ * article's version. For the rollback guard in `kb.functions.ts`: a belt
+ * page's text comes from the syllabus, so restoring an older version of it
+ * would put the page out of step with its own blocks.
  */
 export async function beltOfVersion(db: KbClient, versionId: string): Promise<string | null> {
   const { data, error } = await db

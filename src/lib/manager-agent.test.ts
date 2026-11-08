@@ -505,7 +505,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("38");
+    expect(AGENT_MANIFEST.version).toBe("39");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -1330,7 +1330,7 @@ describe("check-in on the agent API", () => {
   });
 
   it("flags the narrower visitors group as breaking, and names the new pieces", () => {
-    const change = AGENT_MANIFEST.changes.find((c) => c.version === "38")!;
+    const change = AGENT_MANIFEST.changes.find((c) => c.version === "39")!;
     expect(change.breaking).toBe(true);
     const notes = change.notes.join(" ");
     for (const word of ["lapsed", "person_ids", "list_message_people", "lead_sources"])

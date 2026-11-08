@@ -7,6 +7,7 @@
 // feature actually has: several articles rather than one, a visibility setting,
 // and a feedback panel.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { manageKbSearchSchema } from "@/lib/validation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -95,6 +96,9 @@ import { useAuth, useRoles } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/manager/kb")({
+  // `?article=green-belt` opens that article: the syllabus screen links here
+  // for a belt page's comments and history.
+  validateSearch: manageKbSearchSchema,
   head: () => ({
     meta: [{ title: "Knowledge base editor | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
@@ -191,6 +195,7 @@ const KB_DRAFT_SHAPE: KbDraftFields = {
 };
 
 function KnowledgeBaseManager() {
+  const search = Route.useSearch();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isManager, loading: rolesLoading } = useRoles(user?.id);
@@ -570,7 +575,8 @@ function KnowledgeBaseManager() {
       .then(([rows, sectionRows]) => {
         setArticles(rows);
         setSections(sectionRows);
-        const firstArticle = rows.find((r) => !r.link_path) ?? rows[0];
+        const firstArticle =
+          rows.find((r) => r.slug === search.article) ?? rows.find((r) => !r.link_path) ?? rows[0];
         // Passed explicitly rather than left to the `articles` state this sets
         // above: this effect runs once, with an `openDocument` closure fixed to
         // the render where the effect was created, whose `articles` was still
@@ -774,7 +780,10 @@ function KnowledgeBaseManager() {
     // Into the first section, at the END of it. Position 0 would put a brand-new
     // article ahead of the one a manager deliberately made the first thing a
     // member reads, which is the single thing the reading order is for.
-    const into = sections[0]?.slug ?? "";
+    // Never the syllabus section, which takes belt pages only: a new article
+    // filed there could not be saved, and this form has no section picker to
+    // get it out again.
+    const into = sections.find((row) => row.kind !== "syllabus")?.slug ?? "";
     setSection(into);
     setPosition(nextPosition(siblingsOf(into)));
     setNewBaseline({
@@ -1151,6 +1160,10 @@ function KnowledgeBaseManager() {
     setDragging({ id, label });
   }
 
+  /** Whether a group in the list is the section that holds the belt pages. */
+  const isSyllabusSection = (groupSlug: string) =>
+    sections.find((row) => row.slug === groupSlug)?.kind === "syllabus";
+
   /**
    * Carry an entry into the section it is currently over, so the list shows
    * where it would land.
@@ -1159,6 +1172,7 @@ function KnowledgeBaseManager() {
    * manager cannot see whether they are about to file the article into "Belts"
    * or the section under it.
    */
+
   function onDragOver(event: DragOverEvent) {
     const { active, over } = event;
     if (!over || active.data.current?.type !== "entry") return;
@@ -1168,6 +1182,10 @@ function KnowledgeBaseManager() {
     if (from === null || to === null || from === to) return;
 
     const slugMoved = String(active.id).slice("entry:".length);
+    // The syllabus section takes belt pages only, and belt pages have no
+    // handle, so nothing dragged can go in. Not shown landing there, rather
+    // than shown and then refused half-way through renumbering two sections.
+    if (isSyllabusSection(to)) return;
     const entry = current
       .find((group) => group.slug === from)
       ?.entries.find((e) => e.slug === slugMoved);
@@ -1251,6 +1269,11 @@ function KnowledgeBaseManager() {
     const into = containerOf(current, String(over.id));
     if (into === null) {
       setDragGroups(null);
+      return;
+    }
+    if (isSyllabusSection(into)) {
+      setDragGroups(null);
+      toast.info("The Syllabus section holds belt pages only, so that stays where it was.");
       return;
     }
 
@@ -1804,7 +1827,12 @@ function KnowledgeBaseManager() {
                     and whether it takes comments.
                   </p>
                   <Button asChild size="sm" variant="outline">
-                    <Link to="/manager/syllabus">Edit the syllabus</Link>
+                    <Link
+                      to="/manager/syllabus"
+                      search={{ belt: articles.find((a) => a.slug === slug)?.belt ?? undefined }}
+                    >
+                      Edit this belt&apos;s syllabus
+                    </Link>
                   </Button>
                 </div>
               ) : (
@@ -1889,20 +1917,25 @@ function KnowledgeBaseManager() {
                         the page. Blank uses the title.
                       </p>
                     </div>
-                    <div className="sm:col-span-2">
-                      <Label htmlFor="change-note">What changed (optional)</Label>
-                      <Input
-                        id="change-note"
-                        value={changeNote}
-                        onChange={(e) => setChangeNote(e.target.value)}
-                        maxLength={500}
-                        placeholder="Added the hygiene section"
-                        className="mt-1.5"
-                      />
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        Shown to readers whose comments were written against an earlier version.
-                      </p>
-                    </div>
+                    {/* A belt page's settings save writes no version, so a
+                        note would be dropped without a word. Its versions get
+                        their notes from the syllabus screen. */}
+                    {!beltPage && (
+                      <div className="sm:col-span-2">
+                        <Label htmlFor="change-note">What changed (optional)</Label>
+                        <Input
+                          id="change-note"
+                          value={changeNote}
+                          onChange={(e) => setChangeNote(e.target.value)}
+                          maxLength={500}
+                          placeholder="Added the hygiene section"
+                          className="mt-1.5"
+                        />
+                        <p className="mt-1.5 text-xs text-muted-foreground">
+                          Shown to readers whose comments were written against an earlier version.
+                        </p>
+                      </div>
+                    )}
                   </>
                 )}
                 {kind === "link" && (
@@ -1944,7 +1977,9 @@ function KnowledgeBaseManager() {
                         : "Save the link"
                       : creating
                         ? "Create and publish"
-                        : "Save as new version"}
+                        : beltPage
+                          ? "Save settings"
+                          : "Save as new version"}
                 </Button>
                 {busy && <Loading className="text-xs" />}
                 {dirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
@@ -1975,7 +2010,9 @@ function KnowledgeBaseManager() {
               </CardHeader>
               <CardContent className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  One version is live at a time. Publishing an older one is how you undo an edit.
+                  {beltPage
+                    ? "One version is live at a time. A belt page's text comes from the syllabus, so an older version cannot be put back here: read it, and copy what you need into the syllabus."
+                    : "One version is live at a time. Publishing an older one is how you undo an edit."}
                 </p>
                 {versions.map((v) => (
                   <div
