@@ -1558,7 +1558,7 @@ sorts first), `kind` (`standard | syllabus`, default `standard`; a partial
 unique index allows at most one `syllabus`), `created_at`, `updated_at`.
 
 `kind = 'syllabus'` is the section that holds the belt pages, and only those
-(`docs/syllabus.md`). Added by `20261108000000_syllabus.sql`.
+(`docs/syllabus.md`). Added by `20261108120000_syllabus.sql`.
 
 A section holds no text and no secrets: it is a heading and a number. What makes
 it load-bearing is that `(section.position, article.position)` is the **only**
@@ -1728,7 +1728,7 @@ service role, which enforces visibility in code.
 What each belt asks of each topic, one block of markdown per (belt, topic).
 Each belt's knowledge base page is assembled from its blocks and republished
 when they change. The product spec is **`docs/syllabus.md`**. Added by
-`20261108000000_syllabus.sql`, which also seeded the belts and topics and
+`20261108120000_syllabus.sql`, which also seeded the belts and topics and
 imported the existing belt pages into blocks.
 
 All three tables are **closed**: `REVOKE ALL` from `anon` and `authenticated`,

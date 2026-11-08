@@ -378,7 +378,7 @@ export type _KbSectionColumns = RequireColumns<
 >;
 
 /**
- * The syllabus (`20261108000000_syllabus.sql`, docs/syllabus.md). Hand-added to
+ * The syllabus (`20261108120000_syllabus.sql`, docs/syllabus.md). Hand-added to
  * `types.ts` ahead of the live schema while that migration waits for approval;
  * the merge step regenerates the file, which replaces them with the
  * generator's identical lines.

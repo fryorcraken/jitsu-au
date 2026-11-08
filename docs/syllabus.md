@@ -188,7 +188,7 @@ markdown document.
 
 ## How it was imported
 
-`20261108000000_syllabus.sql` read each belt page's live version and filed the
+`20261108120000_syllabus.sql` read each belt page's live version and filed the
 text under each `##` and `###` heading as that belt's block for that topic. It
 refuses, naming the page and the heading, anything it cannot place (a heading
 that is not a topic, a sub-topic under the wrong topic, text before the first
