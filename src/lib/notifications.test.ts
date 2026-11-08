@@ -69,6 +69,7 @@ describe("preferenceForKind", () => {
       "membership_plan_open",
       "insurance_ending_soon",
       "insurance_ended",
+      "club_notice",
     ]);
   });
 
@@ -249,6 +250,18 @@ describe("digestSections", () => {
     expect(hasDigestContent(sections)).toBe(true);
   });
 
+  it("puts a club notice its own send missed under its own heading, switches or not", () => {
+    const sections = digestSections([item({ kind: "club_notice" })], {
+      reply_to_me: false,
+      thread_activity: false,
+      new_blog_post: false,
+      manager_comment_alerts: false,
+    });
+    expect(sections.notices).toHaveLength(1);
+    expect(sections.membership).toHaveLength(0);
+    expect(hasDigestContent(sections)).toBe(true);
+  });
+
   it("keeps a membership email for a person with every switch off", () => {
     const sections = digestSections(rows, {
       reply_to_me: false,
@@ -277,13 +290,21 @@ describe("digestSections", () => {
 describe("hasDigestContent", () => {
   it("is false for an empty digest, so no email goes out", () => {
     expect(
-      hasDigestContent({ membership: [], replies: [], threads: [], posts: [], moderation: [] }),
+      hasDigestContent({
+        notices: [],
+        membership: [],
+        replies: [],
+        threads: [],
+        posts: [],
+        moderation: [],
+      }),
     ).toBe(false);
   });
 
   it("is true when any one section has something", () => {
     expect(
       hasDigestContent({
+        notices: [],
         membership: [],
         replies: [],
         threads: [],
@@ -298,6 +319,7 @@ describe("digestItemCount and digestSubject", () => {
   it("counts across every section", () => {
     expect(
       digestItemCount({
+        notices: [],
         membership: [item()],
         replies: [item()],
         threads: [item()],
@@ -309,6 +331,7 @@ describe("digestItemCount and digestSubject", () => {
 
   it("says one thing in the singular", () => {
     const subject = digestSubject("UTS Jitsu", {
+      notices: [],
       membership: [],
       replies: [item()],
       threads: [],
@@ -320,6 +343,7 @@ describe("digestItemCount and digestSubject", () => {
 
   it("counts in the plural", () => {
     const subject = digestSubject("UTS Jitsu", {
+      notices: [],
       membership: [],
       replies: [item(), item()],
       threads: [],
@@ -333,6 +357,7 @@ describe("digestItemCount and digestSubject", () => {
   // subject line is the most-read copy the club writes.
   it("uses no em dash", () => {
     const subject = digestSubject("UTS Jitsu", {
+      notices: [],
       membership: [],
       replies: [item()],
       threads: [],

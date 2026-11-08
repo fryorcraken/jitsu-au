@@ -26,6 +26,8 @@
 //    Emails), which adds its own unsubscribe line to every email and refuses
 //    to deliver to anyone who used it, so there is no separate "stop" list of
 //    ours to consult. Lovable does not allow a second one alongside it.
+import { z } from "zod";
+
 import { contactUserIdFor, type HouseholdLink } from "@/lib/household";
 import { normalizeEmail, type LifecycleStatus } from "@/lib/validation";
 
@@ -256,3 +258,43 @@ export function messageProgress(
   const emailed = all.filter((r) => r.emailed_at).length;
   return { recipients: all.length, emailed, pending: all.length - emailed };
 }
+
+// ---- input schemas ----
+//
+// Here rather than in `validation.ts`, which this module imports from: a
+// schema there built from `clubMessageGroups` would need this module loaded
+// first, and the two would import each other. Shared by the screen's server
+// functions and the manager agent API, so both refuse the same things.
+
+/** A subject goes into the email's subject line, so it is one line. */
+const subjectLine = z
+  .string()
+  .trim()
+  .min(1, "Give the message a subject.")
+  .max(200)
+  .regex(/^[^\r\n]*$/, "The subject has to fit on one line.");
+
+/** What the manager wrote. */
+export const clubMessageDraftSchema = z.object({
+  kind: z.enum(clubMessageKinds),
+  subject: subjectLine,
+  body: z.string().trim().min(1, "Write the message.").max(20000),
+});
+
+/** Who it goes to. At least one group or one lead. */
+export const clubMessageAudienceSchema = z.object({
+  groups: z.array(z.enum(clubMessageGroups)).max(clubMessageGroups.length),
+  lead_ids: z.array(z.string().uuid()).max(5000),
+});
+
+export const sendClubMessageSchema = clubMessageDraftSchema
+  .merge(clubMessageAudienceSchema)
+  .extend({ message_id: z.string().uuid() })
+  .refine((d) => d.groups.length > 0 || d.lead_ids.length > 0, {
+    message: "Tick at least one group or one lead.",
+    path: ["groups"],
+  });
+
+export const sendClubMessageTestSchema = clubMessageDraftSchema.extend({
+  client_submission_id: z.string().uuid(),
+});
