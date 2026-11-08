@@ -22,6 +22,7 @@ import {
   Check,
   ChevronLeft,
   ExternalLink,
+  ListTree,
   Menu,
   RefreshCw,
   Search,
@@ -226,6 +227,25 @@ function KbNavList({
             {section.title}
           </p>
           <ul className="space-y-0.5">
+            {/* The syllabus section opens with the view across its belt pages:
+                everything up to a belt, topic by topic. */}
+            {section.kind === "syllabus" && (
+              <li>
+                <Link
+                  to="/kb/syllabus"
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
+                    location.pathname === "/kb/syllabus"
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                  )}
+                  aria-current={location.pathname === "/kb/syllabus" ? "page" : undefined}
+                >
+                  <ListTree className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  By topic, up to any belt
+                </Link>
+              </li>
+            )}
             {section.entries.map((entry) => {
               const active = location.pathname === `/kb/${entry.slug}`;
               // A link entry leaves the knowledge base for the marketing site,

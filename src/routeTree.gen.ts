@@ -41,6 +41,7 @@ import { Route as EmailSettingsIndexRouteImport } from './routes/email-settings/
 import { Route as EmailSettingsTokenRouteImport } from './routes/email-settings/$token'
 import { Route as KbIndexRouteImport } from './routes/kb/index'
 import { Route as KbSlugRouteImport } from './routes/kb/$slug'
+import { Route as KbSyllabusRouteImport } from './routes/kb/syllabus'
 import { Route as DotlovableOauthConsentRouteImport } from './routes/[.]lovable.oauth.consent'
 import { Route as AuthenticatedAccountUserIdRouteImport } from './routes/_authenticated/account_.$userId'
 import { Route as AuthenticatedManagerIndexRouteImport } from './routes/_authenticated/manager.index'
@@ -232,6 +233,11 @@ const KbIndexRoute = KbIndexRouteImport.update({
 const KbSlugRoute = KbSlugRouteImport.update({
   id: '/$slug',
   path: '/$slug',
+  getParentRoute: () => KbRouteRoute,
+} as any)
+const KbSyllabusRoute = KbSyllabusRouteImport.update({
+  id: '/syllabus',
+  path: '/syllabus',
   getParentRoute: () => KbRouteRoute,
 } as any)
 const DotlovableOauthConsentRoute = DotlovableOauthConsentRouteImport.update({
@@ -441,6 +447,7 @@ export interface FileRoutesByFullPath {
   '/blog/$slug': typeof BlogSlugRoute
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
+  '/kb/syllabus': typeof KbSyllabusRoute
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
@@ -504,6 +511,7 @@ export interface FileRoutesByTo {
   '/blog/$slug': typeof BlogSlugRoute
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
+  '/kb/syllabus': typeof KbSyllabusRoute
   '/blog': typeof BlogIndexRoute
   '/email-settings': typeof EmailSettingsIndexRoute
   '/kb': typeof KbIndexRoute
@@ -570,6 +578,7 @@ export interface FileRoutesById {
   '/blog/$slug': typeof BlogSlugRoute
   '/email-settings/$token': typeof EmailSettingsTokenRoute
   '/kb/$slug': typeof KbSlugRoute
+  '/kb/syllabus': typeof KbSyllabusRoute
   '/blog/': typeof BlogIndexRoute
   '/email-settings/': typeof EmailSettingsIndexRoute
   '/kb/': typeof KbIndexRoute
@@ -636,6 +645,7 @@ export interface FileRouteTypes {
     | '/blog/$slug'
     | '/email-settings/$token'
     | '/kb/$slug'
+    | '/kb/syllabus'
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
@@ -699,6 +709,7 @@ export interface FileRouteTypes {
     | '/blog/$slug'
     | '/email-settings/$token'
     | '/kb/$slug'
+    | '/kb/syllabus'
     | '/blog'
     | '/email-settings'
     | '/kb'
@@ -764,6 +775,7 @@ export interface FileRouteTypes {
     | '/blog/$slug'
     | '/email-settings/$token'
     | '/kb/$slug'
+    | '/kb/syllabus'
     | '/blog/'
     | '/email-settings/'
     | '/kb/'
@@ -1064,6 +1076,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KbSlugRouteImport
       parentRoute: typeof KbRouteRoute
     }
+    '/kb/syllabus': {
+      id: '/kb/syllabus'
+      path: '/syllabus'
+      fullPath: '/kb/syllabus'
+      preLoaderRoute: typeof KbSyllabusRouteImport
+      parentRoute: typeof KbRouteRoute
+    }
     '/.lovable/oauth/consent': {
       id: '/.lovable/oauth/consent'
       path: '/.lovable/oauth/consent'
@@ -1353,11 +1372,13 @@ const AuthenticatedRouteRouteWithChildren =
 
 interface KbRouteRouteChildren {
   KbSlugRoute: typeof KbSlugRoute
+  KbSyllabusRoute: typeof KbSyllabusRoute
   KbIndexRoute: typeof KbIndexRoute
 }
 
 const KbRouteRouteChildren: KbRouteRouteChildren = {
   KbSlugRoute: KbSlugRoute,
+  KbSyllabusRoute: KbSyllabusRoute,
   KbIndexRoute: KbIndexRoute,
 }
 

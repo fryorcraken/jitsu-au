@@ -12,7 +12,17 @@
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
-import { Lock, MessageSquare, Check, Trash2, Pencil, CornerDownRight, Link2 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import {
+  Lock,
+  MessageSquare,
+  Check,
+  Trash2,
+  Pencil,
+  CornerDownRight,
+  Link2,
+  ListTree,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +83,12 @@ export type NewAnnotation = {
  */
 type Props = {
   article: ReaderArticle;
+  /**
+   * On a belt page, where a heading's "this topic for every belt up to this
+   * one" link goes: null for a heading that is not a syllabus topic. Absent on
+   * every other article.
+   */
+  topicLink?: (heading: KbHeading) => { topic: string; upTo: string; label: string } | null;
   annotations: ReaderAnnotation[];
   viewer: ReaderViewer;
   busy?: boolean;
@@ -84,6 +100,7 @@ type Props = {
 
 export function KbArticleReader({
   article,
+  topicLink,
   annotations,
   viewer,
   busy,
@@ -197,6 +214,7 @@ export function KbArticleReader({
                   </button>
                 )}
                 {heading && <SectionLink heading={heading} />}
+                {heading && topicLink && <TopicAcrossBelts link={topicLink(heading)} />}
               </div>
             </div>
           );
@@ -373,6 +391,30 @@ function SectionLink({ heading }: { heading: KbHeading }) {
       {copied ? <Check className="h-3 w-3" /> : <Link2 className="h-3 w-3" />}
       {copied ? "Link copied" : "Link to this section"}
     </a>
+  );
+}
+
+/**
+ * Under a topic heading on a belt page: the same topic for every belt up to
+ * this one, which is what somebody preparing for this grading wants next. A
+ * router link, so it costs no reload, and always visible (unlike "Link to this
+ * section"): it is a way on, not a tool.
+ */
+function TopicAcrossBelts({
+  link,
+}: {
+  link: { topic: string; upTo: string; label: string } | null;
+}) {
+  if (!link) return null;
+  return (
+    <Link
+      to="/kb/syllabus"
+      search={{ up_to: link.upTo, topic: link.topic }}
+      className="mt-1 flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+    >
+      <ListTree className="h-3 w-3" aria-hidden="true" />
+      {link.label}
+    </Link>
   );
 }
 

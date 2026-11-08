@@ -4377,6 +4377,19 @@ export const getSyllabusSchema = z
 export type GetSyllabusInput = z.infer<typeof getSyllabusSchema>;
 
 /**
+ * The member's `/kb/syllabus?up_to=green&topic=breakfalling`. Lenient on
+ * purpose: this arrives from a link somebody pasted into a group chat, so a
+ * malformed value is dropped (the page then shows everything) rather than
+ * failing the route, and a well-formed one that names nothing is reported on
+ * the page by `syllabusView`.
+ */
+export const syllabusSearchSchema = z.object({
+  up_to: z.string().trim().max(50).optional().catch(undefined),
+  topic: z.string().trim().max(100).optional().catch(undefined),
+});
+export type SyllabusSearch = z.infer<typeof syllabusSearchSchema>;
+
+/**
  * Write an annotation.
  *
  * `article_version` is the version the reader had on screen. The server stores
