@@ -1328,6 +1328,17 @@ scripts/agent.sh save_syllabus_topic '{"slug":"breakfalling","title":"Breakfalli
 scripts/agent.sh save_syllabus_topic '{"slug":"weapons","title":"Weapons","parent":"techniques","expect_new":true}'
 ```
 
+To change the ORDER, send every moved topic in one call, which republishes each
+belt page once (one `save_syllabus_topic` per topic republishes every page each
+time). Renumbering a sibling group in tens is the simple way:
+
+```bash
+scripts/agent.sh reorder_syllabus_topics '{"topics":[{"slug":"drills","position":45},{"slug":"concepts","position":90}]}'
+```
+
+A page that only changed order keeps members' reading progress: they are not
+told it was updated.
+
 Two levels only: a topic, and sub-topics under it. A topic's `slug` is its
 heading's anchor on every belt page (`/kb/green-belt#breakfalling`), fixed once
 made. Renaming or moving a topic republishes every belt page it is on.

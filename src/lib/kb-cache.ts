@@ -127,7 +127,6 @@ export const syllabusCacheSchema = z.object({
     }),
   ),
   entries: z.array(z.object({ belt: z.string(), topic: z.string(), body_md: z.string() })),
-  viewer: z.object({ signed_in: z.boolean(), is_manager: z.boolean() }),
 });
 
 /**

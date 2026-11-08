@@ -407,7 +407,7 @@ locked | already_verified` (the record has moved on, checked again at the send);
   `sections[].pinned` says which anchors were set that way.
 - `list_belts` / `save_belt` / `delete_belt` / `list_syllabus_topics` /
   `save_syllabus_topic` / `delete_syllabus_topic` / `get_syllabus` /
-  `save_syllabus_entries` (`"36"`) — the syllabus, the agent's equivalent of
+  `save_syllabus_entries` (`"36"`), `reorder_syllabus_topics` (`"38"`) — the syllabus, the agent's equivalent of
   `/manager/syllabus` and of the member's `/kb/syllabus`. All of them go
   through `src/lib/syllabus-admin.ts`, which those screens call too, so there
   is no query in the handlers. The product rules are `docs/syllabus.md`; the
@@ -930,7 +930,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"37"`.
+test so the bump is a deliberate edit, and the current value is `"38"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

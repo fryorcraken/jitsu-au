@@ -789,9 +789,9 @@ describe("saveKbArticle and the syllabus", () => {
     });
     await expect(
       saveKbArticle(db, { slug: "yellow-belt", section: "start-here" }, "u1"),
-    ).rejects.toThrow(/stays in the syllabus section/);
+    ).rejects.toThrow(/stays in the Syllabus section/);
     await expect(saveKbArticle(db, { slug: "yellow-belt", section: "" }, "u1")).rejects.toThrow(
-      /stays in the syllabus section/,
+      /stays in the Syllabus section/,
     );
     expect(writes(calls)).toHaveLength(0);
   });
@@ -799,7 +799,7 @@ describe("saveKbArticle and the syllabus", () => {
   it("refuses reordering a belt page, which follows the belt order", async () => {
     const { db } = harness({ article: BELT_PAGE });
     await expect(saveKbArticle(db, { slug: "yellow-belt", position: 5 }, "u1")).rejects.toThrow(
-      /ordered by belt/,
+      /in belt order/,
     );
   });
 
@@ -827,7 +827,7 @@ describe("saveKbArticle and the syllabus", () => {
     const { db } = harness({ article: null });
     await expect(
       saveKbArticle(db, { slug: "syllabus", title: "Syllabus", body_md: "Text" }, "u1"),
-    ).rejects.toThrow(/syllabus by topic/);
+    ).rejects.toThrow(/read the syllabus on, topic by topic/);
   });
 });
 

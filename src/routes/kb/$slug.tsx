@@ -123,6 +123,7 @@ function ArticlePage() {
             topic: heading.id,
             upTo: syllabus.belt,
             label: `${heading.text}, every belt up to ${syllabus.belt_name}`,
+            short: `Every belt up to ${syllabus.belt_name}`,
           }
         : null;
   }, [syllabus]);
