@@ -850,9 +850,7 @@ function BeltRow({
               disabled={busy}
               onClick={() => onVisibility(belt.visibility === "managers" ? "members" : "managers")}
             >
-              {belt.visibility === "managers"
-                ? "Open the page to members"
-                : "Make it managers only"}
+              {belt.visibility === "managers" ? "Open to members" : "Make it managers only"}
             </Button>
           ) : (
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onWrite}>
