@@ -306,6 +306,28 @@ describe("reorderSyllabusTopics", () => {
     });
   });
 
+  // Tied siblings read in whichever order the tie falls, which can change
+  // between saves and publish a page that moved for no reason.
+  it("refuses two siblings on one number, and writes nothing", async () => {
+    const tables = club();
+    await expect(
+      reorderSyllabusTopics(memoryDb(tables), { topics: [{ slug: "uke", position: 30 }] }, null),
+    ).rejects.toThrow(/"techniques" and "uke" would share position 30/);
+    expect(tables.syllabus_topics.find((t) => t.slug === "uke")?.position).toBe(40);
+    expect(tables.kb_article_versions).toHaveLength(1);
+  });
+
+  it("allows the same number under different topics", async () => {
+    const tables = club();
+    // Uke is 40 at the top level; Throws, under Techniques, can be 40 too.
+    const result = await reorderSyllabusTopics(
+      memoryDb(tables),
+      { topics: [{ slug: "throws", position: 40 }] },
+      null,
+    );
+    expect(result.moved).toBe(1);
+  });
+
   // A reorder changes no word anybody read, so it must not tell them the page
   // was updated: their read moves to the new version with it.
   it("carries readers' progress to the reordered page", async () => {

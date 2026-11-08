@@ -1160,6 +1160,10 @@ function KnowledgeBaseManager() {
     setDragging({ id, label });
   }
 
+  /** Whether a group in the list is the section that holds the belt pages. */
+  const isSyllabusSection = (groupSlug: string) =>
+    sections.find((row) => row.slug === groupSlug)?.kind === "syllabus";
+
   /**
    * Carry an entry into the section it is currently over, so the list shows
    * where it would land.
@@ -1168,9 +1172,6 @@ function KnowledgeBaseManager() {
    * manager cannot see whether they are about to file the article into "Belts"
    * or the section under it.
    */
-  /** Whether a group in the list is the section that holds the belt pages. */
-  const isSyllabusSection = (groupSlug: string) =>
-    sections.find((row) => row.slug === groupSlug)?.kind === "syllabus";
 
   function onDragOver(event: DragOverEvent) {
     const { active, over } = event;

@@ -5,6 +5,7 @@ import {
   editorCells,
   moveTopic,
   positionChanges,
+  withPositions,
 } from "./syllabus-editor";
 import { topicTree, type SyllabusData } from "./syllabus";
 
@@ -129,6 +130,18 @@ describe("moveTopic and positionChanges", () => {
       { slug: "b", position: 30 },
     ]);
     expect(positionChanges(stored, tree)).toEqual([]);
+  });
+
+  // A move saved, then undone before the reload came back: compared with the
+  // positions from before the save, the undo would look like no change.
+  it("sees an undo of a save still being reloaded", () => {
+    const up = moveTopic(tree, "c", "up")!;
+    const saved = positionChanges(stored, up);
+    expect(positionChanges(stored, tree)).toEqual([]);
+    expect(positionChanges(withPositions(stored, saved), tree)).toEqual([
+      { slug: "b", position: 20 },
+      { slug: "c", position: 30 },
+    ]);
   });
 
   it("renumbers a group whose numbers had drifted", () => {
