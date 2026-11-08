@@ -13,9 +13,9 @@
 //
 // `noindex` like every page under /kb, and behind the same sign-in gate.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import { ArrowUp, Sun } from "lucide-react";
+import { Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -24,13 +24,7 @@ import { LoadFailure } from "@/components/site/LoadFailure";
 import { StaleNotice } from "@/components/site/StaleNotice";
 import { useSyllabus } from "@/hooks/useSyllabus";
 import { kbMarkdownComponents, kbRemarkPlugins } from "@/lib/kb-markdown";
-import {
-  beltPageTitle,
-  syllabusView,
-  type SyllabusBelt,
-  type ViewBeltEntry,
-  type ViewTopic,
-} from "@/lib/syllabus";
+import { beltPageTitle, syllabusView, type ViewBeltEntry, type ViewTopic } from "@/lib/syllabus";
 import { syllabusSearchSchema } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +38,6 @@ export const Route = createFileRoute("/kb/syllabus")({
 
 /** The id a topic's heading gets on this page, for the jump list. */
 const topicAnchor = (slug: string) => `topic-${slug}`;
-const JUMP_LIST_ID = "syllabus-topics";
 
 function SyllabusPage() {
   const search = Route.useSearch();
@@ -63,10 +56,9 @@ function SyllabusPage() {
 
   const header = (
     <header>
-      <h1 className="text-3xl font-bold md:text-4xl">Syllabus by topic</h1>
-      <p className="mt-2 text-muted-foreground">
-        Everything up to the belt you pick, one topic at a time. Each belt&apos;s own page has the
-        same text, belt by belt.
+      <h1 className="text-2xl font-bold sm:text-3xl md:text-4xl">Syllabus by topic</h1>
+      <p className="mt-1 text-sm text-muted-foreground sm:mt-2 sm:text-base">
+        Everything up to the belt you pick, one topic at a time.
       </p>
     </header>
   );
@@ -109,35 +101,41 @@ function SyllabusPage() {
   const showingAll = !view.topic;
 
   return (
-    <section className="mx-auto max-w-3xl space-y-6">
+    <section className="mx-auto max-w-3xl space-y-4">
       {header}
 
       {restoredAt && <StaleNotice what="syllabus" savedAt={restoredAt} onRetry={refetch} />}
 
-      <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="syllabus-up-to">Up to</Label>
+      {/* Both pickers on one row even on a phone: they are the page's only
+          controls, and stacked they pushed the syllabus itself below the fold. */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label htmlFor="syllabus-up-to" className="text-xs text-muted-foreground">
+            Up to
+          </Label>
           <select
             id="syllabus-up-to"
             value={view.upTo.slug}
             onChange={(e) => choose({ up_to: e.target.value })}
-            className="h-11 w-full rounded-md border bg-background px-3 text-base"
+            className="h-11 w-full rounded-md border bg-background px-2 text-base"
           >
             {view.choices.map((belt) => (
               <option key={belt.slug} value={belt.slug}>
-                {beltPageTitle(belt)}
+                {belt.name}
                 {belt.visibility === "managers" ? " (draft)" : ""}
               </option>
             ))}
           </select>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="syllabus-topic">Topic</Label>
+        <div className="space-y-1">
+          <Label htmlFor="syllabus-topic" className="text-xs text-muted-foreground">
+            Topic
+          </Label>
           <select
             id="syllabus-topic"
             value={view.topic?.slug ?? ""}
             onChange={(e) => choose({ topic: e.target.value || undefined })}
-            className="h-11 w-full rounded-md border bg-background px-3 text-base"
+            className="h-11 w-full rounded-md border bg-background px-2 text-base"
           >
             <option value="">All topics</option>
             {view.allTopics.map((root) =>
@@ -158,11 +156,9 @@ function SyllabusPage() {
             )}
           </select>
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
-          <BeltStrip belts={view.belts} />
-          <KeepScreenOn />
-        </div>
       </div>
+
+      <KeepScreenOn />
 
       {view.unknownUpTo && (
         <p role="status" className="rounded-lg border border-dashed p-3 text-sm">
@@ -177,27 +173,7 @@ function SyllabusPage() {
         </p>
       )}
 
-      {showingAll && view.sections.length > 1 && (
-        <nav
-          id={JUMP_LIST_ID}
-          aria-label="Jump to a topic"
-          className="scroll-mt-24 rounded-lg border p-4"
-        >
-          <p className="text-sm font-semibold">Jump to</p>
-          <ul className="mt-2 flex flex-wrap gap-2">
-            {view.sections.map((section) => (
-              <li key={section.slug}>
-                <a
-                  href={`#${topicAnchor(section.slug)}`}
-                  className="inline-flex min-h-9 items-center rounded-full border px-3 text-sm hover:bg-muted"
-                >
-                  {section.title}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      )}
+      {showingAll && view.sections.length > 1 && <TopicBar sections={view.sections} />}
 
       {view.sections.length === 0 ? (
         <p className="rounded-lg border p-4 text-sm text-muted-foreground">
@@ -206,7 +182,7 @@ function SyllabusPage() {
             : `Nothing has been written up to ${beltPageTitle(view.upTo)} yet.`}
         </p>
       ) : (
-        <div className="space-y-10">
+        <div className="space-y-8 pt-2">
           {view.topicParent && (
             <p className="text-sm text-muted-foreground">
               Part of{" "}
@@ -220,7 +196,7 @@ function SyllabusPage() {
             </p>
           )}
           {view.sections.map((section) => (
-            <TopicSection key={section.slug} section={section} showBackLink={showingAll} />
+            <TopicSection key={section.slug} section={section} />
           ))}
         </div>
       )}
@@ -228,16 +204,154 @@ function SyllabusPage() {
   );
 }
 
+/**
+ * The topics, as a row that stays under the top bar while the page scrolls,
+ * and marks the topic being read.
+ *
+ * It replaced a "Jump to" card at the top and a "Back to the topics" link after
+ * every topic. On a phone that card was the third box before any syllabus,
+ * and once scrolled past it there was no telling which topic you were in, which
+ * is exactly the moment an instructor reading down the page while testing
+ * somebody needs it. The row scrolls sideways when the topics do not fit, and
+ * keeps the current one in view.
+ */
+function TopicBar({ sections }: { sections: ViewTopic[] }) {
+  const { active, choose } = useActiveTopic(sections.map((s) => s.slug));
+  const listRef = useRef<HTMLUListElement | null>(null);
+
+  useEffect(() => {
+    const list = listRef.current;
+    const chip = active ? list?.querySelector<HTMLElement>(`[data-topic="${active}"]`) : null;
+    if (!list || !chip) return;
+    // Scroll the ROW, never the page: `scrollIntoView` would also move the
+    // page vertically, fighting the reader's own scroll. `scrollLeft` rather
+    // than `scrollTo`, which older phones lack; the row's `scroll-smooth`
+    // animates it where the browser can.
+    list.scrollLeft = chip.offsetLeft - list.clientWidth / 2 + chip.offsetWidth / 2;
+  }, [active]);
+
+  return (
+    <nav
+      aria-label="Topics"
+      className="sticky top-16 z-30 -mx-4 border-b bg-background/95 px-4 py-2 backdrop-blur lg:mx-0 lg:px-0"
+    >
+      <ul
+        ref={listRef}
+        className="flex gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {sections.map((section) => {
+          const current = section.slug === active;
+          return (
+            <li key={section.slug} className="shrink-0">
+              <a
+                href={`#${topicAnchor(section.slug)}`}
+                data-topic={section.slug}
+                aria-current={current ? "true" : undefined}
+                onClick={() => choose(section.slug)}
+                className={cn(
+                  "inline-flex min-h-10 items-center whitespace-nowrap rounded-full border px-3.5 text-sm transition-colors",
+                  current ? "border-foreground bg-foreground text-background" : "hover:bg-muted",
+                )}
+              >
+                {section.title}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+/** How far down the screen a heading counts as reached: the top bar (4rem) and the topic row. */
+const READ_LINE = 140;
+
+/**
+ * The topic being read: the one whose heading was last scrolled past the top
+ * bar and the topic row, or the first before any has been. Measured on scroll,
+ * throttled to a frame; there are only a handful of headings.
+ *
+ * Two cases where "last heading past the line" is wrong, both near the end of
+ * the page, where the last topics are too short for their headings ever to be
+ * scrolled up that far:
+ *
+ * - A topic TAPPED in the row stays marked while the page settles on it, until
+ *   the reader scrolls for themselves. Otherwise tapping "Scenarios" at the
+ *   bottom would mark "Uke", the last heading that did reach the line.
+ * - Scrolled to the very bottom by hand, the first heading still below the
+ *   line is the one being read, not the one above it.
+ */
+function useActiveTopic(slugs: string[]): {
+  active: string | null;
+  choose: (slug: string) => void;
+} {
+  const [active, setActive] = useState<string | null>(slugs[0] ?? null);
+  const chosen = useRef<string | null>(null);
+  const key = slugs.join(" ");
+
+  useEffect(() => {
+    let frame = 0;
+    const top = (slug: string) =>
+      document.getElementById(topicAnchor(slug))?.getBoundingClientRect().top ?? Infinity;
+    const measure = () => {
+      frame = 0;
+      const pick = chosen.current;
+      if (pick && top(pick) >= 0 && top(pick) < window.innerHeight) {
+        setActive(pick);
+        return;
+      }
+      let current = slugs[0] ?? null;
+      for (const slug of slugs) if (top(slug) <= READ_LINE) current = slug;
+      const atBottom =
+        window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      if (atBottom) {
+        const below = slugs.find((slug) => top(slug) > READ_LINE && top(slug) < window.innerHeight);
+        if (below) current = below;
+      }
+      setActive(current);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    // The reader taking over: from here on, where the page is decides.
+    const release = () => {
+      chosen.current = null;
+    };
+    measure();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("wheel", release, { passive: true });
+    window.addEventListener("touchstart", release, { passive: true });
+    window.addEventListener("keydown", release);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("wheel", release);
+      window.removeEventListener("touchstart", release);
+      window.removeEventListener("keydown", release);
+      if (frame) cancelAnimationFrame(frame);
+    };
+    // `key` stands for `slugs`, which is a new array on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const choose = useCallback((slug: string) => {
+    chosen.current = slug;
+    setActive(slug);
+  }, []);
+
+  return { active, choose };
+}
+
 /** One topic: its belts in order, then its sub-topics. */
-function TopicSection({ section, showBackLink }: { section: ViewTopic; showBackLink: boolean }) {
+function TopicSection({ section }: { section: ViewTopic }) {
   const Heading = section.depth === 2 ? "h2" : "h3";
   return (
-    <section aria-labelledby={topicAnchor(section.slug)} className="space-y-4">
+    <section aria-labelledby={topicAnchor(section.slug)} className="space-y-3">
       <Heading
         id={topicAnchor(section.slug)}
+        // Clears the top bar and the sticky topic row when jumped to.
         className={cn(
-          "scroll-mt-24 font-bold tracking-tight",
-          section.depth === 2 ? "border-b pb-2 text-2xl" : "text-xl",
+          "scroll-mt-32 font-bold tracking-tight",
+          section.depth === 2 ? "border-b pb-1.5 text-xl sm:text-2xl" : "pt-1 text-lg",
         )}
       >
         {section.title}
@@ -246,43 +360,49 @@ function TopicSection({ section, showBackLink }: { section: ViewTopic; showBackL
         <BeltBlock key={entry.belt.slug} entry={entry} topic={section.slug} />
       ))}
       {section.children.map((child) => (
-        <TopicSection key={child.slug} section={child} showBackLink={false} />
+        <TopicSection key={child.slug} section={child} />
       ))}
-      {showBackLink && (
-        <a
-          href={`#${JUMP_LIST_ID}`}
-          className="inline-flex min-h-9 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowUp className="h-4 w-4" aria-hidden="true" />
-          Back to the topics
-        </a>
-      )}
     </section>
   );
 }
 
-/** One belt's text under one topic. */
+/**
+ * One belt's text under one topic: a strip in the belt's colour down the left,
+ * its name, and the text. A strip rather than a boxed card, because on a phone
+ * a card per belt per topic was mostly border and padding around a two-line
+ * list. The colour is decoration only; the name is always there.
+ */
 function BeltBlock({ entry, topic }: { entry: ViewBeltEntry; topic: string }) {
   const { belt } = entry;
   const components = useMemo(() => beltComponents(belt.page_slug), [belt.page_slug]);
   return (
-    <article className="rounded-lg border p-4">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <BeltSwatch belt={belt} />
-        <h4 className="font-semibold">{beltPageTitle(belt)}</h4>
+    <article
+      className="border-l-4 pl-3"
+      style={{ borderLeftColor: belt.colour }}
+      aria-label={beltPageTitle(belt)}
+    >
+      <div className="flex items-baseline gap-2">
+        <h4 className="font-semibold">
+          {belt.name}
+          {belt.grade && (
+            <span className="ml-1.5 text-sm font-normal text-muted-foreground">{belt.grade}</span>
+          )}
+        </h4>
         {belt.visibility === "managers" && <Badge variant="secondary">Draft</Badge>}
         {belt.page_slug && (
           <Link
             to="/kb/$slug"
             params={{ slug: belt.page_slug }}
             hash={topic}
-            className="ml-auto text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            className="ml-auto inline-flex min-h-8 items-center text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
           >
-            On the belt page
+            Belt page
           </Link>
         )}
       </div>
-      <div className="text-sm">
+      {/* The knowledge base's own markdown, at reading size, with the space
+          after the last list or paragraph taken off so belts sit close. */}
+      <div className="mt-1 text-base [&>*:last-child]:mb-0 [&_ul]:mb-2 [&_ul]:ml-5 [&_ul]:space-y-1">
         <ReactMarkdown components={components} remarkPlugins={kbRemarkPlugins}>
           {entry.body_md}
         </ReactMarkdown>
@@ -311,35 +431,6 @@ function beltComponents(pageSlug: string | null): Components {
       </Anchor>
     ),
   };
-}
-
-/**
- * The belt's colour, as a swatch. Decoration only: the name always sits beside
- * it, so nothing depends on telling two colours apart.
- */
-function BeltSwatch({ belt }: { belt: Pick<SyllabusBelt, "colour"> }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-block h-3 w-6 shrink-0 rounded-sm border border-foreground/30"
-      style={{ backgroundColor: belt.colour }}
-    />
-  );
-}
-
-/** The belts the page covers, as a row of swatches, so the range reads at a glance. */
-function BeltStrip({ belts }: { belts: SyllabusBelt[] }) {
-  return (
-    <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-      <span className="sr-only">Showing </span>
-      {belts.map((belt) => (
-        <span key={belt.slug} className="inline-flex items-center gap-1">
-          <BeltSwatch belt={belt} />
-          <span>{belt.name}</span>
-        </span>
-      ))}
-    </p>
-  );
 }
 
 /**
@@ -388,7 +479,7 @@ function KeepScreenOn() {
 
   if (!supported) return null;
   return (
-    <div className="ml-auto flex items-center gap-2">
+    <div className="-mt-1 flex items-center justify-end gap-2">
       {failed && !on && (
         <span role="status" className="text-xs text-muted-foreground">
           This phone would not keep the screen on.

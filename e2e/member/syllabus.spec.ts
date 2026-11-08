@@ -31,6 +31,22 @@ test("a member reads breakfalling up to orange, and goes from a belt page into i
     await expect(upTo.locator("option", { hasText: "Green" })).toHaveCount(0);
   });
 
+  await step(page, "the topic row follows the reader down the page", async () => {
+    const topics = page.getByRole("navigation", { name: "Topics" });
+    await expect(topics.getByRole("link", { name: "Breakfalling" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await topics.getByRole("link", { name: "Scenarios" }).click();
+    await expect(page.getByRole("heading", { name: "Scenarios", level: 2 })).toBeInViewport();
+    await expect(topics.getByRole("link", { name: "Scenarios" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    // Still on screen after scrolling: it is pinned under the top bar.
+    await expect(topics).toBeInViewport();
+  });
+
   await step(page, "narrowed to one topic, which the address keeps", async () => {
     await page.getByLabel("Topic", { exact: true }).selectOption("breakfalling");
     await expect(page).toHaveURL(/topic=breakfalling/);

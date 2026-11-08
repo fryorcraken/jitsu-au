@@ -69,18 +69,33 @@ describe("/kb/syllabus", () => {
   afterEach(() => {
     mockUseSyllabus.mockReset();
     navigate.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("shows every topic up to the most senior belt by default, skipping empty belts", () => {
+    // jsdom lays nothing out, so every heading reports a top of 0, as if all
+    // had been scrolled past. Put them below the fold, as on a fresh load.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 600,
+    } as DOMRect);
     mockUseSyllabus.mockReturnValue(ready());
     render(<SyllabusPage />);
 
     const breakfalling = screen.getByRole("region", { name: "Breakfalling" });
     expect(within(breakfalling).getByText("Peg leg")).toBeInTheDocument();
     expect(within(breakfalling).getByText("Judo rolls")).toBeInTheDocument();
-    // Orange has nothing on breakfalling, so it is not shown under it.
-    expect(within(breakfalling).queryByText("Orange belt")).not.toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Jump to a topic" })).toBeInTheDocument();
+    // Orange has nothing on breakfalling, so it has no block under it.
+    expect(within(breakfalling).getByRole("article", { name: "Yellow belt" })).toBeInTheDocument();
+    expect(within(breakfalling).queryByRole("article", { name: "Orange belt" })).toBeNull();
+    // The topic row, with the first topic marked as the one being read.
+    const topics = screen.getByRole("navigation", { name: "Topics" });
+    expect(within(topics).getByRole("link", { name: "Breakfalling" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(within(topics).getByRole("link", { name: "Techniques" })).not.toHaveAttribute(
+      "aria-current",
+    );
   });
 
   it("stops at the belt in the address", () => {

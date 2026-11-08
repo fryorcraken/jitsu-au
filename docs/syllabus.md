@@ -101,10 +101,19 @@ The belt pages live in one knowledge base section whose **kind** is
 a phone held in one hand, and for an instructor reading down it while testing
 somebody:
 
-- **One column, scrolling down.** All topics by default, with a "Jump to" list
-  at the top and "Back to the topics" after each one. Within a topic, the belts
-  run junior first, each with its swatch, its name and a link to that spot on
-  its own page.
+- **One column, scrolling down, with the syllabus starting near the top of
+  the screen.** The two pickers share one row (belts by name only, "Green"),
+  and nothing else stands between them and the first topic. On a phone the
+  earlier layout (stacked pickers, a row of belt swatches and a "Jump to" card)
+  put the syllabus itself below the fold.
+- **A topic row pinned under the top bar** while the page scrolls, marking the
+  topic being read and scrolling sideways to keep it in view. It is how an
+  instructor reading down the page knows where they are and jumps ahead, and it
+  replaced the "Jump to" card and the "Back to the topics" links.
+- **Each belt is a strip in its colour down the left**, with its name and grade
+  and a link to that topic on its own page, rather than a boxed card: on a phone
+  a card per belt per topic was mostly border and padding. Text is at reading
+  size (16px). The colour is decoration; the name is always there.
 - **Pick a belt and, optionally, one topic.** Picking a topic with sub-topics
   shows all of them; picking a sub-topic shows it alone and says which topic it
   is part of.
