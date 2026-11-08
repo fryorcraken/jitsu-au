@@ -3175,6 +3175,12 @@ export const managerAgentActions = [
   "undo_check_in",
   "attach_check_in",
   "move_check_in",
+  "list_club_messages",
+  "get_club_message",
+  "list_message_leads",
+  "get_club_message_audience",
+  "send_club_message_test",
+  "send_club_message",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 

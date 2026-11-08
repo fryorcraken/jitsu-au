@@ -505,7 +505,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("35");
+    expect(AGENT_MANIFEST.version).toBe("36");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -1327,6 +1327,26 @@ describe("check-in on the agent API", () => {
     const deleteInvoice = AGENT_MANIFEST.actions.find((a) => a.name === "delete_invoice")!;
     expect(deleteInvoice.summary).toMatch(/move_check_in/);
     expect(deleteInvoice.summary).not.toMatch(/not available through this API/);
+  });
+
+  it("records the club message actions in the changelog", () => {
+    const notes = AGENT_MANIFEST.changes.find((c) => c.version === "36")!.notes.join(" ");
+    for (const a of [
+      "list_club_messages",
+      "get_club_message",
+      "list_message_leads",
+      "get_club_message_audience",
+      "send_club_message_test",
+      "send_club_message",
+    ])
+      expect(notes).toContain(a);
+  });
+
+  it("tells an agent to read the count back before sending a club notice", () => {
+    const send = AGENT_MANIFEST.actions.find((a) => a.name === "send_club_message")!;
+    expect(send.summary).toMatch(/get_club_message_audience/);
+    expect(send.summary).toMatch(/clear yes/);
+    expect(send.summary).toMatch(/must not ask anyone to buy or join/);
   });
 
   it("records the check-in actions in the changelog", () => {

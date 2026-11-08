@@ -287,14 +287,42 @@ export const clubMessageAudienceSchema = z.object({
   lead_ids: z.array(z.string().uuid()).max(5000),
 });
 
-export const sendClubMessageSchema = clubMessageDraftSchema
+const sendClubMessageObject = clubMessageDraftSchema
   .merge(clubMessageAudienceSchema)
-  .extend({ message_id: z.string().uuid() })
-  .refine((d) => d.groups.length > 0 || d.lead_ids.length > 0, {
-    message: "Tick at least one group or one lead.",
-    path: ["groups"],
-  });
+  .extend({ message_id: z.string().uuid() });
+
+const someoneTicked = <T extends { groups: unknown[]; lead_ids: unknown[] }>(d: T) =>
+  d.groups.length > 0 || d.lead_ids.length > 0;
+const someoneTickedMessage = {
+  message: "Tick at least one group or one lead.",
+  path: ["groups"],
+};
+
+export const sendClubMessageSchema = sendClubMessageObject.refine(
+  someoneTicked,
+  someoneTickedMessage,
+);
 
 export const sendClubMessageTestSchema = clubMessageDraftSchema.extend({
   client_submission_id: z.string().uuid(),
 });
+
+// The manager agent API's shapes: the same rules, refusing unknown keys so a
+// misspelt param is an error rather than silently ignored.
+
+export const agentClubMessageIdSchema = z.object({ id: z.string().uuid() }).strict();
+
+export const agentClubMessageAudienceSchema = z
+  .object({
+    groups: clubMessageAudienceSchema.shape.groups.default([]),
+    lead_ids: clubMessageAudienceSchema.shape.lead_ids.default([]),
+  })
+  .strict();
+
+export const agentSendClubMessageSchema = sendClubMessageObject
+  .strict()
+  .refine(someoneTicked, someoneTickedMessage);
+
+export const agentSendClubMessageTestSchema = clubMessageDraftSchema
+  .extend({ client_submission_id: z.string().uuid().optional() })
+  .strict();

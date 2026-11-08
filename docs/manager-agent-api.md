@@ -708,6 +708,21 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   `invite_only`, and an edit changes it like any other detail, on one date or
   that date and every later one.
 
+- `list_club_messages` / `get_club_message` / `list_message_leads` /
+  `get_club_message_audience` / `send_club_message_test` / `send_club_message`
+  (`"36"`) — club notices, the agent's equivalent of `/manager/messages`.
+  Every read and write goes through `src/lib/club-message.server.ts`, the
+  module the screen's server functions (`club-message.functions.ts`) call, so
+  the count an agent reads back is the count the screen shows and a send is
+  the same send. `send_club_message` takes a `message_id` the caller mints,
+  which is what makes a retry safe: the same id finishes the same message (the
+  recipient list is frozen by the first call), a new id is a new message, and
+  the same id with different words is `409 submission_conflict`.
+  `422 no_recipients` when nobody ticked can be emailed, `404 not_found` from
+  `get_club_message`. The manifest tells the agent to read the count back and
+  get a yes first, and that a notice is facts only. Product rules:
+  `docs/club-messages.md`.
+
 - `list_check_in_classes` / `list_attendance` / `get_check_in_preview` /
   `list_uncovered_check_ins` / `check_in` / `undo_check_in` /
   `attach_check_in` / `move_check_in` (`"35"`) — check-in and attendance, the
@@ -891,7 +906,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"35"`.
+test so the bump is a deliberate edit, and the current value is `"36"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

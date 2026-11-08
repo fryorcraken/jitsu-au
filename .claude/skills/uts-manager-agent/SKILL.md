@@ -28,7 +28,9 @@ description: >-
   calendar and who is coming, add a class or event (once or weekly), edit,
   cancel or restore a date, stop a weekly class, or delete one added by
   mistake, or check somebody in to a class, see who was at one, undo a
-  check-in, or change which membership paid for it. Requires the
+  check-in, or change which membership paid for it, or email the club a
+  notice about training (a closure, a time change) and see what was sent.
+  Requires the
   UTS_MANAGER_API_URL and UTS_MANAGER_API_KEY environment variables.
 ---
 
@@ -1835,6 +1837,43 @@ wanted) and `500 refund_failed` (the old membership did not get its session
 back, and the class is uncovered too: `attach_check_in` it to the membership
 wanted, and tell the manager about the missing session).
 
+### Club notices
+
+A club notice is one email a manager writes to the club about training: a
+closure, a time change, a venue move. It is the agent's way into the manager's
+Messages screen (`/manager/messages`), through the same code, so the counts,
+the recipients and the history all agree. Product rules:
+`docs/club-messages.md`.
+
+- **Facts only.** A notice must not ask anyone to buy or join anything (no
+  "sign up now", no discounts). Promotions are not available yet: if the
+  manager wants one, say so rather than sending it as a notice.
+- **It emails people and cannot be undone.** Before `send_club_message`, read
+  back the subject, the groups, how many leads, and the `emails` number from
+  `get_club_message_audience`, and get a clear yes.
+- Members also see it on their Notifications page, and nobody can turn notices
+  off. A family is one email, to the parent.
+
+```bash
+scripts/agent.sh list_message_leads '{}'
+scripts/agent.sh get_club_message_audience '{"groups":["members","visitors","applicants"],"lead_ids":["<registration_id>"]}'
+scripts/agent.sh send_club_message_test '{"kind":"notice","subject":"Dojo closed on 24 December","body":"The dojo is **closed** on 24 December."}'
+scripts/agent.sh send_club_message '{"message_id":"<uuid you mint>","kind":"notice","subject":"Dojo closed on 24 December","body":"The dojo is **closed** on 24 December.","groups":["members","visitors","applicants"],"lead_ids":["<registration_id>"]}'
+scripts/agent.sh list_club_messages '{}'
+```
+
+- **Groups:** `members` (paying for training now), `visitors` (waiver approved,
+  not paying now, lapsed members included), `applicants` (waiver waiting for
+  approval). Leads are picked one by one from `list_message_leads`; the screen
+  ticks those with `preselected: true` (the last 90 days) to start with, so
+  offer the same default and let the manager change it.
+- **Test first** when the manager wants to see it: `send_club_message_test`
+  goes only to the acting manager's own address.
+- **`pending` above zero** means some emails have not gone yet. Call
+  `send_club_message` again with the **same** `message_id` and the same words
+  to send the rest; nobody gets it twice. A new `message_id` is a new message.
+  `409 submission_conflict` means the id was used with different words.
+
 ## Guidance
 
 - Confirm the target invoice with the manager (member name + amount) before an
@@ -1890,7 +1929,7 @@ wanted, and tell the manager about the missing session).
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"35"`), and its
+- The manifest's `version` tells generations apart (currently `"36"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is
