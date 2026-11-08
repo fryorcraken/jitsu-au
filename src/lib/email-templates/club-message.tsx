@@ -32,7 +32,7 @@ interface ClubMessageEmailProps {
  * The body is the manager's markdown, rendered with inline styles, because an
  * email client ignores the Tailwind classes the site's own markdown renderers
  * use. Raw HTML in the markdown is never rendered (react-markdown escapes it by
- * default), and images are shown as their alt text: a manager typing a picture
+ * default, and `skipHtml` drops it rather than printing the tags as text), and images are shown as their alt text: a manager typing a picture
  * link into a notice should not make every member's mail client fetch it.
  */
 export const ClubMessageEmail = ({
@@ -60,7 +60,9 @@ export const ClubMessageEmail = ({
         <Text style={text}>
           Hi {greeting || "there"},{forWhom ? ` this is about ${forWhom}.` : ""}
         </Text>
-        <ReactMarkdown components={markdownComponents}>{body}</ReactMarkdown>
+        <ReactMarkdown components={markdownComponents} skipHtml>
+          {body}
+        </ReactMarkdown>
         <Text style={footer}>
           Questions?{" "}
           <ReplyOrReachUs

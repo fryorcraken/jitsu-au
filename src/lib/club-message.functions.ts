@@ -74,7 +74,7 @@ export const sendClubMessage = createServerFn({ method: "POST" })
       });
     } catch (e) {
       // A refusal with a reason reaches the screen as its own words.
-      if (e instanceof server.ClubMessageError) throw new Error(e.message);
+      if (e instanceof server.ClubMessageError) throw new Error(e.message, { cause: e });
       throw e;
     }
   });

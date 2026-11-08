@@ -20,6 +20,7 @@ import {
   ShoppingBag,
   User,
   Users,
+  Send,
   Wallet,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -72,6 +73,7 @@ const managerNav: NavItem[] = [
   // Then: the highest-frequency manager screen, used at the door every class.
   { to: "/manager/check-in", label: "Check in", icon: ClipboardCheck },
   { to: "/manager/users", label: "Users", icon: Users },
+  { to: "/manager/messages", label: "Messages", icon: Send },
   { to: "/manager/memberships", label: "Memberships", icon: CreditCard },
   { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
   { to: "/manager/items", label: "Items", icon: ShoppingBag },

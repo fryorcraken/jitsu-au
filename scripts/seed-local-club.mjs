@@ -121,6 +121,8 @@ const SERIES = id(51);
 const IMPORT_BATCH = id(71);
 /** The manager's own year of cover, ending inside the 14-day reminder window. */
 const ENDING_INSURANCE = id(81);
+/** A club notice already sent, so the history and the member's copy have one to show. */
+const CLUB_MESSAGE = id(91);
 
 /** Named so the annotation below can be anchored to one of its blocks. */
 const ETIQUETTE_BODY = [
@@ -1029,7 +1031,38 @@ await insert("interest_registrations", [
     phone: "0400 000 022",
     uts_student: false,
     experience: "Four years of BJJ, blue belt.",
+    // Ticked "Keep me posted about club events and offers".
+    promotion_consent: true,
     created_at: at(-6),
+  },
+]);
+
+// One club notice, sent last week to members and their families, so
+// /manager/messages has a history and /messages/<id> has something to open.
+await insert("club_messages", [
+  {
+    id: CLUB_MESSAGE,
+    kind: "notice",
+    subject: "No class on Tuesday 24 December",
+    body: "The dojo is closed on **Tuesday 24 December**. Thursday class runs as usual.\n\nSee you on the mat.",
+    audience: { groups: ["members"], lead_ids: [] },
+    sent_by: users.manager,
+    recipients_written_at: at(-7),
+    created_at: at(-7),
+  },
+]);
+await insert("notifications", [
+  {
+    user_id: users.member,
+    kind: "club_notice",
+    subject_type: "club_message",
+    subject_id: CLUB_MESSAGE,
+    actor_id: users.manager,
+    title: "No class on Tuesday 24 December",
+    body: "The dojo is closed on Tuesday 24 December. Thursday class runs as usual. See you on the mat.",
+    href: `/messages/${CLUB_MESSAGE}`,
+    created_at: at(-7),
+    emailed_at: at(-7),
   },
 ]);
 
@@ -1059,6 +1092,9 @@ const fixture = {
   // as many words; this is that fix.
   paramsByPath: {
     "/account/$userId": { userId: users.dependant },
+    // `$id` is a blog post everywhere else.
+    "/manager/messages/$id": { id: CLUB_MESSAGE },
+    "/messages/$id": { id: CLUB_MESSAGE },
   },
   // The family, for the specs that are about being one. Names rather than only
   // ids, because the flows they cover -- a parent picking a child, a manager

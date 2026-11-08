@@ -162,6 +162,8 @@ describe("signedInPaths, against the real src/routes tree", () => {
       "/manager/kb",
       "/manager/membership-plans",
       "/manager/memberships",
+      "/manager/messages",
+      "/manager/messages/$id",
       "/manager/reconciliation",
       "/manager/settings",
       "/manager/site-banner",
@@ -171,6 +173,7 @@ describe("signedInPaths, against the real src/routes tree", () => {
       "/manager/waivers",
       "/manager/waivers/upload",
       "/membership",
+      "/messages/$id",
       "/notifications",
     ]);
   });
