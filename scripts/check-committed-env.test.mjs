@@ -27,6 +27,7 @@ const PUBLISHABLE_ENV = [
   `VITE_SUPABASE_PUBLISHABLE_KEY="${ANON_KEY}"`,
   'VITE_SUPABASE_URL="https://c--0000-prod.lovable.cloud"',
   'VITE_GOOGLE_OAUTH_CLIENT_ID="626329413356-abc.apps.googleusercontent.com"',
+  'VITE_GOOGLE_PICKER_API_KEY="AIzaSyExampleExampleExampleExampleExampl"',
 ].join("\n");
 
 describe("parseEnv", () => {
@@ -128,7 +129,9 @@ describe("auditEnv", () => {
 
   it("reports the line number so the failure points at the offending row", () => {
     const findings = auditEnv(`${PUBLISHABLE_ENV}\nLOVABLE_API_KEY="anything"`);
-    expect(findings[0].line).toBe(8);
+    // The row after the fixture's own lines, so this moves when a publishable
+    // key is added to it.
+    expect(findings[0].line).toBe(9);
   });
 
   it("passes when nothing is committed", () => {

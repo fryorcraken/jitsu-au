@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { SaveFailure } from "@/components/site/SaveFailure";
+import type { PickedDriveFolder } from "@/lib/google-picker";
 import { ActionFailure } from "@/components/site/ActionFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
@@ -393,6 +394,7 @@ function GoogleDriveCard() {
   const [pickerBusy, setPickerBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
+  const [pickedFolder, setPickedFolder] = useState<PickedDriveFolder | null>(null);
   // Set while Google's dialog is on screen. Everything in that dialog is
   // Google's and it only talks back on a pick or a cancel, so this is the
   // manager's own way out if it refuses the pick or shows its own error.
@@ -495,22 +497,38 @@ function GoogleDriveCard() {
     }
   }
 
+  async function savePickedFolder(folder: PickedDriveFolder) {
+    setFolderBusy(true);
+    setSaveError(null);
+    try {
+      const result = await saveFolderFromPicker({ data: { folderId: folder.id } });
+      setSavedFolderName(result.folderName);
+      setFolderNameInput(result.folderName);
+      setPickedFolder(null);
+      toast.success(`Waivers will save to "${result.folderName}"`);
+    } catch (e) {
+      // Keep the folder, so Try again saves the one they chose. The pick
+      // itself stands: Google has already recorded this site's access to it.
+      setPickedFolder(folder);
+      setSaveError(e instanceof Error ? e.message : "Could not save that folder. Try again.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
   async function onBrowseFolder() {
     if (!picker) return;
     setPickerBusy(true);
     setPickError(null);
+    setSaveError(null);
+    let picked: PickedDriveFolder | null = null;
     try {
       const { pickDriveFolder } = await import("@/lib/google-picker");
-      const picked = await pickDriveFolder({
+      picked = await pickDriveFolder({
         ...picker,
         connectedEmail: email,
         onOpen: (close) => setAbandonPicker(() => close),
       });
-      if (!picked) return;
-      const result = await saveFolderFromPicker({ data: { folderId: picked.id } });
-      setSavedFolderName(result.folderName);
-      setFolderNameInput(result.folderName);
-      toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
       setPickError(
         e instanceof Error
@@ -518,9 +536,13 @@ function GoogleDriveCard() {
           : "Could not open the folder picker. Type the folder name instead.",
       );
     } finally {
-      setPickerBusy(false);
+      // Google's dialog is gone either way, so the way out of it goes too:
+      // left on screen it would offer to cancel a dialog that has closed.
       setAbandonPicker(null);
+      setPickerBusy(false);
     }
+
+    if (picked) await savePickedFolder(picked);
   }
 
   return (
@@ -573,6 +595,7 @@ function GoogleDriveCard() {
                   onChange={(e) => {
                     setFolderNameInput(e.target.value);
                     setSaveError(null);
+                    setPickedFolder(null);
                   }}
                   placeholder={DEFAULT_FOLDER_NAME}
                   className="max-w-xs"
@@ -600,7 +623,9 @@ function GoogleDriveCard() {
                 <SaveFailure
                   what="folder"
                   message={saveError}
-                  onRetry={() => void saveFolder()}
+                  onRetry={() =>
+                    void (pickedFolder ? savePickedFolder(pickedFolder) : saveFolder())
+                  }
                   retrying={folderBusy}
                   // This box is not backed by a draft, so the panel must not
                   // promise the name is kept anywhere but on the screen.

@@ -709,6 +709,60 @@ describe("/account", () => {
       expect(driveCard.queryByRole("button", { name: "Cancel" })).toBeNull();
     });
 
+    it("takes the way out away once Google's window has closed", async () => {
+      // Cancel offers to abandon Google's dialog. Once the pick is back, that
+      // dialog is gone, so a Cancel still on screen would cancel nothing.
+      configurePicker();
+      const { setGoogleDriveFolderFromPicker } = await import("@/lib/google-drive.functions");
+      vi.mocked(setGoogleDriveFolderFromPicker).mockResolvedValue({
+        ok: true,
+        folderId: "folder-1",
+        folderName: "Signed waivers",
+      } as never);
+      mockPickDriveFolder.mockImplementation((opts: { onOpen?: (c: () => void) => void }) => {
+        opts.onOpen?.(() => {});
+        return Promise.resolve({ id: "folder-1", name: "Signed waivers" });
+      });
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull());
+    });
+
+    it("retries the folder they picked, not whatever is in the name box", async () => {
+      // The pick is the part that cannot be redone cheaply: Google has already
+      // recorded this site's access to that folder. A retry that saved the name
+      // box instead would quietly point waivers somewhere else.
+      configurePicker();
+      const { setGoogleDriveFolderFromPicker, setGoogleDriveFolder } =
+        await import("@/lib/google-drive.functions");
+      vi.mocked(setGoogleDriveFolderFromPicker)
+        .mockRejectedValueOnce(new Error("Drive had a bad day"))
+        .mockResolvedValueOnce({
+          ok: true,
+          folderId: "folder-1",
+          folderName: "Signed waivers",
+        } as never);
+      vi.mocked(setGoogleDriveFolder).mockClear();
+      mockPickDriveFolder.mockResolvedValue({ id: "folder-1", name: "Signed waivers" });
+      const user = userEvent.setup();
+
+      const driveCard = await renderConnected();
+      await user.click(driveCard.getByRole("button", { name: "Browse in Drive" }));
+
+      expect(await driveCard.findByRole("alert")).toHaveTextContent(/drive had a bad day/i);
+      await user.click(driveCard.getByRole("button", { name: "Try again" }));
+
+      await waitFor(() => expect(setGoogleDriveFolderFromPicker).toHaveBeenCalledTimes(2));
+      expect(setGoogleDriveFolderFromPicker).toHaveBeenLastCalledWith({
+        data: { folderId: "folder-1" },
+      });
+      // Never the typed-name path, which would resolve a different folder.
+      expect(setGoogleDriveFolder).not.toHaveBeenCalled();
+    });
+
     it("keeps a failed pick on screen, where it can be read and retried", async () => {
       configurePicker();
       mockPickDriveFolder.mockRejectedValue(new Error("Google sign-in did not finish. Try again."));

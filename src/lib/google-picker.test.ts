@@ -18,6 +18,7 @@ import {
   type GooglePickerView,
   type PickerResponse,
   pickDriveFolder,
+  preloadGooglePicker,
   readPickerResponse,
 } from "./google-picker";
 
@@ -287,15 +288,23 @@ describe("pickDriveFolder", () => {
    * flow can run without the network.
    */
   function stubGoogle(
-    opts: { accountEmail?: string | null; popupError?: string; accountCheckFails?: boolean } = {},
+    opts: {
+      accountEmail?: string | null;
+      popupError?: string;
+      accountCheckFails?: boolean;
+      /** False to leave the script tags out, so a real load has to be awaited. */
+      preinsert?: boolean;
+    } = {},
   ) {
-    for (const src of [
-      "https://accounts.google.com/gsi/client",
-      "https://apis.google.com/js/api.js",
-    ]) {
-      const script = document.createElement("script");
-      script.src = src;
-      document.head.appendChild(script);
+    if (opts.preinsert !== false) {
+      for (const src of [
+        "https://accounts.google.com/gsi/client",
+        "https://apis.google.com/js/api.js",
+      ]) {
+        const script = document.createElement("script");
+        script.src = src;
+        document.head.appendChild(script);
+      }
     }
 
     const { picker, built } = fakePicker();
@@ -330,6 +339,39 @@ describe("pickDriveFolder", () => {
 
     return { built, tokenConfig };
   }
+
+  it("waits for a preloaded script instead of racing it", async () => {
+    // The preload inserts the tag; the click that follows must wait for the
+    // download rather than see the tag and assume it is ready. Getting this
+    // wrong made Browse fail on a slow connection claiming the script had not
+    // loaded, which is the symptom this file exists to prevent.
+    const { built } = stubGoogle({ accountEmail: "club@example.com", preinsert: false });
+    const google = window.google;
+    const gapi = window.gapi;
+    delete window.google;
+    delete window.gapi;
+
+    preloadGooglePicker();
+    const pending = pickDriveFolder({
+      clientId: "123456789012-abc.apps.googleusercontent.com",
+      developerKey: "AIza-key",
+    });
+    const settled = vi.fn();
+    void pending.then(settled, settled);
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    expect(built.visible).toBe(false);
+
+    // Google's scripts arrive.
+    window.google = google;
+    window.gapi = gapi;
+    for (const tag of document.head.querySelectorAll("script"))
+      tag.dispatchEvent(new Event("load"));
+
+    await vi.waitFor(() => expect(built.visible).toBe(true));
+    built.respond({ action: "cancel" });
+    await expect(pending).resolves.toBeNull();
+  });
 
   it("hands back the folder the manager picked", async () => {
     const { built } = stubGoogle({ accountEmail: "club@example.com" });

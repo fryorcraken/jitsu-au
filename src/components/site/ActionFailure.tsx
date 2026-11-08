@@ -44,7 +44,7 @@ export function ActionFailure({
         {title}
       </p>
       <p className="mt-1 text-sm text-muted-foreground">{message}</p>
-      <Button className="mt-3" size="sm" variant="outline" onClick={onDismiss}>
+      <Button type="button" className="mt-3" size="sm" variant="outline" onClick={onDismiss}>
         Dismiss
       </Button>
     </div>

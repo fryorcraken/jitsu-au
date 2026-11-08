@@ -89,28 +89,57 @@ const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 // the sentence with a way out.
 const LOAD_FAILED = "Could not load Google's folder picker. Check your connection and try again.";
 
+/**
+ * One in-flight load per script, because this file now asks for them twice:
+ * once when the card mounts, and again on the click.
+ *
+ * Without this, the second call saw the tag the first had inserted, took the
+ * "already here" shortcut and resolved while the download was still running,
+ * so `window.google` was undefined and the browse died claiming the script had
+ * failed. A rejection is dropped from the map so the next press tries again
+ * rather than inheriting a failure for the life of the page.
+ */
+const inFlight = new Map<string, Promise<void>>();
+
+function once(key: string, start: () => Promise<void>): Promise<void> {
+  const running = inFlight.get(key);
+  if (running) return running;
+  const load = start().catch((e: unknown) => {
+    inFlight.delete(key);
+    throw e;
+  });
+  inFlight.set(key, load);
+  return load;
+}
+
 function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => {
-      console.warn(`[google-picker] script did not load: ${src}`);
-      reject(new Error(LOAD_FAILED));
-    };
-    document.head.appendChild(script);
+  return once(src, () => {
+    return new Promise((resolve, reject) => {
+      // A tag we did not insert (one in the document already) fires no event we
+      // can wait for, so it counts as loaded.
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+      const script = document.createElement("script");
+      script.src = src;
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        console.warn(`[google-picker] script did not load: ${src}`);
+        reject(new Error(LOAD_FAILED));
+      };
+      document.head.appendChild(script);
+    });
   });
 }
 
-async function loadPickerLibrary(): Promise<void> {
-  await loadScript(GAPI_SRC);
-  if (!window.gapi) throw new Error(LOAD_FAILED);
-  await new Promise<void>((resolve) => window.gapi!.load("picker", () => resolve()));
+function loadPickerLibrary(): Promise<void> {
+  return once("gapi:picker", async () => {
+    await loadScript(GAPI_SRC);
+    if (!window.gapi) throw new Error(LOAD_FAILED);
+    await new Promise<void>((resolve) => window.gapi!.load("picker", () => resolve()));
+  });
 }
 
 /**
@@ -142,6 +171,10 @@ export function signInErrorMessage(code: string | undefined): string {
     case "access_denied":
       return "Google would not give this site access. Try again and allow it to see the folder you choose.";
     default:
+      // `admin_policy_enforced`, `org_internal` and friends mean nothing to a
+      // manager and everything to whoever debugs it, so the code goes to the
+      // console rather than being thrown away.
+      console.warn(`[google-picker] Google sign-in failed: ${code ?? "no code given"}`);
       return "Google sign-in did not finish. Try again.";
   }
 }
@@ -177,7 +210,11 @@ async function requestAccessToken(clientId: string, loginHint?: string): Promise
       },
       error_callback: (err) => reject(new Error(signInErrorMessage(err?.type))),
     });
-    client.requestAccessToken();
+    // Always the account chooser, never a silent reissue. Picking a folder is
+    // a once-a-year action, so the extra click costs nothing, and without it a
+    // manager whose browser defaults to the wrong Google account gets the same
+    // mismatch message every time they press Browse with no way to change it.
+    client.requestAccessToken({ prompt: "select_account" });
   });
 }
 
