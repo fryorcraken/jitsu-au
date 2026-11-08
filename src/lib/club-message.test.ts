@@ -183,6 +183,12 @@ describe("plainExcerpt", () => {
     );
   });
 
+  it("keeps underscores inside words, even two of them", () => {
+    expect(plainExcerpt("Use club_room and side_door, _not_ the lift")).toBe(
+      "Use club_room and side_door, not the lift",
+    );
+  });
+
   it("cuts long text at a word boundary", () => {
     const out = plainExcerpt("word ".repeat(100), 20);
     expect(out.endsWith("...")).toBe(true);

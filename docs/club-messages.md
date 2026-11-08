@@ -64,8 +64,12 @@ number the confirm repeats.
   still unsent, to the same people.
 - **Up to 150 a request**, ten at a time (the plan announcement's bounds), people
   first, then leads. Anything left is pending: the screen offers "Send the rest
-  now", and the morning summary sends the people's rows under "From the club".
-  Leads have no summary, so a lead still pending needs "Send the rest now".
+  now" (on the screen straight after sending, and on the message's own page in
+  the history, which finishes it by id with the words on record), and the
+  morning summary sends the people's rows under "From the club". Leads have no
+  summary, so a lead still pending needs "Send the rest now".
+- **A send that reaches nobody is refused before anything is recorded**
+  (`no_recipients`), so it never appears in the history.
 - **What the email says.** The subject, a greeting (naming the child for a
   parent), the manager's words rendered from markdown with inline styles, a
   reply line (`ReplyOrReachUs`: replies go to the club's reply-to address), and

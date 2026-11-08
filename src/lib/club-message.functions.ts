@@ -79,6 +79,24 @@ export const sendClubMessage = createServerFn({ method: "POST" })
     }
   });
 
+/** Finish a part-sent message from the history, by its id. Safe to repeat. */
+export const finishClubMessage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    await requireManager(context);
+    const server = await import("@/lib/club-message.server");
+    try {
+      return await server.finishClubMessage(await adminClient(), {
+        messageId: data.id,
+        actorId: context.userId,
+      });
+    } catch (e) {
+      if (e instanceof server.ClubMessageError) throw new Error(e.message, { cause: e });
+      throw e;
+    }
+  });
+
 /** Past messages, newest first, with how far each has got. */
 export const listClubMessages = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

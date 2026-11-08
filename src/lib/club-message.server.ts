@@ -357,7 +357,12 @@ export async function sendClubMessage(
   },
 ): Promise<SendResult> {
   const id = input.messageId.toLowerCase();
-  let message = await readMessage(db, id);
+  const [existing, dir, replyTo] = await Promise.all([
+    readMessage(db, id),
+    loadMessageDirectory(db),
+    clubReplyTo(db),
+  ]);
+  let message = existing;
   if (message) {
     if (
       message.kind !== input.kind ||
@@ -369,6 +374,11 @@ export async function sendClubMessage(
         "That message id was already used for a different message. Start a new message.",
       );
   } else {
+    // Refused before anything is recorded, so a send that reaches nobody
+    // leaves no message in the history.
+    const reach = resolveAudience(dir, { groups: input.groups, leadIds: input.leadIds });
+    if (reach.inboxes.length + reach.leads.length === 0)
+      throw new ClubMessageError("no_recipients", "Nobody you ticked can be emailed right now.");
     const audience: StoredAudience = { groups: [...input.groups], lead_ids: [...input.leadIds] };
     const { error } = await db.from("club_messages").insert({
       id,
@@ -385,7 +395,6 @@ export async function sendClubMessage(
   }
 
   const stored = readStoredAudience(message.audience);
-  const [dir, replyTo] = await Promise.all([loadMessageDirectory(db), clubReplyTo(db)]);
   const { inboxes, leads } = resolveAudience(dir, {
     groups: stored.groups,
     leadIds: stored.lead_ids,
@@ -461,6 +470,30 @@ export async function sendClubMessage(
     sent_at: message.created_at,
     ...(progress.get(id) ?? { recipients: 0, emailed: 0, pending: 0 }),
   };
+}
+
+/**
+ * Finish sending a message already on record, by its id alone: the history's
+ * "Send the rest now", for a send left part-way (the hourly email cap, a
+ * closed laptop). The words and the people are the ones on record, so this
+ * can only ever finish the same message, never change it.
+ */
+export async function finishClubMessage(
+  db: AdminClient,
+  input: { messageId: string; actorId: string | null },
+): Promise<SendResult> {
+  const message = await readMessage(db, input.messageId.toLowerCase());
+  if (!message) throw new ClubMessageError("not_found", "That message does not exist.");
+  const stored = readStoredAudience(message.audience);
+  return sendClubMessage(db, {
+    messageId: message.id,
+    kind: message.kind as ClubMessageKind,
+    subject: message.subject,
+    body: message.body,
+    groups: stored.groups,
+    leadIds: stored.lead_ids,
+    actorId: input.actorId,
+  });
 }
 
 type MessageRow = Database["public"]["Tables"]["club_messages"]["Row"];

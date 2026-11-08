@@ -159,6 +159,8 @@ function Composer({ userId }: { userId: string | null }) {
   const groupList = useMemo(() => [...groups], [groups]);
   const leadList = useMemo(() => [...picked], [picked]);
   const countSeq = useRef(0);
+  // Bumped by the "Count again" button after a failed count.
+  const [recount, setRecount] = useState(0);
   useEffect(() => {
     if (leads === null) return;
     const seq = ++countSeq.current;
@@ -177,7 +179,7 @@ function Composer({ userId }: { userId: string | null }) {
         });
     }, 300);
     return () => clearTimeout(t);
-  }, [fetchCount, groupList, leadList, leads]);
+  }, [fetchCount, groupList, leadList, leads, recount]);
 
   // Changing the words or the people after a send started is a new message.
   const { reset } = submit;
@@ -416,7 +418,14 @@ function Composer({ userId }: { userId: string | null }) {
 
             <div aria-live="polite" className="text-sm">
               {countError ? (
-                <p className="text-destructive">{countError}</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-destructive">
+                    {countError}. Sending is off until we know how many emails it is.
+                  </p>
+                  <Button size="sm" variant="outline" onClick={() => setRecount((n) => n + 1)}>
+                    Count again
+                  </Button>
+                </div>
               ) : count ? (
                 <p>
                   This will send <strong>{count.emails}</strong>{" "}
@@ -482,7 +491,8 @@ function Composer({ userId }: { userId: string | null }) {
                   Sent to {result.emailed} of {result.recipients}. {result.pending} still to go.
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Anything not sent now goes out with tomorrow morning's summary email. Nobody gets
+                  Members still waiting get it with tomorrow morning's summary email. Leads only get
+                  it when you send the rest, here or from the message in the list below. Nobody gets
                   it twice.
                 </p>
                 <Button className="mt-3" onClick={() => void deliver()} disabled={submit.busy}>
