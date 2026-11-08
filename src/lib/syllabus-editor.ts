@@ -141,6 +141,20 @@ export function moveTopic(
 }
 
 /**
+ * The stored topics with a set of position changes applied, for the screen to
+ * compare its next burst of moves against while the reload that would bring
+ * them is still out. Compared with the positions from before the save
+ * instead, a burst that undid it would look like no change and never be sent.
+ */
+export function withPositions(
+  stored: SyllabusTopic[],
+  changes: { slug: string; position: number }[],
+): SyllabusTopic[] {
+  const sent = new Map(changes.map((c) => [c.slug, c.position]));
+  return stored.map((t) => (sent.has(t.slug) ? { ...t, position: sent.get(t.slug)! } : t));
+}
+
+/**
  * The positions that make the stored topics read in `tree`'s order: each
  * sibling group renumbered 10, 20, 30, and only the topics whose number
  * actually changes. Renumbering in tens keeps a gap for the next one added.

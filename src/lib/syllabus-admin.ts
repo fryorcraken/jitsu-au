@@ -316,8 +316,9 @@ export async function republishBeltPages(
   // nothing here is shared between them, and done one after another a topic
   // moved on seven belt pages took about eight seconds: six round trips per
   // page, back to back.
+  const ordered = orderBelts(scope);
   const outcomes = await Promise.allSettled(
-    orderBelts(scope).map(async (belt): Promise<BeltPageResult | null> => {
+    ordered.map(async (belt): Promise<BeltPageResult | null> => {
       let page = pageByBelt.get(belt.id) ?? null;
       let created = false;
       if (!page) {
@@ -354,7 +355,7 @@ export async function republishBeltPages(
     } else {
       const reason = outcome.reason;
       failures.push(
-        `${beltPageTitle(orderBelts(scope)[i])}: ${reason instanceof Error ? reason.message : String(reason)}`,
+        `${beltPageTitle(ordered[i])}: ${reason instanceof Error ? reason.message : String(reason)}`,
       );
     }
   });
@@ -663,10 +664,11 @@ export async function reorderSyllabusTopics(
   actingAs: string | null,
 ): Promise<{ moved: number; pages: BeltPageResult[] }> {
   const slugs = input.topics.map((t) => t.slug);
+  // Every topic, not just the ones named: a few dozen rows, and the only way
+  // to see whether the new numbers collide with a sibling left where it was.
   const { data: rows, error } = await db
     .from("syllabus_topics")
-    .select("id, slug, position")
-    .in("slug", slugs);
+    .select("id, slug, position, parent_id");
   if (error) throw new Error(error.message);
   const bySlug = new Map((rows ?? []).map((r) => [r.slug, r]));
   const unknown = slugs.filter((slug) => !bySlug.has(slug));
@@ -675,6 +677,24 @@ export async function reorderSyllabusTopics(
       `Nothing was moved: there is no topic ${unknown.map((s) => `"${s}"`).join(", ")}.`,
       "invalid",
     );
+  }
+
+  // Two siblings on one number read in whichever order the tie falls, which
+  // can differ between saves: refused, naming them, before anything is written.
+  const wanted = new Map(input.topics.map((t) => [t.slug, t.position]));
+  const seen = new Map<string, string>();
+  for (const row of rows ?? []) {
+    const key = `${row.parent_id ?? ""}/${wanted.get(row.slug) ?? row.position}`;
+    const other = seen.get(key);
+    // A tie already stored between two topics this call does not move is not
+    // this call's to refuse: positionChanges renumbers whole groups anyway.
+    if (other && (wanted.has(row.slug) || wanted.has(other))) {
+      throw new SyllabusError(
+        `Nothing was moved: "${other}" and "${row.slug}" would share position ${wanted.get(row.slug) ?? row.position}. Give each topic its own.`,
+        "invalid",
+      );
+    }
+    seen.set(key, row.slug);
   }
 
   const changes = input.topics.filter((t) => bySlug.get(t.slug)!.position !== t.position);
@@ -688,13 +708,19 @@ export async function reorderSyllabusTopics(
         .eq("id", bySlug.get(t.slug)!.id),
     ),
   );
-  const failed = writes.find((w) => w.error);
-  if (failed?.error) throw new Error(failed.error.message);
-
+  // Republished even when some writes failed: the pages then match what IS
+  // stored, part-moved or not, rather than an order nothing holds any more.
+  const failed = writes.filter((w) => w.error).length;
   const pages = await republishBeltPages(db, "all", {
     changeNote: input.change_note || "Topics reordered",
     actingAs,
   });
+  if (failed) {
+    throw new SyllabusError(
+      `${failed} of ${changes.length} topics could not be moved. The belt pages show the order that is saved now; move them again to finish.`,
+      "not_published",
+    );
+  }
   return { moved: changes.length, pages };
 }
 

@@ -1731,7 +1731,7 @@ export const AGENT_MANIFEST: {
       name: "reorder_syllabus_topics",
       method: "POST",
       summary:
-        "Put several topics in a new order at once: send each moved topic's new position, and every belt page is republished once for the whole call (moving topics one save at a time republishes every page each time). Positions only; titles and parents are changed with save_syllabus_topic. Unknown slugs refuse the whole call. A page that only changed order keeps members' reading progress.",
+        "Put several topics in a new order at once: send each moved topic's new position, and every belt page is republished once for the whole call (moving topics one save at a time republishes every page each time). Positions only; titles and parents are changed with save_syllabus_topic. Unknown slugs, or two siblings left on the same position, refuse the whole call. A page that only changed order keeps members' reading progress.",
       params: [
         {
           name: "topics",

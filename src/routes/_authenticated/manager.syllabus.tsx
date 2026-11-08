@@ -50,6 +50,7 @@ import {
   editorCells,
   moveTopic,
   positionChanges,
+  withPositions,
   type EditorMode,
 } from "@/lib/syllabus-editor";
 import {
@@ -1007,10 +1008,9 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
       await reorder({ data: { topics: changes } });
       if (again.current) {
         // More presses landed while that save was out: save again from the
-        // order now on screen, then reload once at the end.
-        // The target is absolute (renumbered in tens), so sending it against
-        // the not-yet-reloaded positions is safe: the server skips every
-        // topic already where it should be.
+        // order now on screen, then reload once at the end, comparing it
+        // with what was just saved rather than what was there before.
+        stored.current = withPositions(stored.current, changes);
         again.current = false;
         saving.current = false;
         await saveOrder();
@@ -1029,7 +1029,7 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
         key: "order",
         message: errorText(
           e,
-          "The new order could not be saved. The topics are back as they were.",
+          "The new order could not be saved. The list shows the order that is saved now.",
         ),
       });
       await onSaved();

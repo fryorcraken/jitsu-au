@@ -993,7 +993,9 @@ export const listManagerArticles = createServerFn({ method: "GET" }).handler(asy
       db.from("belts").select("id, slug"),
     ]);
   if (error) throw new Error(error.message);
-  if (beltErr) throw new Error(beltErr.message);
+  // Only for the "edit this belt's syllabus" link, so a failure here costs
+  // that link its belt, not the manager the whole list.
+  if (beltErr) console.warn("[kb] could not read belts for the editor:", beltErr.message);
   const beltSlugById = new Map((beltRows ?? []).map((b) => [b.id, b.slug]));
   const articles = (docs ?? []) as KbArticleListRow[];
   // Reported by SLUG, never by id: the slug is what a save takes back, so the
