@@ -1957,18 +1957,25 @@ the recipients and the history all agree. Product rules:
   off. A family is one email, to the parent.
 
 ```bash
+scripts/agent.sh list_message_people '{}'
 scripts/agent.sh list_message_leads '{}'
-scripts/agent.sh get_club_message_audience '{"groups":["members","visitors","applicants"],"lead_ids":["<registration_id>"]}'
+scripts/agent.sh get_club_message_audience '{"groups":["members","visitors","lapsed","applicants"],"lead_ids":["<registration_id>"]}'
 scripts/agent.sh send_club_message_test '{"kind":"notice","subject":"Dojo closed on 24 December","body":"The dojo is **closed** on 24 December."}'
-scripts/agent.sh send_club_message '{"message_id":"<uuid you mint>","kind":"notice","subject":"Dojo closed on 24 December","body":"The dojo is **closed** on 24 December.","groups":["members","visitors","applicants"],"lead_ids":["<registration_id>"]}'
+scripts/agent.sh send_club_message '{"message_id":"<uuid you mint>","kind":"notice","subject":"Dojo closed on 24 December","body":"The dojo is **closed** on 24 December.","groups":["members","visitors","lapsed","applicants"],"lead_ids":["<registration_id>"]}'
 scripts/agent.sh list_club_messages '{}'
 ```
 
 - **Groups:** `members` (paying for training now), `visitors` (waiver approved,
-  not paying now, lapsed members included), `applicants` (waiver waiting for
-  approval). Leads are picked one by one from `list_message_leads`; the screen
-  ticks those with `preselected: true` (the last 90 days) to start with, so
-  offer the same default and let the manager change it.
+  never paid for training, such as a finished trial), `lapsed` (used to pay,
+  and their membership ended) and `applicants` (waiver waiting for approval).
+  Send a whole group in `groups`, or pick people one by one in `person_ids`
+  (user ids from `list_message_people`), the way the screen lets a manager
+  untick somebody.
+- **Leads** are anybody who filled in the interest form or wrote in through the
+  contact form and has no person record, picked one by one from
+  `list_message_leads` (`source` says which form). The screen ticks those with
+  `preselected: true` (the last 90 days) to start with, so offer the same
+  default and let the manager change it.
 - **Test first** when the manager wants to see it: `send_club_message_test`
   goes only to the acting manager's own address.
 - **`pending` above zero** means some emails have not gone yet. Call
@@ -2031,7 +2038,7 @@ scripts/agent.sh list_club_messages '{}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"37"`), and its
+- The manifest's `version` tells generations apart (currently `"38"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

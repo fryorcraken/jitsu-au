@@ -476,27 +476,37 @@ export type Database = {
       }
       club_message_lead_recipients: {
         Row: {
+          contact_message_id: string | null
           created_at: string
           emailed_at: string | null
           id: string
-          interest_registration_id: string
+          interest_registration_id: string | null
           message_id: string
         }
         Insert: {
+          contact_message_id?: string | null
           created_at?: string
           emailed_at?: string | null
           id?: string
-          interest_registration_id: string
+          interest_registration_id?: string | null
           message_id: string
         }
         Update: {
+          contact_message_id?: string | null
           created_at?: string
           emailed_at?: string | null
           id?: string
-          interest_registration_id?: string
+          interest_registration_id?: string | null
           message_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "club_message_lead_recipients_contact_message_id_fkey"
+            columns: ["contact_message_id"]
+            isOneToOne: false
+            referencedRelation: "contact_messages"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "club_message_lead_recipients_interest_registration_id_fkey"
             columns: ["interest_registration_id"]
@@ -664,6 +674,7 @@ export type Database = {
           id: string
           message: string
           name: string
+          promotion_consent: boolean
           subject: string | null
         }
         Insert: {
@@ -673,6 +684,7 @@ export type Database = {
           id?: string
           message: string
           name: string
+          promotion_consent?: boolean
           subject?: string | null
         }
         Update: {
@@ -682,6 +694,7 @@ export type Database = {
           id?: string
           message?: string
           name?: string
+          promotion_consent?: boolean
           subject?: string | null
         }
         Relationships: []

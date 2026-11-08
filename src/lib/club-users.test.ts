@@ -233,6 +233,41 @@ describe("aggregateClubUsers", () => {
     expect(u.greeting_name).toBe("Ada");
   });
 
+  it("makes a contact-form sender a lead, one row per address across both forms", () => {
+    const users = aggregate({
+      profiles: [],
+      emails: [],
+      leads: [
+        lead({ email: "sam@example.com", created_at: "2026-08-01T00:00:00Z" }),
+        lead({
+          email: "Sam@Example.com",
+          name: "Sam from the contact form",
+          created_at: "2026-09-01T00:00:00Z",
+          source: "contact",
+        }),
+        lead({ email: "kim@example.com", source: "contact" }),
+      ],
+    });
+    const sam = users.find((u) => u.email === "sam@example.com")!;
+    // The newest entry stands for them, whichever form it came from.
+    expect(sam.name).toBe("Sam from the contact form");
+    expect(sam.lead_sources).toEqual({ interest: 1, contact: 1 });
+    expect(users.find((u) => u.email === "kim@example.com")!.lead_sources).toEqual({
+      interest: 0,
+      contact: 1,
+    });
+  });
+
+  it("drops a contact-form sender whose address now belongs to a person", () => {
+    const users = aggregate({
+      profiles: [profile({ user_id: "u1" })],
+      emails: [{ user_id: "u1", email: "kim@example.com" }],
+      leads: [lead({ email: "KIM@example.com", source: "contact" })],
+    });
+    expect(users).toHaveLength(1);
+    expect(users[0].lead_sources).toBeNull();
+  });
+
   it("leaves a lead without a greeting name (no person record yet)", () => {
     const users = aggregate({ profiles: [], emails: [], leads: [lead()] });
     expect(users[0].greeting_name).toBeNull();

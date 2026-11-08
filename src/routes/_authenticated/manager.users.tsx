@@ -21,6 +21,7 @@ import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
 import { formatDate } from "@/lib/dates";
 import {
+  NEUTRAL_STATUS_CLASS,
   ROLE_CLASS,
   UNREAD_CLASS,
   lifecycleClass,
@@ -341,6 +342,12 @@ function ManagerUsersPage() {
                             there. The address stands in when a row has no name:
                             it is the only thing a lead is guaranteed to have. */}
                         <UserLink userId={r.user_id} name={r.name ?? r.email} />
+                        {/* Where a lead came from, when it was the contact form.
+                            The interest form is what a lead has always been,
+                            so it needs no label of its own. */}
+                        {r.lead_sources && r.lead_sources.contact > 0 ? (
+                          <Pill label="Contact form" className={`ml-1.5 ${NEUTRAL_STATUS_CLASS}`} />
+                        ) : null}
                       </td>
                       <td className="px-3 py-2">
                         {r.email ? (
@@ -474,10 +481,9 @@ function ManagerUsersPage() {
               Delete the enquiry from {pendingDelete?.name ?? pendingDelete?.email}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This deletes every interest form filed under {pendingDelete?.email}, with the name,
-              phone number and message on it, and takes them off this list. The club keeps no copy,
-              and it can't be undone. Anything they sent through the contact form is separate. This
-              does not touch it, and it stays in Contact messages until you delete it there.
+              {leadDeleteWhat(pendingDelete)} under {pendingDelete?.email} will be deleted, with
+              everything they typed into it, and they come off this list and the Messages lead list.
+              The club keeps no copy, and it can't be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -493,4 +499,23 @@ function ManagerUsersPage() {
       </AlertDialog>
     </>
   );
+}
+
+/**
+ * What deleting a lead takes, in words: "1 interest form entry and 2 contact
+ * messages". Deleting a lead deletes both forms' entries under the address,
+ * or a contact message alone would bring them straight back as a lead.
+ */
+function leadDeleteWhat(row: Row | null): string {
+  const counts = row?.lead_sources ?? { interest: 1, contact: 0 };
+  const parts = [
+    counts.interest > 0
+      ? `${counts.interest} interest form ${counts.interest === 1 ? "entry" : "entries"}`
+      : null,
+    counts.contact > 0
+      ? `${counts.contact} contact ${counts.contact === 1 ? "message" : "messages"}`
+      : null,
+  ].filter(Boolean);
+  const text = parts.join(" and ") || "Their entries";
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

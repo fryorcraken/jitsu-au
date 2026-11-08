@@ -76,16 +76,16 @@ function ManagerDashboard() {
               blurb: "Price list, and item invoices still owed.",
             },
             { to: "/manager/users", title: "Users", blurb: "Everyone in the funnel." },
-            {
-              to: "/manager/messages",
-              title: "Messages",
-              blurb: "Email the club about a closure or a time change.",
-            },
             { to: "/manager/waivers", title: "Signed waivers", blurb: "Approvals and uploads." },
             {
               to: "/manager/contact-messages",
               title: "Contact messages",
               blurb: "What people sent through the form.",
+            },
+            {
+              to: "/manager/messages",
+              title: "Messages",
+              blurb: "Email the club about a closure or a time change.",
             },
           ].map((item) => (
             <Link key={item.to} to={item.to}>

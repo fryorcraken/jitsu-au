@@ -462,6 +462,7 @@ async function handleListUsers(params: unknown) {
     { data: waivers, error: wErr },
     { data: checkins, error: cErr },
     { data: leadRows, error: lErr },
+    { data: contactRows, error: ctErr },
   ] = await Promise.all([
     pdb
       .from("profiles")
@@ -483,6 +484,13 @@ async function handleListUsers(params: unknown) {
       .select("email, name, phone, created_at")
       .order("created_at", { ascending: false })
       .limit(LEADS_LIMIT),
+    // Somebody who wrote in through the contact form is a lead too
+    // (docs/club-messages.md), and merged with any registration by address.
+    db
+      .from("contact_messages")
+      .select("email, name, created_at")
+      .order("created_at", { ascending: false })
+      .limit(LEADS_LIMIT),
   ]);
   // A db_error is the only honest answer to a failed read. An agent cannot see
   // that a query fell over, so degrading to `[]` would hand it a confident
@@ -494,8 +502,12 @@ async function handleListUsers(params: unknown) {
   if (wErr) throw new AgentError(500, "db_error", wErr.message);
   if (cErr) throw new AgentError(500, "db_error", cErr.message);
   if (lErr) throw new AgentError(500, "db_error", lErr.message);
+  if (ctErr) throw new AgentError(500, "db_error", ctErr.message);
 
-  const leads = (leadRows ?? []) as ClubUserLead[];
+  const leads: ClubUserLead[] = [
+    ...((leadRows ?? []) as ClubUserLead[]).map((l) => ({ ...l, source: "interest" as const })),
+    ...(contactRows ?? []).map((c) => ({ ...c, phone: null, source: "contact" as const })),
+  ];
   if ((checkins ?? []).length >= CHECKINS_LIMIT) {
     console.warn(
       `[agent.list_users] session_checkins capped at ${CHECKINS_LIMIT}; counts truncated`,
@@ -610,6 +622,9 @@ async function handleListUsers(params: unknown) {
     email_confirmed_at: u.email_confirmed_at,
     roles: u.roles,
     lifecycle_status: u.lifecycle_status,
+    // For a lead, how many entries of each form sit under their address (the
+    // users page's "Contact form" label). Null for a person.
+    lead_sources: u.lead_sources,
     sessions_attended: u.sessions_attended,
     invoices: (u.user_id ? (membershipsByUser.get(u.user_id) ?? []) : []).map((m) => ({
       ...projectInvoice(m, planById.get(m.plan_id)),
@@ -2151,11 +2166,18 @@ async function handleListMessageLeads() {
   return { count: leads.length, leads };
 }
 
+async function handleListMessagePeople() {
+  const { listMessagePeople } = await import("@/lib/club-message.server");
+  const people = await listMessagePeople(await adminClient());
+  return { count: people.length, people };
+}
+
 async function handleGetClubMessageAudience(params: unknown) {
   const input = agentClubMessageAudienceSchema.parse(params);
   const { countClubMessageAudience } = await import("@/lib/club-message.server");
   return countClubMessageAudience(await adminClient(), {
     groups: input.groups,
+    personIds: input.person_ids,
     leadIds: input.lead_ids,
   });
 }
@@ -2182,6 +2204,7 @@ async function handleSendClubMessage(params: unknown, actingAs: string) {
       subject: input.subject,
       body: input.body,
       groups: input.groups,
+      personIds: input.person_ids,
       leadIds: input.lead_ids,
       actorId: actingAs,
     });
@@ -3152,6 +3175,8 @@ export async function dispatch(
       return handleGetClubMessage(params);
     case "list_message_leads":
       return handleListMessageLeads();
+    case "list_message_people":
+      return handleListMessagePeople();
     case "get_club_message_audience":
       return handleGetClubMessageAudience(params);
     case "send_club_message_test":

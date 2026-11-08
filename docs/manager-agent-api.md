@@ -730,8 +730,13 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   that date and every later one.
 
 - `list_club_messages` / `get_club_message` / `list_message_leads` /
-  `get_club_message_audience` / `send_club_message_test` / `send_club_message`
-  (`"37"`) — club notices, the agent's equivalent of `/manager/messages`.
+  `list_message_people` / `get_club_message_audience` /
+  `send_club_message_test` / `send_club_message` (`"37"`, with
+  `list_message_people`, `person_ids`, the separate `lapsed` group and
+  contact-form leads in `"38"`) — club notices, the agent's equivalent of
+  `/manager/messages`. The screen's two lists (people by group, and leads)
+  come from `listMessageRecipients`; the API reports the same rows through
+  `list_message_people` and `list_message_leads`.
   Every read and write goes through `src/lib/club-message.server.ts`, the
   module the screen's server functions (`club-message.functions.ts`) call, so
   the count an agent reads back is the count the screen shows and a send is
@@ -930,7 +935,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"37"`.
+test so the bump is a deliberate edit, and the current value is `"38"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call

@@ -190,19 +190,24 @@ export const markInterestRegistrationsSeen = createServerFn({ method: "POST" })
 // decided those are never erased (docs/erasing-personal-data.md).
 
 /**
- * Delete every interest-form registration filed under one email address.
+ * Delete a lead: every interest-form registration AND every contact message
+ * filed under one email address.
+ *
+ * Both, because both make somebody a lead (docs/club-messages.md): deleting
+ * only the registrations would leave a contact message that puts them straight
+ * back on the users page and the Messages lead list.
  *
  * Exported for its own test: the `createServerFn` wrapper below cannot be
  * called from the unit runner (no Start request context), and the two guards
  * here are the whole feature.
  *
- * Returns how many rows went, so the caller can tell "deleted" from "somebody
- * else got there first" rather than reporting a no-op as a success.
+ * Returns how many of each went, so the caller can tell "deleted" from
+ * "somebody else got there first" rather than reporting a no-op as a success.
  */
 export async function deleteLeadRegistrations(
   admin: AdminClient,
   email: string,
-): Promise<{ deleted: number }> {
+): Promise<{ deleted: number; contactDeleted: number }> {
   const wanted = normalizeEmail(email);
 
   // Re-checked here, never trusted from the browser. The list the Delete was
@@ -221,6 +226,21 @@ export async function deleteLeadRegistrations(
   if (personErr) throw new Error(personErr.message);
   if (personId) throw new Error(LEAD_HAS_PERSON_MESSAGE);
 
+  const deleted = await deleteUnderAddress(admin, "interest_registrations", wanted);
+  const contactDeleted = await deleteUnderAddress(admin, "contact_messages", wanted);
+  return { deleted, contactDeleted };
+}
+
+/**
+ * Delete every row of one intake table filed under one normalized address, and
+ * say how many went. Run one table after the other, never together, so a
+ * failure on the first leaves the second untouched.
+ */
+async function deleteUnderAddress(
+  admin: AdminClient,
+  table: "interest_registrations" | "contact_messages",
+  wanted: string,
+): Promise<number> {
   // The column stores the address exactly as it was typed, so one person can
   // hold two rows that differ only in capitalisation, and the directory already
   // merges them into a single lead. Both have to go, or the row a manager just
@@ -234,7 +254,7 @@ export async function deleteLeadRegistrations(
   // stranger's enquiry. (`%` is a wildcard too; the form's validator happens to
   // reject it today, which is not something this should lean on.)
   const { data: rows, error: readErr } = await admin
-    .from("interest_registrations")
+    .from(table)
     .select("id, email")
     .ilike("email", wanted)
     .limit(REGISTRATIONS_PER_LEAD_LIMIT);
@@ -252,30 +272,30 @@ export async function deleteLeadRegistrations(
   }
 
   const ids = (rows ?? []).filter((r) => normalizeEmail(r.email) === wanted).map((r) => r.id);
-  if (ids.length === 0) return { deleted: 0 };
+  if (ids.length === 0) return 0;
 
-  const { error: delErr } = await admin.from("interest_registrations").delete().in("id", ids);
+  const { error: delErr } = await admin.from(table).delete().in("id", ids);
   if (delErr) throw new Error(delErr.message);
-  return { deleted: ids.length };
+  return ids.length;
 }
 
 /**
- * Manager: delete a lead, meaning every interest-form registration under their
- * address, with the name, phone number and message they typed.
- *
- * Contact-form messages are NOT touched, even from the same address: they are a
- * separate inbox with its own screen, and a manager clearing a lead off the
- * directory has not necessarily read what that person wrote in.
+ * Manager: delete a lead, meaning every interest-form registration and every
+ * contact message under their address, with everything they typed. The users
+ * page's confirm says how many of each go before anything is deleted.
  */
 export const deleteLead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => deleteLeadSchema.parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
-    const { deleted } = await deleteLeadRegistrations(await adminClient(), data.email);
+    const { deleted, contactDeleted } = await deleteLeadRegistrations(
+      await adminClient(),
+      data.email,
+    );
     // Nothing matched. Almost always a second manager (or a second tab) that
     // deleted it first, and saying so beats a success message over a row that
     // was already gone.
-    if (deleted === 0) throw new Error("That enquiry has already been deleted.");
-    return { ok: true as const, deleted };
+    if (deleted + contactDeleted === 0) throw new Error("That enquiry has already been deleted.");
+    return { ok: true as const, deleted, contactDeleted };
   });

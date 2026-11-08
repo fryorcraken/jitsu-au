@@ -48,6 +48,7 @@ import {
   CLUB_NOTICE_KIND,
   clubMessageGroups,
   clubMessageHref,
+  groupPeople,
   leadCandidates,
   messageAudience,
   messageProgress,
@@ -55,6 +56,7 @@ import {
   type ClubMessageGroup,
   type ClubMessageKind,
   type ClubMessageProgress,
+  type GroupPerson,
   type LeadCandidate,
   type MessageInbox,
   type MessagePerson,
@@ -119,7 +121,7 @@ export async function loadMessageDirectory(
   db: AdminClient,
   now = new Date(),
 ): Promise<MessageDirectory> {
-  const [profiles, waivers, memberships, plans, registrations] = await Promise.all([
+  const [profiles, waivers, memberships, plans, registrations, contacts] = await Promise.all([
     readAll<ClubUserProfile & { archived_at: string | null }>((from, to) =>
       db
         .from("profiles")
@@ -147,6 +149,19 @@ export async function loadMessageDirectory(
     }>((from, to) =>
       db
         .from("interest_registrations")
+        .select("id, name, email, created_at, promotion_consent")
+        .order("id")
+        .range(from, to),
+    ),
+    readAll<{
+      id: string;
+      name: string;
+      email: string;
+      created_at: string;
+      promotion_consent: boolean;
+    }>((from, to) =>
+      db
+        .from("contact_messages")
         .select("id, name, email, created_at, promotion_consent")
         .order("id")
         .range(from, to),
@@ -198,7 +213,12 @@ export async function loadMessageDirectory(
   return {
     people,
     leads: leadCandidates({
-      registrations,
+      // Both forms make a lead: somebody who wrote in is as reachable as
+      // somebody who asked about a trial (docs/club-messages.md).
+      registrations: [
+        ...registrations.map((r) => ({ ...r, source: "interest" as const })),
+        ...contacts.map((c) => ({ ...c, source: "contact" as const })),
+      ],
       personEmails: (emails.data ?? []).map((e) => e.email),
       now,
     }),
@@ -206,14 +226,25 @@ export async function loadMessageDirectory(
   };
 }
 
-/** Who a choice of groups and leads reaches: the inboxes, and the leads still eligible. */
+/** What a manager ticked: whole groups, people one by one, and leads. */
+export type AudienceChoice = {
+  groups: readonly ClubMessageGroup[];
+  personIds: readonly string[];
+  leadIds: readonly string[];
+};
+
+/** Who a choice reaches: the inboxes, and the leads still eligible. */
 function resolveAudience(
   dir: MessageDirectory,
-  choice: { groups: readonly ClubMessageGroup[]; leadIds: readonly string[] },
+  choice: AudienceChoice,
 ): { inboxes: MessageInbox[]; leads: LeadCandidate[] } {
   const wanted = new Set(choice.leadIds.map((id) => id.toLowerCase()));
   return {
-    inboxes: messageAudience({ people: dir.people, groups: choice.groups }),
+    inboxes: messageAudience({
+      people: dir.people,
+      groups: choice.groups,
+      personIds: choice.personIds,
+    }),
     leads: dir.leads.filter((l) => wanted.has(l.registration_id.toLowerCase())),
   };
 }
@@ -230,7 +261,7 @@ export type AudienceCount = {
 /** How many emails a choice would send right now, for the screen and the confirm. */
 export async function countClubMessageAudience(
   db: AdminClient,
-  choice: { groups: readonly ClubMessageGroup[]; leadIds: readonly string[] },
+  choice: AudienceChoice,
 ): Promise<AudienceCount> {
   const dir = await loadMessageDirectory(db);
   const { inboxes, leads } = resolveAudience(dir, choice);
@@ -248,6 +279,23 @@ export async function countClubMessageAudience(
 /** Every lead a message could be sent to, for the screen's list. */
 export async function listMessageLeads(db: AdminClient): Promise<LeadCandidate[]> {
   return (await loadMessageDirectory(db)).leads;
+}
+
+/** Everybody each group can reach, person by person, for the agent API. */
+export async function listMessagePeople(db: AdminClient): Promise<GroupPerson[]> {
+  return groupPeople((await loadMessageDirectory(db)).people);
+}
+
+/**
+ * Everything the screen ticks from, in one read of the club: the people in
+ * each group and the leads. One call rather than two, because both come from
+ * the same directory and the screen needs both before it can count.
+ */
+export async function listMessageRecipients(
+  db: AdminClient,
+): Promise<{ people: GroupPerson[]; leads: LeadCandidate[] }> {
+  const dir = await loadMessageDirectory(db);
+  return { people: groupPeople(dir.people), leads: dir.leads };
 }
 
 /** The message as the email renders it, shared by the real send and the test. */
@@ -314,19 +362,18 @@ export async function sendClubMessageTest(
 
 export type SendResult = ClubMessageProgress & { message_id: string; sent_at: string };
 
-type StoredAudience = { groups: ClubMessageGroup[]; lead_ids: string[] };
+type StoredAudience = { groups: ClubMessageGroup[]; person_ids: string[]; lead_ids: string[] };
 
 function readStoredAudience(value: Json): StoredAudience {
-  const v = (value ?? {}) as { groups?: unknown; lead_ids?: unknown };
+  const v = (value ?? {}) as { groups?: unknown; person_ids?: unknown; lead_ids?: unknown };
   const groups = Array.isArray(v.groups)
     ? (v.groups.filter((g) =>
         (clubMessageGroups as readonly unknown[]).includes(g),
       ) as ClubMessageGroup[])
     : [];
-  const lead_ids = Array.isArray(v.lead_ids)
-    ? v.lead_ids.filter((id): id is string => typeof id === "string")
-    : [];
-  return { groups, lead_ids };
+  const ids = (list: unknown) =>
+    Array.isArray(list) ? list.filter((id): id is string => typeof id === "string") : [];
+  return { groups, person_ids: ids(v.person_ids), lead_ids: ids(v.lead_ids) };
 }
 
 /**
@@ -352,6 +399,7 @@ export async function sendClubMessage(
     subject: string;
     body: string;
     groups: readonly ClubMessageGroup[];
+    personIds: readonly string[];
     leadIds: readonly string[];
     actorId: string | null;
   },
@@ -376,10 +424,14 @@ export async function sendClubMessage(
   } else {
     // Refused before anything is recorded, so a send that reaches nobody
     // leaves no message in the history.
-    const reach = resolveAudience(dir, { groups: input.groups, leadIds: input.leadIds });
+    const reach = resolveAudience(dir, input);
     if (reach.inboxes.length + reach.leads.length === 0)
       throw new ClubMessageError("no_recipients", "Nobody you ticked can be emailed right now.");
-    const audience: StoredAudience = { groups: [...input.groups], lead_ids: [...input.leadIds] };
+    const audience: StoredAudience = {
+      groups: [...input.groups],
+      person_ids: [...input.personIds],
+      lead_ids: [...input.leadIds],
+    };
     const { error } = await db.from("club_messages").insert({
       id,
       kind: input.kind,
@@ -397,6 +449,7 @@ export async function sendClubMessage(
   const stored = readStoredAudience(message.audience);
   const { inboxes, leads } = resolveAudience(dir, {
     groups: stored.groups,
+    personIds: stored.person_ids,
     leadIds: stored.lead_ids,
   });
 
@@ -419,10 +472,21 @@ export async function sendClubMessage(
       })),
       { throwOnError: true },
     );
-    if (leads.length > 0) {
+    // One row per lead, pointing at whichever form their newest entry came
+    // from, so deleting the lead (both forms) deletes the row with it.
+    const byInterest = leads.filter((l) => l.source === "interest");
+    const byContact = leads.filter((l) => l.source === "contact");
+    if (byInterest.length > 0) {
       const { error } = await db.from("club_message_lead_recipients").upsert(
-        leads.map((l) => ({ message_id: id, interest_registration_id: l.registration_id })),
+        byInterest.map((l) => ({ message_id: id, interest_registration_id: l.registration_id })),
         { onConflict: "message_id,interest_registration_id", ignoreDuplicates: true },
+      );
+      if (error) throw new Error(error.message);
+    }
+    if (byContact.length > 0) {
+      const { error } = await db.from("club_message_lead_recipients").upsert(
+        byContact.map((l) => ({ message_id: id, contact_message_id: l.registration_id })),
+        { onConflict: "message_id,contact_message_id", ignoreDuplicates: true },
       );
       if (error) throw new Error(error.message);
     }
@@ -491,6 +555,7 @@ export async function finishClubMessage(
     subject: message.subject,
     body: message.body,
     groups: stored.groups,
+    personIds: stored.person_ids,
     leadIds: stored.lead_ids,
     actorId: input.actorId,
   });
@@ -513,7 +578,7 @@ async function sendPendingLeads(
   if (!apiKey) return;
   const { data, error } = await db
     .from("club_message_lead_recipients")
-    .select("id, interest_registrations(name, email)")
+    .select("id, interest_registrations(name, email), contact_messages(name, email)")
     .eq("message_id", opts.message.id)
     .is("emailed_at", null)
     .order("created_at", { ascending: true })
@@ -525,7 +590,7 @@ async function sendPendingLeads(
     const batch = pending.slice(i, i + IMMEDIATE_SEND_BATCH);
     const outcomes = await Promise.allSettled(
       batch.map(async (row) => {
-        const lead = row.interest_registrations;
+        const lead = row.interest_registrations ?? row.contact_messages;
         if (!lead?.email) return false;
         const { html, text } = await composeEmail({
           subject: opts.message.subject,
@@ -610,6 +675,8 @@ export type ClubMessageSummary = ClubMessageProgress & {
   sent_at: string;
   sent_by_name: string | null;
   groups: ClubMessageGroup[];
+  /** How many people were ticked one by one, outside the whole groups. */
+  person_count: number;
   /** How many leads were ticked when it was sent. */
   lead_count: number;
 };
@@ -700,6 +767,7 @@ function summarise(
     sent_at: m.created_at,
     sent_by_name: (m.sent_by ? names.get(m.sent_by) : null) || null,
     groups: stored.groups,
+    person_count: stored.person_ids.length,
     lead_count: stored.lead_ids.length,
     ...(progress ?? { recipients: 0, emailed: 0, pending: 0 }),
   };

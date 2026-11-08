@@ -42,37 +42,41 @@ export type ClubMessageKind = (typeof clubMessageKinds)[number];
 /** Leads who registered this recently are ticked to start with. */
 export const LEAD_PRESELECT_DAYS = 90;
 
-/** The groups of people a manager can tick. Leads are picked separately. */
-export const clubMessageGroups = ["members", "visitors", "applicants"] as const;
+/**
+ * The groups of people a manager can tick. Leads are picked separately.
+ *
+ * Visitors and lapsed members are two groups, not one: somebody whose trial is
+ * over and who has not joined yet is told something different from somebody
+ * who was paying and did not renew.
+ */
+export const clubMessageGroups = ["members", "visitors", "lapsed", "applicants"] as const;
 export type ClubMessageGroup = (typeof clubMessageGroups)[number];
 
 /** What each group is called on the screen and in the history. */
 export const CLUB_MESSAGE_GROUP_LABELS: Record<ClubMessageGroup, string> = {
   members: "Members",
-  visitors: "Visitors and lapsed members",
+  visitors: "Visitors",
+  lapsed: "Lapsed members",
   applicants: "Applicants",
 };
 
 /** One line under each group, so a manager knows who is in it. */
 export const CLUB_MESSAGE_GROUP_HINTS: Record<ClubMessageGroup, string> = {
   members: "Paying for training now.",
-  visitors: "Waiver approved, not paying for training now.",
+  visitors: "Waiver approved, never paid for training. A finished trial, say.",
+  lapsed: "Used to pay for training, and their membership ended.",
   applicants: "Signed a waiver that is still waiting for approval.",
 };
 
-/**
- * Which group a person is in, or null for nobody a group reaches.
- *
- * Lapsed sits with visitors: both have an open account and no paid training
- * right now, and a closure notice matters to both the same way.
- */
+/** Which group a person is in, or null for nobody a group reaches. */
 export function groupForStatus(status: LifecycleStatus): ClubMessageGroup | null {
   switch (status) {
     case "member":
       return "members";
     case "visitor":
-    case "lapsed":
       return "visitors";
+    case "lapsed":
+      return "lapsed";
     case "applicant":
       return "applicants";
     case "lead":
@@ -102,25 +106,29 @@ export type MessageInbox = {
 /**
  * The people a message reaches, as inboxes.
  *
- * Everybody in a ticked group who has not left the club, folded to the inbox
- * the club writes to about them. A parent who is in no ticked group still gets
- * it for a child who is, and their email names the child. An inbox whose
- * owner has left the club gets nothing at all.
+ * Everybody in a ticked group, plus each person ticked one by one, who has not
+ * left the club, folded to the inbox the club writes to about them. A parent
+ * who is in no ticked group still gets it for a child who is, and their email
+ * names the child. An inbox whose owner has left the club gets nothing at all.
+ * A person ticked one by one is reached only while they are in some group:
+ * a lead, or somebody who has left, is not reached by naming their id.
  */
 export function messageAudience(input: {
   people: MessagePerson[];
   groups: Iterable<ClubMessageGroup>;
+  personIds?: Iterable<string>;
 }): MessageInbox[] {
   const groups = new Set(input.groups);
+  const named = new Set([...(input.personIds ?? [])].map((id) => id.toLowerCase()));
   const byId = new Map(input.people.map((p) => [p.user_id.toLowerCase(), p]));
   const byInbox = new Map<string, MessageInbox>();
 
   for (const person of input.people) {
     if (person.archived) continue;
     const group = groupForStatus(person.lifecycle_status);
-    if (!group || !groups.has(group)) continue;
-
     const id = person.user_id.toLowerCase();
+    if (!group || !(groups.has(group) || named.has(id))) continue;
+
     const contactId = contactUserIdFor(person).toLowerCase();
     if (byId.get(contactId)?.archived) continue;
 
@@ -139,24 +147,100 @@ export function messageAudience(input: {
   return [...byInbox.values()].sort((a, b) => a.contactUserId.localeCompare(b.contactUserId));
 }
 
-/** An interest registration, as the lead list reads it. */
+/**
+ * One person in a group, as the screen lists them for ticking. Their email goes
+ * to `inbox_user_id`, which is somebody else (`inbox_name`) for a child.
+ */
+export type GroupPerson = {
+  user_id: string;
+  name: string;
+  group: ClubMessageGroup;
+  inbox_user_id: string;
+  /** Who reads their email, when that is not them: the parent, for a child. */
+  inbox_name: string | null;
+};
+
+/**
+ * Everybody a group can reach, person by person, in name order: the screen's
+ * lists under each group, and the agent's `list_message_people`. The same
+ * rules as `messageAudience`, so a person listed here is a person who can be
+ * reached, and nobody who has left is listed.
+ */
+export function groupPeople(people: MessagePerson[]): GroupPerson[] {
+  const byId = new Map(people.map((p) => [p.user_id.toLowerCase(), p]));
+  const out: GroupPerson[] = [];
+  for (const person of people) {
+    if (person.archived) continue;
+    const group = groupForStatus(person.lifecycle_status);
+    if (!group) continue;
+    const id = person.user_id.toLowerCase();
+    const contactId = contactUserIdFor(person).toLowerCase();
+    const contact = byId.get(contactId);
+    if (contact?.archived) continue;
+    out.push({
+      user_id: id,
+      name: person.name || "No name on file",
+      group,
+      inbox_user_id: contactId,
+      inbox_name: contactId === id ? null : contact?.name || "their parent",
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Turn the screen's ticks into what is sent: a group whose every person is
+ * ticked goes as the whole group, and a group with somebody unticked goes as
+ * the people kept. Sending the whole group, rather than its list, is what lets
+ * the history say "Members" and means somebody who joined while the screen was
+ * open is not left out.
+ */
+export function choiceFromTicks(
+  people: GroupPerson[],
+  ticked: ReadonlySet<string>,
+): { groups: ClubMessageGroup[]; person_ids: string[] } {
+  const groups: ClubMessageGroup[] = [];
+  const person_ids: string[] = [];
+  for (const group of clubMessageGroups) {
+    const inGroup = people.filter((p) => p.group === group);
+    if (inGroup.length === 0) continue;
+    const kept = inGroup.filter((p) => ticked.has(p.user_id));
+    if (kept.length === inGroup.length) groups.push(group);
+    else person_ids.push(...kept.map((p) => p.user_id));
+  }
+  return { groups, person_ids };
+}
+
+/** Where a lead came from: the interest form or the contact form. */
+export const leadSources = ["interest", "contact"] as const;
+export type LeadSource = (typeof leadSources)[number];
+
+/** An interest registration or a contact message, as the lead list reads it. */
 export type LeadRegistration = {
   id: string;
+  source: LeadSource;
   name: string;
   email: string;
   created_at: string;
   promotion_consent: boolean;
 };
 
-/** One lead a manager can tick: the address, and the registration that stands for it. */
+/** One lead a manager can tick: the address, and the entry that stands for it. */
 export type LeadCandidate = {
-  /** The newest registration for this address. Its row is what a send records. */
+  /**
+   * The newest entry for this address, from either form. Its row is what a
+   * send records, which is how deleting the lead also deletes that record.
+   */
   registration_id: string;
+  /** Which form that newest entry came from. */
+  source: LeadSource;
+  /** Every form this address has used, interest first. */
+  sources: LeadSource[];
   name: string;
   email: string;
-  /** When they last filled in the interest form. */
+  /** When they last filled in either form. */
   registered_at: string;
-  /** Whether any of their registrations ticked "keep me posted". */
+  /** Whether any of their entries ticked "keep me posted". */
   promotion_consent: boolean;
   /** Ticked to start with: they registered in the last `LEAD_PRESELECT_DAYS`. */
   preselected: boolean;
@@ -166,9 +250,9 @@ export type LeadCandidate = {
  * Every lead a message could go to, newest first.
  *
  * The same dedupe the users page makes (`aggregateClubUsers`): one row per
- * address, the newest registration standing for it, and an address that now
- * belongs to a person is left out, because they get the message as that
- * person if their group is ticked.
+ * address across both forms, the newest entry standing for it, and an address
+ * that now belongs to a person is left out, because they get the message as
+ * that person if their group is ticked.
  */
 export function leadCandidates(input: {
   registrations: LeadRegistration[];
@@ -193,6 +277,8 @@ export function leadCandidates(input: {
     const latest = list.reduce((a, b) => (b.created_at > a.created_at ? b : a));
     out.push({
       registration_id: latest.id,
+      source: latest.source,
+      sources: leadSources.filter((src) => list.some((r) => r.source === src)),
       name: latest.name.trim() || latest.email,
       email: latest.email.trim(),
       registered_at: latest.created_at,
@@ -285,20 +371,26 @@ export const clubMessageDraftSchema = z.object({
   body: z.string().trim().min(1, "Write the message.").max(20000),
 });
 
-/** Who it goes to. At least one group or one lead. */
+/**
+ * Who it goes to: whole groups, people ticked one by one, and leads. At least
+ * one of the three. A screen with a group fully ticked sends the group; one
+ * with some of a group unticked sends the people it kept.
+ */
 export const clubMessageAudienceSchema = z.object({
-  groups: z.array(z.enum(clubMessageGroups)).max(clubMessageGroups.length),
-  lead_ids: z.array(z.string().uuid()).max(5000),
+  groups: z.array(z.enum(clubMessageGroups)).max(clubMessageGroups.length).default([]),
+  person_ids: z.array(z.string().uuid()).max(5000).default([]),
+  lead_ids: z.array(z.string().uuid()).max(5000).default([]),
 });
 
 const sendClubMessageObject = clubMessageDraftSchema
   .merge(clubMessageAudienceSchema)
   .extend({ message_id: z.string().uuid() });
 
-const someoneTicked = <T extends { groups: unknown[]; lead_ids: unknown[] }>(d: T) =>
-  d.groups.length > 0 || d.lead_ids.length > 0;
+const someoneTicked = <T extends { groups: unknown[]; person_ids: unknown[]; lead_ids: unknown[] }>(
+  d: T,
+) => d.groups.length > 0 || d.person_ids.length > 0 || d.lead_ids.length > 0;
 const someoneTickedMessage = {
-  message: "Tick at least one group or one lead.",
+  message: "Tick at least one person.",
   path: ["groups"],
 };
 
@@ -318,8 +410,9 @@ export const agentClubMessageIdSchema = z.object({ id: z.string().uuid() }).stri
 
 export const agentClubMessageAudienceSchema = z
   .object({
-    groups: clubMessageAudienceSchema.shape.groups.default([]),
-    lead_ids: clubMessageAudienceSchema.shape.lead_ids.default([]),
+    groups: clubMessageAudienceSchema.shape.groups,
+    person_ids: clubMessageAudienceSchema.shape.person_ids,
+    lead_ids: clubMessageAudienceSchema.shape.lead_ids,
   })
   .strict();
 

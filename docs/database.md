@@ -1760,10 +1760,12 @@ send anything the immediate send did not.
 ### `club_message_lead_recipients`
 
 `id` PK, `message_id` (`→ club_messages ON DELETE CASCADE`),
-`interest_registration_id` (`→ interest_registrations ON DELETE CASCADE`),
-`emailed_at`, `created_at`, `UNIQUE (message_id, interest_registration_id)`.
-One row per lead per message, because a lead has no profile and so no
-`notifications` row. It holds no address: the address is read from the
+`interest_registration_id` (`→ interest_registrations ON DELETE CASCADE`) or
+`contact_message_id` (`→ contact_messages ON DELETE CASCADE`), exactly one of
+the two (a CHECK, added by `20261108180000_club_message_contact_leads.sql`),
+`emailed_at`, `created_at`, and a `UNIQUE (message_id, …)` on each. One row per
+lead per message, pointing at their newest entry from either form, because a
+lead has no profile and so no `notifications` row. It holds no address: the address is read from the
 registration at send time, and deleting a lead (`deleteLead`) takes these rows
 with it.
 
@@ -1831,16 +1833,24 @@ creating no person record. The manager directory merges leads in by normalized
 email until the email belongs to a person (they signed the waiver).
 
 A manager can **delete a lead** from `/manager/users` (`deleteLead`), which
-removes every registration under that address, since the directory merges them
-into one row. Refused, on the server, when the address belongs to a person: they
+removes every registration **and every contact message** under that address,
+since the directory merges them into one row. Refused, on the server, when the address belongs to a person: they
 have signed something, and their enquiry is part of that record. This is the
 only erasure the product has, and why it stops here is
 `docs/erasing-personal-data.md`.
 
 ### `contact_messages`
 
-`id` PK, `name`, `email`, `subject`, `message`, `client_submission_id`,
-`created_at`. **RLS:** anon INSERT under a validating `WITH CHECK`.
+`id` PK, `name`, `email`, `subject`, `message`, `promotion_consent`,
+`client_submission_id`, `created_at`. **RLS:** anon INSERT under a validating
+`WITH CHECK`. `promotion_consent` is the same optional, unticked "Keep me
+posted about club events and offers" box as the interest form's
+(`20261108180000_club_message_contact_leads.sql`).
+
+A sender is a **lead** until their address belongs to a person: they are listed
+on `/manager/users` (labelled "Contact form") and in the Messages lead list,
+merged by address with any interest registration (`aggregateClubUsers`,
+`leadCandidates`). Deleting that lead deletes their contact messages too.
 
 Insert-only for both client roles, and it stays that way: managers read it
 through `listContactMessages` (`src/lib/contact-messages.functions.ts`) on the

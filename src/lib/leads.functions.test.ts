@@ -283,6 +283,8 @@ describe("acknowledgeInterestRegistrations", () => {
 function fakeDeleteAdmin(opts: {
   personId?: string | null;
   rows?: Array<{ id: string; email: string }>;
+  /** The contact messages under the same search. None unless a test says so. */
+  contactRows?: Array<{ id: string; email: string }>;
   rpcError?: { message: string } | null;
   readError?: { message: string } | null;
   deleteError?: { message: string } | null;
@@ -295,8 +297,9 @@ function fakeDeleteAdmin(opts: {
       rpcCalls.push([fn, args]);
       return Promise.resolve({ data: opts.personId ?? null, error: opts.rpcError ?? null });
     },
-    from() {
-      const read = { data: opts.rows ?? [], error: opts.readError ?? null };
+    from(table: string) {
+      const rowsFor = table === "contact_messages" ? (opts.contactRows ?? []) : (opts.rows ?? []);
+      const read = { data: rowsFor, error: opts.readError ?? null };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const chain: any = {
         select: () => chain,
@@ -350,10 +353,46 @@ describe("deleteLeadRegistrations", () => {
     // The directory merges both rows into one lead, so deleting "this lead" has
     // to take both. Leaving the older one behind puts the person straight back
     // on the list a manager just cleared them from.
-    expect(await deleteLeadRegistrations(admin, "  SAM@example.com ")).toEqual({ deleted: 2 });
+    expect(await deleteLeadRegistrations(admin, "  SAM@example.com ")).toEqual({
+      deleted: 2,
+      contactDeleted: 0,
+    });
     expect(deleted).toEqual([["reg-1", "reg-2"]]);
-    // Searched with the normalized address, not the one that was typed.
-    expect(patterns).toEqual(["sam@example.com"]);
+    // Searched with the normalized address, not the one that was typed, in
+    // both forms' tables.
+    expect(patterns).toEqual(["sam@example.com", "sam@example.com"]);
+  });
+
+  it("deletes their contact messages too, so they cannot come straight back as a lead", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { admin, deleted } = fakeDeleteAdmin({
+      personId: null,
+      rows: [{ id: "reg-1", email: "sam@example.com" }],
+      contactRows: [
+        { id: "msg-1", email: "Sam@example.com" },
+        { id: "msg-2", email: "other@example.com" },
+      ],
+    });
+    expect(await deleteLeadRegistrations(admin, "sam@example.com")).toEqual({
+      deleted: 1,
+      contactDeleted: 1,
+    });
+    // Registrations first, then the matching contact message only.
+    expect(deleted).toEqual([["reg-1"], ["msg-1"]]);
+  });
+
+  it("deletes a lead who only ever used the contact form", async () => {
+    const { deleteLeadRegistrations } = await import("./leads.functions");
+    const { admin, deleted } = fakeDeleteAdmin({
+      personId: null,
+      rows: [],
+      contactRows: [{ id: "msg-1", email: "kim@example.com" }],
+    });
+    expect(await deleteLeadRegistrations(admin, "kim@example.com")).toEqual({
+      deleted: 0,
+      contactDeleted: 1,
+    });
+    expect(deleted).toEqual([["msg-1"]]);
   });
 
   it("ignores rows the search over-matched on a LIKE wildcard", async () => {
@@ -368,7 +407,10 @@ describe("deleteLeadRegistrations", () => {
         { id: "reg-2", email: "axb@example.com" },
       ],
     });
-    expect(await deleteLeadRegistrations(admin, "a_b@example.com")).toEqual({ deleted: 1 });
+    expect(await deleteLeadRegistrations(admin, "a_b@example.com")).toEqual({
+      deleted: 1,
+      contactDeleted: 0,
+    });
     expect(deleted).toEqual([["reg-1"]]);
   });
 
@@ -384,7 +426,10 @@ describe("deleteLeadRegistrations", () => {
       email: "sam@example.com",
     }));
     const { admin, deleted } = fakeDeleteAdmin({ personId: null, rows });
-    expect(await deleteLeadRegistrations(admin, "sam@example.com")).toEqual({ deleted: 500 });
+    expect(await deleteLeadRegistrations(admin, "sam@example.com")).toEqual({
+      deleted: 500,
+      contactDeleted: 0,
+    });
     expect(deleted[0]).toHaveLength(500);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -393,7 +438,10 @@ describe("deleteLeadRegistrations", () => {
   it("reports nothing deleted rather than issuing an empty delete", async () => {
     const { deleteLeadRegistrations } = await import("./leads.functions");
     const { admin, deleted } = fakeDeleteAdmin({ personId: null, rows: [] });
-    expect(await deleteLeadRegistrations(admin, "nobody@example.com")).toEqual({ deleted: 0 });
+    expect(await deleteLeadRegistrations(admin, "nobody@example.com")).toEqual({
+      deleted: 0,
+      contactDeleted: 0,
+    });
     expect(deleted).toEqual([]);
   });
 

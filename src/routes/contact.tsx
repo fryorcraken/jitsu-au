@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,6 +63,8 @@ function Contact() {
             email: String(fd.get("email") || ""),
             subject: String(fd.get("subject") || ""),
             message: String(fd.get("message") || ""),
+            // Unticked unless they tick it: a pre-ticked box is not consent.
+            promotion_consent: fd.get("promotion_consent") === "on",
             hp: String(fd.get("hp") || ""),
           },
         });
@@ -168,6 +171,13 @@ function Contact() {
                 className="mt-1.5"
               />
             </div>
+            <div className="flex items-start gap-3">
+              <Checkbox id="promotion_consent" name="promotion_consent" className="mt-0.5" />
+              <Label htmlFor="promotion_consent" className="font-normal leading-snug">
+                Keep me posted about club events and offers (optional)
+              </Label>
+            </div>
+
             <Button type="submit" size="lg" disabled={send.busy} className="w-full">
               {send.busy ? "Sending..." : "Send message"}
             </Button>
