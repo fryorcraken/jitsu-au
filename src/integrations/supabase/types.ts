@@ -474,6 +474,78 @@ export type Database = {
         }
         Relationships: []
       }
+      club_message_lead_recipients: {
+        Row: {
+          created_at: string
+          emailed_at: string | null
+          id: string
+          interest_registration_id: string
+          message_id: string
+        }
+        Insert: {
+          created_at?: string
+          emailed_at?: string | null
+          id?: string
+          interest_registration_id: string
+          message_id: string
+        }
+        Update: {
+          created_at?: string
+          emailed_at?: string | null
+          id?: string
+          interest_registration_id?: string
+          message_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_message_lead_recipients_interest_registration_id_fkey"
+            columns: ["interest_registration_id"]
+            isOneToOne: false
+            referencedRelation: "interest_registrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_message_lead_recipients_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "club_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      club_messages: {
+        Row: {
+          audience: Json
+          body: string
+          created_at: string
+          id: string
+          kind: string
+          recipients_written_at: string | null
+          sent_by: string | null
+          subject: string
+        }
+        Insert: {
+          audience?: Json
+          body: string
+          created_at?: string
+          id: string
+          kind: string
+          recipients_written_at?: string | null
+          sent_by?: string | null
+          subject: string
+        }
+        Update: {
+          audience?: Json
+          body?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          recipients_written_at?: string | null
+          sent_by?: string | null
+          subject?: string
+        }
+        Relationships: []
+      }
       club_settings: {
         Row: {
           key: string
@@ -698,6 +770,7 @@ export type Database = {
           message: string | null
           name: string
           phone: string | null
+          promotion_consent: boolean
           sms_whatsapp_consent: boolean
           uts_student: boolean
         }
@@ -710,6 +783,7 @@ export type Database = {
           message?: string | null
           name: string
           phone?: string | null
+          promotion_consent?: boolean
           sms_whatsapp_consent?: boolean
           uts_student?: boolean
         }
@@ -722,6 +796,7 @@ export type Database = {
           message?: string | null
           name?: string
           phone?: string | null
+          promotion_consent?: boolean
           sms_whatsapp_consent?: boolean
           uts_student?: boolean
         }
