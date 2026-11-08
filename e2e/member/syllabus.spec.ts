@@ -17,7 +17,7 @@ import { expectPageRendered } from "../support/page";
 test("a member reads breakfalling up to orange, and goes from a belt page into it", async ({
   page,
 }) => {
-  const upTo = page.getByLabel("Up to");
+  const upTo = page.getByLabel("Up to", { exact: true });
 
   await step(page, "the syllabus by topic, up to orange", async () => {
     await page.goto("/kb/syllabus?up_to=orange");
@@ -32,7 +32,7 @@ test("a member reads breakfalling up to orange, and goes from a belt page into i
   });
 
   await step(page, "narrowed to one topic, which the address keeps", async () => {
-    await page.getByLabel("Topic").selectOption("breakfalling");
+    await page.getByLabel("Topic", { exact: true }).selectOption("breakfalling");
     await expect(page).toHaveURL(/topic=breakfalling/);
     await expect(page.getByRole("heading", { name: "Breakfalling", level: 2 })).toBeVisible();
     await expect(page.getByText("O Goshi")).toHaveCount(0);
