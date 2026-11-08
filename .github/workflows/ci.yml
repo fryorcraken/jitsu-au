@@ -22,9 +22,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Pinned rather than `latest`, and kept the same in ci.yml and e2e.yml:
+      # a run should not change Bun under a commit that already passed. Bump it
+      # here (both files) on purpose.
+      #
+      # setup-bun downloads from GitHub releases, which has returned 504 on
+      # every attempt for an hour at a time (2026-11-08) with nothing wrong in
+      # the code. The same build is on npm, a different service, so a failed
+      # download falls back to that rather than failing the run before any
+      # check has looked at the change.
       - uses: oven-sh/setup-bun@v2
+        id: setup-bun
+        continue-on-error: true
         with:
-          bun-version: latest
+          bun-version: "1.4.4"
+
+      - name: Install Bun from npm (GitHub releases unavailable)
+        if: steps.setup-bun.outcome == 'failure'
+        run: |
+          npm install --global bun@1.4.4
+          bun --version
 
       # This repo is going public and `.env` is tracked (Lovable generates it and
       # re-commits it, so it cannot just be gitignored). That makes it the easiest

@@ -570,7 +570,10 @@ owner/manager policies (`20260727120000_waiver_storage_policies.sql`).
 - **CI:** `.github/workflows/ci.yml` runs lint → typecheck → test → build on
   Linux with Bun for every PR and pushes to `main`. It installs via
   `bash scripts/bun-install.sh` (see Lock file strategy below), not a plain
-  `bun install`. Before the install it runs `scripts/check-committed-env.mjs`,
+  `bun install`. Bun itself is pinned to one version in both `ci.yml` and
+  `e2e.yml` (bump the two together), and installed from npm when the GitHub
+  releases download fails, which it has done for an hour at a time. Before the
+  install it runs `scripts/check-committed-env.mjs`,
   which fails if the committed `.env` holds anything but publishable values
   (see "Environment variables"). `.github/workflows/e2e.yml` runs the end-to-end
   suite alongside it (no repository secrets — the local stack's keys are the
