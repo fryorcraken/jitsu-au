@@ -61,9 +61,11 @@ import {
   saveManagerSyllabusEntries,
   saveManagerSyllabusTopic,
 } from "@/lib/syllabus.functions";
+import { manageSyllabusSearchSchema } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/manager/syllabus")({
+  validateSearch: manageSyllabusSearchSchema,
   head: () => ({
     meta: [{ title: "Syllabus | UTS Jitsu" }, { name: "robots", content: "noindex" }],
   }),
@@ -81,21 +83,33 @@ function SyllabusManager() {
   const invalidateKbReader = useInvalidateKbReader();
   const { confirm, confirmDialog } = useConfirm();
 
+  const search = Route.useSearch();
+  const saveArticle = useServerFn(saveManagerArticle);
   const [data, setData] = useState<SyllabusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState("write");
+  // "Open this belt in the Write tab": from the address (the knowledge base
+  // editor links here with ?belt=), or from a belt's card. `n` makes asking for
+  // the same belt twice still count as asking.
+  const [writeRequest, setWriteRequest] = useState<{ belt: string; n: number } | null>(
+    search.belt ? { belt: search.belt, n: 0 } : null,
+  );
 
   useEffect(() => {
     if (!rolesLoading && user && !isManager) void navigate({ to: "/account" });
   }, [rolesLoading, isManager, user, navigate]);
 
-  const load = useCallback(async () => {
+  /** Fetch the syllabus. Says whether what is on screen is now fresh. */
+  const load = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     try {
       setData(await fetchSyllabus());
       setLoadError(null);
+      return true;
     } catch (e) {
       setLoadError(describeLoadError(e, "Could not load the syllabus"));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -105,11 +119,49 @@ function SyllabusManager() {
     if (isManager) void load();
   }, [isManager, load]);
 
-  /** After any write: what members read has changed, and so has this screen. */
+  /**
+   * After any write: what members read has changed, and so has this screen.
+   * Resolves false when the screen could not be refreshed, so a tab does not
+   * let go of edits it can no longer show as saved.
+   */
   const afterWrite = useCallback(async () => {
     invalidateKbReader();
-    await load();
+    return load();
   }, [invalidateKbReader, load]);
+
+  /**
+   * Open a belt's page to members, or take it back to managers only. Shared by
+   * the Write tab (beside the belt being written) and the Belts tab. Opening
+   * asks first, because it publishes a belt's syllabus to every member; taking
+   * it back does not, because that is recoverable.
+   */
+  const setBeltVisibility = useCallback(
+    async (belt: SyllabusBelt, visibility: "members" | "managers") => {
+      if (!belt.page_slug) return;
+      if (visibility === "members") {
+        const ok = await confirm({
+          title: `Open ${beltPageTitle(belt)} to members?`,
+          description:
+            "Every member will be able to read this belt's syllabus, on its page and in the syllabus by topic.",
+          confirmLabel: "Open to members",
+        });
+        if (!ok) return;
+      }
+      await saveArticle({ data: { slug: belt.page_slug, visibility } });
+      toast.success(
+        visibility === "members"
+          ? `${beltPageTitle(belt)} is open to members`
+          : `${beltPageTitle(belt)} is for managers only again`,
+      );
+      await afterWrite();
+    },
+    [afterWrite, confirm, saveArticle],
+  );
+
+  const writeBelt = useCallback((belt: string) => {
+    setWriteRequest((prev) => ({ belt, n: (prev?.n ?? 0) + 1 }));
+    setTab("write");
+  }, []);
 
   return (
     <section className="mx-auto max-w-4xl space-y-6 px-4 py-10">
@@ -138,7 +190,19 @@ function SyllabusManager() {
           onRetry={() => void load()}
         />
       ) : (
-        <Tabs defaultValue="write">
+        <Tabs value={tab} onValueChange={setTab}>
+          {loadError && (
+            // The screen holds data, but the refresh after a change failed:
+            // what is on screen may be behind what is saved. Said, not
+            // silently shown as current.
+            <LoadFailure
+              className="mb-4"
+              what="The latest syllabus"
+              message={loadError}
+              hint="Your last change went through. What is on screen may be out of date until this loads."
+              onRetry={() => void load()}
+            />
+          )}
           <TabsList>
             <TabsTrigger value="write">Write</TabsTrigger>
             <TabsTrigger value="belts">Belts</TabsTrigger>
@@ -148,10 +212,22 @@ function SyllabusManager() {
               tabs, which threw away whatever was typed in the boxes the
               moment a manager glanced at the Belts tab. */}
           <TabsContent value="write" forceMount className="pt-4 data-[state=inactive]:hidden">
-            <WriteTab data={data} confirm={confirm} onSaved={afterWrite} />
+            <WriteTab
+              data={data}
+              confirm={confirm}
+              onSaved={afterWrite}
+              request={writeRequest}
+              setBeltVisibility={setBeltVisibility}
+            />
           </TabsContent>
           <TabsContent value="belts" className="pt-4">
-            <BeltsTab data={data} confirm={confirm} onSaved={afterWrite} />
+            <BeltsTab
+              data={data}
+              confirm={confirm}
+              onSaved={afterWrite}
+              setBeltVisibility={setBeltVisibility}
+              onWrite={writeBelt}
+            />
           </TabsContent>
           <TabsContent value="topics" className="pt-4">
             <TopicsTab data={data} confirm={confirm} onSaved={afterWrite} />
@@ -164,11 +240,22 @@ function SyllabusManager() {
 }
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"];
-type TabProps = { data: SyllabusData; confirm: Confirm; onSaved: () => Promise<void> };
+type TabProps = { data: SyllabusData; confirm: Confirm; onSaved: () => Promise<boolean> };
+type SetBeltVisibility = (belt: SyllabusBelt, visibility: "members" | "managers") => Promise<void>;
 
 // ---- Write ----
 
-function WriteTab({ data, confirm, onSaved }: TabProps) {
+function WriteTab({
+  data,
+  confirm,
+  onSaved,
+  request,
+  setBeltVisibility,
+}: TabProps & {
+  /** A belt to switch to, from the address or a belt's card. */
+  request: { belt: string; n: number } | null;
+  setBeltVisibility: SetBeltVisibility;
+}) {
   const { user } = useAuth();
   const save = useServerFn(saveManagerSyllabusEntries);
   const belts = useMemo(() => orderBelts(data.belts), [data.belts]);
@@ -179,7 +266,11 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
   // The first belt that has a page, which is the one most likely to be edited;
   // white has none.
   const [selection, setSelection] = useState(
-    () => belts.find((b) => b.page_slug)?.slug ?? belts[0]?.slug ?? "",
+    () =>
+      (request && belts.some((b) => b.slug === request.belt) ? request.belt : null) ??
+      belts.find((b) => b.page_slug)?.slug ??
+      belts[0]?.slug ??
+      "",
   );
   const cells = useMemo(() => editorCells(data, mode, selection), [data, mode, selection]);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -223,6 +314,18 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
     setSaveError(null);
   }
 
+  // A belt asked for from elsewhere (its card's "Write its first block", or a
+  // link from the knowledge base editor). Goes through `choose`, so unsaved
+  // work in the boxes is asked about first. The first request is already the
+  // initial selection.
+  const handled = useRef(request?.n ?? -1);
+  useEffect(() => {
+    if (!request || request.n === handled.current) return;
+    handled.current = request.n;
+    if (mode !== "belt" || selection !== request.belt) void choose("belt", request.belt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
+
   async function onSave() {
     if (!changed.length || problems.size) return;
     setSaving(true);
@@ -241,12 +344,15 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
         );
       }
       draft.clear();
-      // Reload BEFORE letting go of the edits: cleared first, every box showed
-      // the old stored text until the reload landed, and stayed that way if it
-      // failed, as if the save had not happened.
-      await onSaved();
-      setValues({});
-      setChangeNote("");
+      // Reload BEFORE letting go of the edits, and only let go if the reload
+      // worked: cleared first, every box showed the old stored text until the
+      // reload landed, and kept showing it if the reload failed, as if the
+      // save had not happened. If it fails the edits stay in the boxes (saving
+      // them again changes nothing) under a notice that the screen is behind.
+      if (await onSaved()) {
+        setValues({});
+        setChangeNote("");
+      }
     } catch (e) {
       // Not a toast: the boxes look exactly as they would after a save, and a
       // manager who glanced away would walk off believing it was filed.
@@ -266,14 +372,13 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
       <div className="grid gap-3 rounded-lg border bg-muted/30 p-4 sm:grid-cols-[auto_1fr]">
         <fieldset className="space-y-1.5">
           <legend className="text-sm font-medium">Edit</legend>
-          <div className="flex gap-1" role="radiogroup" aria-label="Edit by">
+          <div className="flex gap-1">
             {(["belt", "topic"] as const).map((m) => (
               <Button
                 key={m}
                 type="button"
                 size="sm"
-                role="radio"
-                aria-checked={mode === m}
+                aria-pressed={mode === m}
                 variant={mode === m ? "default" : "outline"}
                 onClick={() =>
                   mode !== m &&
@@ -316,8 +421,14 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
       </div>
 
       {mode === "belt" && selectionLabel && "page_slug" in selectionLabel && (
-        <BeltPageStatus belt={selectionLabel} />
+        <BeltPageStatus belt={selectionLabel} setBeltVisibility={setBeltVisibility} />
       )}
+
+      <p className="text-xs text-muted-foreground">
+        Members can comment on any paragraph of a belt page. Changing the words of a block moves the
+        comments on it to &ldquo;On earlier wording&rdquo; on that page; adding or reordering blocks
+        leaves comments where they are.
+      </p>
 
       {draft.offered && (
         <DraftRestoreBanner
@@ -336,8 +447,12 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
       {cells.length === 0 ? (
         <p className="rounded-lg border p-4 text-sm text-muted-foreground">
           {mode === "belt"
-            ? "There are no belts yet. Add one on the Belts tab."
-            : "There are no topics yet. Add one on the Topics tab."}
+            ? belts.length
+              ? "Pick a belt above."
+              : "There are no belts yet. Add one on the Belts tab."
+            : !topics.length
+              ? "There are no topics yet. Add one on the Topics tab."
+              : "No belt has a page yet. Pick One belt and write a belt's first block: that makes its page."}
         </p>
       ) : (
         <div className="space-y-4">
@@ -419,6 +534,11 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
                 : "Nothing to save"}
           </Button>
         </div>
+        {problems.size > 0 && (
+          <p className="text-xs text-destructive">
+            A box above has a heading in it. Take it out to save: the topic is already the heading.
+          </p>
+        )}
         <p className="hidden text-xs text-muted-foreground sm:block">
           Saving updates each belt page that changed, straight away. Members who read a page are
           told it was updated.
@@ -428,74 +548,121 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
   );
 }
 
-/** Where a belt's page stands: none yet, a draft, or open to members. */
-function BeltPageStatus({ belt }: { belt: SyllabusBelt }) {
+/**
+ * Where a belt's page stands (none yet, a draft, or open to members), with the
+ * one decision about it that belongs here: who can read it. Its comments, its
+ * version history and its sidebar label live with every other article, in the
+ * knowledge base editor, which this links to.
+ */
+function BeltPageStatus({
+  belt,
+  setBeltVisibility,
+}: {
+  belt: SyllabusBelt;
+  setBeltVisibility: SetBeltVisibility;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   if (!belt.page_slug) {
     return (
       <p className="text-sm text-muted-foreground">
         {belt.name} has no page yet. Saving its first block makes one, for managers only until you
-        open it to members on the Belts tab.
+        open it to members.
       </p>
     );
   }
+  const draft = belt.visibility === "managers";
+  const toggle = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await setBeltVisibility(belt, draft ? "members" : "managers");
+    } catch (e) {
+      setFailure(errorText(e, "Who can read the page could not be changed."));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-      <Link
-        to="/kb/$slug"
-        params={{ slug: belt.page_slug }}
-        className="inline-flex items-center gap-1 underline underline-offset-4"
-      >
-        /kb/{belt.page_slug}
-        <ExternalLink className="h-3 w-3" aria-hidden="true" />
-      </Link>
-      {belt.visibility === "managers" ? (
-        <Badge variant="secondary">Draft, managers only</Badge>
-      ) : (
-        <Badge variant="outline">Members can read it</Badge>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <Link
+          to="/kb/$slug"
+          params={{ slug: belt.page_slug }}
+          className="inline-flex min-h-8 items-center gap-1 underline underline-offset-4"
+        >
+          /kb/{belt.page_slug}
+          <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </Link>
+        {draft ? (
+          <Badge variant="secondary">Draft, managers only</Badge>
+        ) : (
+          <Badge variant="outline">Members can read it</Badge>
+        )}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => void toggle()}
+        >
+          {draft ? "Open to members" : "Make it managers only"}
+        </Button>
+        <Link
+          to="/manager/kb"
+          search={{ article: belt.page_slug }}
+          className="inline-flex min-h-8 items-center underline underline-offset-4"
+        >
+          Comments and history
+        </Link>
+      </div>
+      {failure && (
+        <ActionFailure
+          title="That did not go through."
+          message={failure}
+          onDismiss={() => setFailure(null)}
+        />
       )}
-    </p>
+    </div>
   );
 }
 
 // ---- Belts ----
 
-function BeltsTab({ data, confirm, onSaved }: TabProps) {
+function BeltsTab({
+  data,
+  confirm,
+  onSaved,
+  setBeltVisibility,
+  onWrite,
+}: TabProps & {
+  setBeltVisibility: SetBeltVisibility;
+  /** Open a belt in the Write tab. */
+  onWrite: (belt: string) => void;
+}) {
   const saveBelt = useServerFn(saveManagerBelt);
   const removeBelt = useServerFn(deleteManagerBelt);
-  const saveArticle = useServerFn(saveManagerArticle);
   const belts = useMemo(() => orderBelts(data.belts), [data.belts]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  // Shown on the card it was about, not at the top of eight cards.
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
 
-  async function run(key: string, action: () => Promise<unknown>, done: string) {
+  async function run(key: string, action: () => Promise<unknown>, done?: string) {
     setBusy(key);
     setFailure(null);
     try {
       await action();
-      toast.success(done);
-      await onSaved();
+      if (done) {
+        toast.success(done);
+        await onSaved();
+      }
       return true;
     } catch (e) {
-      setFailure(errorText(e, "That did not go through."));
+      setFailure({ key, message: errorText(e, "That did not go through.") });
       return false;
     } finally {
       setBusy(null);
     }
-  }
-
-  async function openToMembers(belt: SyllabusBelt) {
-    if (!belt.page_slug) return;
-    const ok = await confirm({
-      title: `Open ${beltPageTitle(belt)} to members?`,
-      description: `Every member will be able to read this belt's syllabus, on its page and in the syllabus by topic.`,
-      confirmLabel: "Open to members",
-    });
-    if (!ok) return;
-    await run(
-      belt.slug,
-      () => saveArticle({ data: { slug: belt.page_slug!, visibility: "members" } }),
-      `${beltPageTitle(belt)} is open to members`,
-    );
   }
 
   async function remove(belt: SyllabusBelt) {
@@ -508,41 +675,51 @@ function BeltsTab({ data, confirm, onSaved }: TabProps) {
     if (ok) await run(belt.slug, () => removeBelt({ data: { slug: belt.slug } }), "Belt deleted");
   }
 
+  const failureFor = (key: string) =>
+    failure?.key === key ? (
+      <FailureNear message={failure.message} onDismiss={() => setFailure(null)} />
+    ) : null;
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Junior first. A belt&apos;s page title is built from its name and grade, so changing either
-        updates the page. The colour is only a swatch beside the name.
+        updates the page. Its colour marks it in the syllabus members read.
       </p>
-      {failure && (
-        // Not a retry: a one-press change that failed has nothing typed to
-        // keep, and pressing it again is the manager's call once they have
-        // read what went wrong.
-        <ActionFailure
-          title="That change did not go through."
-          message={failure}
-          onDismiss={() => setFailure(null)}
-        />
-      )}
       {belts.map((belt) => (
-        <BeltRow
-          key={belt.slug}
-          belt={belt}
-          busy={busy === belt.slug}
-          onSave={(patch) =>
-            run(belt.slug, () => saveBelt({ data: { slug: belt.slug, ...patch } }), "Belt saved")
-          }
-          onOpen={() => void openToMembers(belt)}
-          onDelete={() => void remove(belt)}
-        />
+        <div key={belt.slug} className="space-y-2">
+          <BeltRow
+            belt={belt}
+            busy={busy === belt.slug}
+            onSave={(patch) =>
+              run(belt.slug, () => saveBelt({ data: { slug: belt.slug, ...patch } }), "Belt saved")
+            }
+            // `setBeltVisibility` reloads and says so itself, so no message here.
+            onVisibility={(visibility) =>
+              void run(belt.slug, () => setBeltVisibility(belt, visibility))
+            }
+            onWrite={() => onWrite(belt.slug)}
+            onDelete={() => void remove(belt)}
+          />
+          {failureFor(belt.slug)}
+        </div>
       ))}
       <NewBelt
         busy={busy === "new"}
         nextPosition={(belts[belts.length - 1]?.position ?? 0) + 10}
-        onCreate={(input) =>
-          run("new", () => saveBelt({ data: { ...input, expect_new: true } }), "Belt added")
-        }
+        onCreate={async (input) => {
+          const ok = await run(
+            "new",
+            () => saveBelt({ data: { ...input, expect_new: true } }),
+            "Belt added",
+          );
+          // Straight on to what a new belt needs next: its first block, which
+          // is what makes its page.
+          if (ok) onWrite(input.slug);
+          return ok;
+        }}
       />
+      {failureFor("new")}
     </div>
   );
 }
@@ -553,13 +730,15 @@ function BeltRow({
   belt,
   busy,
   onSave,
-  onOpen,
+  onVisibility,
+  onWrite,
   onDelete,
 }: {
   belt: SyllabusBelt;
   busy: boolean;
   onSave: (patch: BeltPatch) => Promise<boolean>;
-  onOpen: () => void;
+  onVisibility: (visibility: "members" | "managers") => void;
+  onWrite: () => void;
   onDelete: () => void;
 }) {
   const [form, setForm] = useState<BeltPatch>({
@@ -663,9 +842,21 @@ function BeltRow({
           >
             {busy ? "Saving..." : "Save"}
           </Button>
-          {belt.page_slug && belt.visibility === "managers" && (
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onOpen}>
-              Open the page to members
+          {belt.page_slug ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => onVisibility(belt.visibility === "managers" ? "members" : "managers")}
+            >
+              {belt.visibility === "managers"
+                ? "Open the page to members"
+                : "Make it managers only"}
+            </Button>
+          ) : (
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onWrite}>
+              Write its first block
             </Button>
           )}
           {!belt.page_slug && (

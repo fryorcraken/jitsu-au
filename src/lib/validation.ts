@@ -4421,6 +4421,20 @@ export const syllabusSearchSchema = z.object({
 export type SyllabusSearch = z.infer<typeof syllabusSearchSchema>;
 
 /**
+ * The manager's `/manager/syllabus?belt=green`: open on that belt. Lenient for
+ * the same reason as the member's page: it arrives from a link (the knowledge
+ * base editor's "Edit the syllabus"), and a bad value just opens the default.
+ */
+export const manageSyllabusSearchSchema = z.object({
+  belt: z.string().trim().max(50).optional().catch(undefined),
+});
+
+/** The manager's `/manager/kb?article=green-belt`: open on that article. */
+export const manageKbSearchSchema = z.object({
+  article: z.string().trim().max(100).optional().catch(undefined),
+});
+
+/**
  * Write an annotation.
  *
  * `article_version` is the version the reader had on screen. The server stores
