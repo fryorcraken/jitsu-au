@@ -75,7 +75,11 @@
                 "list_check_in_classes",
                 "list_attendance",
                 "get_check_in_preview",
-                "list_uncovered_check_ins"
+                "list_uncovered_check_ins",
+                "list_club_messages",
+                "get_club_message",
+                "list_message_leads",
+                "get_club_message_audience"
               ],
               "description": "The read-only action to run."
             },
@@ -147,7 +151,9 @@
                 "check_in",
                 "undo_check_in",
                 "attach_check_in",
-                "move_check_in"
+                "move_check_in",
+                "send_club_message_test",
+                "send_club_message"
               ],
               "description": "The action to run."
             },

@@ -512,6 +512,10 @@ export const interestSchema = z.object({
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
   message: z.string().trim().max(1000).optional().or(z.literal("")),
+  // The optional "Keep me posted about club events and offers" box. Absent
+  // means unticked, so an older page still open in somebody's browser keeps
+  // working and never records consent nobody gave.
+  promotion_consent: z.boolean().optional().default(false),
   hp: honeypot,
 });
 
@@ -3182,6 +3186,12 @@ export const managerAgentActions = [
   "undo_check_in",
   "attach_check_in",
   "move_check_in",
+  "list_club_messages",
+  "get_club_message",
+  "list_message_leads",
+  "get_club_message_audience",
+  "send_club_message_test",
+  "send_club_message",
 ] as const;
 export type ManagerAgentAction = (typeof managerAgentActions)[number];
 

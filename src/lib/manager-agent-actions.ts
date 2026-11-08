@@ -242,6 +242,12 @@ import {
 } from "@/lib/calendar.functions";
 import { CLUB_TIME_ZONE } from "@/lib/calendar";
 import {
+  agentClubMessageAudienceSchema,
+  agentClubMessageIdSchema,
+  agentSendClubMessageSchema,
+  agentSendClubMessageTestSchema,
+} from "@/lib/club-message";
+import {
   attachCheckInRow,
   CheckInError,
   type CheckInRefusal,
@@ -2109,6 +2115,81 @@ async function handleSaveSiteBanner(params: unknown, actingAs: string) {
   return { banner: input.value };
 }
 
+// ---- actions: club messages ----
+//
+// Through `club-message.server.ts`, the module the Messages screen's server
+// functions call, so an agent counts, tests and sends exactly as the screen
+// does (docs/club-messages.md).
+
+/** The refusals a club message send can give, as HTTP. */
+async function clubMessageAgentError(e: unknown): Promise<unknown> {
+  const { ClubMessageError } = await import("@/lib/club-message.server");
+  if (!(e instanceof ClubMessageError)) return e;
+  const status = e.code === "not_found" ? 404 : e.code === "submission_conflict" ? 409 : 422;
+  return new AgentError(status, e.code, e.message);
+}
+
+async function handleListClubMessages() {
+  const { listClubMessages } = await import("@/lib/club-message.server");
+  const messages = await listClubMessages(await adminClient());
+  return { count: messages.length, messages };
+}
+
+async function handleGetClubMessage(params: unknown) {
+  const input = agentClubMessageIdSchema.parse(params);
+  const { getClubMessage } = await import("@/lib/club-message.server");
+  try {
+    return await getClubMessage(await adminClient(), input.id);
+  } catch (e) {
+    throw await clubMessageAgentError(e);
+  }
+}
+
+async function handleListMessageLeads() {
+  const { listMessageLeads } = await import("@/lib/club-message.server");
+  const leads = await listMessageLeads(await adminClient());
+  return { count: leads.length, leads };
+}
+
+async function handleGetClubMessageAudience(params: unknown) {
+  const input = agentClubMessageAudienceSchema.parse(params);
+  const { countClubMessageAudience } = await import("@/lib/club-message.server");
+  return countClubMessageAudience(await adminClient(), {
+    groups: input.groups,
+    leadIds: input.lead_ids,
+  });
+}
+
+async function handleSendClubMessageTest(params: unknown, actingAs: string) {
+  const input = agentSendClubMessageTestSchema.parse(params);
+  const { sendClubMessageTest } = await import("@/lib/club-message.server");
+  const result = await sendClubMessageTest(await adminClient(), {
+    managerId: actingAs,
+    subject: input.subject,
+    body: input.body,
+    clickId: input.client_submission_id ?? crypto.randomUUID(),
+  });
+  return { sent: true as const, to: result.to };
+}
+
+async function handleSendClubMessage(params: unknown, actingAs: string) {
+  const input = agentSendClubMessageSchema.parse(params);
+  const { sendClubMessage } = await import("@/lib/club-message.server");
+  try {
+    return await sendClubMessage(await adminClient(), {
+      messageId: input.message_id,
+      kind: input.kind,
+      subject: input.subject,
+      body: input.body,
+      groups: input.groups,
+      leadIds: input.lead_ids,
+      actorId: actingAs,
+    });
+  } catch (e) {
+    throw await clubMessageAgentError(e);
+  }
+}
+
 // ---- action: resend_email ----
 //
 // Through `resendEmail`, the function the screens' Resend buttons post to, so
@@ -3065,5 +3146,17 @@ export async function dispatch(
       return handleAttachCheckIn(params, actingAs);
     case "move_check_in":
       return handleMoveCheckIn(params, actingAs);
+    case "list_club_messages":
+      return handleListClubMessages();
+    case "get_club_message":
+      return handleGetClubMessage(params);
+    case "list_message_leads":
+      return handleListMessageLeads();
+    case "get_club_message_audience":
+      return handleGetClubMessageAudience(params);
+    case "send_club_message_test":
+      return handleSendClubMessageTest(params, actingAs);
+    case "send_club_message":
+      return handleSendClubMessage(params, actingAs);
   }
 }

@@ -399,6 +399,7 @@ async function stampEmailed(db: AdminClient, ids: string[]): Promise<void> {
 }
 
 const SECTION_HEADINGS = {
+  notices: "From the club",
   membership: "Membership",
   replies: "Replies to you",
   threads: "Threads you are in",
@@ -590,7 +591,7 @@ export async function sendDailyDigests(db: AdminClient, now = new Date()): Promi
       }
 
       const blocks: DigestBlock[] = (
-        ["membership", "replies", "threads", "posts", "moderation"] as const
+        ["notices", "membership", "replies", "threads", "posts", "moderation"] as const
       )
         .filter((key) => sections[key].length > 0)
         .map((key) => ({

@@ -508,7 +508,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "36",
+  version: "37",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -521,6 +521,15 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "37",
+      // New actions, and nothing that worked before changes.
+      breaking: false,
+      notes: [
+        "Club notices, the agent's equivalent of the manager's Messages screen, through the same functions it calls. New read actions: list_club_messages and get_club_message (what was sent and how far it got), list_message_leads (the leads a notice can go to, the last 90 days marked preselected) and get_club_message_audience (how many emails a choice of groups and leads would send).",
+        "New change actions: send_club_message_test (a test copy to the acting manager only) and send_club_message (emails everyone ticked; read the count back to the manager first). A notice is facts about training only; promotions are not available.",
+      ],
+    },
     {
       version: "36",
       // One refusal that is new: text sent to a belt page through
@@ -2365,6 +2374,97 @@ export const AGENT_MANIFEST: {
           name: "membership_id",
           required: true,
           description: "Another membership of the same person's, from get_user's memberships.",
+        },
+      ],
+    },
+    {
+      name: "list_club_messages",
+      method: "POST",
+      summary:
+        "The club notices managers have sent, newest first, the same list as the Messages screen: id, kind (notice), subject, sent_at, sent_by_name, groups (the groups ticked), lead_count (leads ticked), recipients (emails it is: one per household plus one per lead), emailed and pending. pending above zero means some have not gone yet: send_club_message with the same message_id sends them, and otherwise the next morning's summary does. No bodies: get_club_message reads one.",
+      params: [],
+    },
+    {
+      name: "get_club_message",
+      method: "POST",
+      summary:
+        "One sent club notice in full: everything list_club_messages reports plus body (Markdown, as sent). 404 not_found when there is no such message.",
+      params: [{ name: "id", required: true, description: "The message's id." }],
+    },
+    {
+      name: "list_message_leads",
+      method: "POST",
+      summary:
+        "Every lead a club notice could go to, newest first, the same list the Messages screen ticks from: registration_id (what send_club_message's lead_ids takes), name, email, registered_at, promotion_consent (they ticked 'keep me posted about club events and offers') and preselected (registered in the last 90 days, ticked to start with on the screen). One row per address, the newest registration standing for it; an address that now belongs to a person is left out, because they get messages as that person.",
+      params: [],
+    },
+    {
+      name: "get_club_message_audience",
+      method: "POST",
+      summary:
+        "How many emails a club notice would send right now to these groups and leads, without sending anything: emails (the number to read back to the manager before sending), inboxes (households), leads, and by_group (households each group reaches on its own). A family is one email, to the parent. Nobody who has left the club is counted.",
+      params: [
+        {
+          name: "groups",
+          required: false,
+          description:
+            "Any of members (paying for training now), visitors (waiver approved, not paying now, lapsed members included) and applicants (waiver still waiting for approval). Default none.",
+        },
+        {
+          name: "lead_ids",
+          required: false,
+          description: "registration_id values from list_message_leads. Default none.",
+        },
+      ],
+    },
+    {
+      name: "send_club_message_test",
+      method: "POST",
+      summary:
+        "Email a test copy of a club notice to the acting manager's own address only, marked as a test, exactly as everyone else would see it. Nothing is recorded and nobody else is emailed. Returns to.",
+      params: [
+        { name: "kind", required: true, description: "notice. The only kind today." },
+        { name: "subject", required: true, description: "One line, up to 200 characters." },
+        {
+          name: "body",
+          required: true,
+          description: "The message, in Markdown (bold, lists, links). Raw HTML is dropped.",
+        },
+        {
+          name: "client_submission_id",
+          required: false,
+          description: "A UUID for this test. Reuse it to retry safely; omit it for a new send.",
+        },
+      ],
+    },
+    {
+      name: "send_club_message",
+      method: "POST",
+      summary:
+        "Send a club notice, the same send as the manager's Messages screen. IT EMAILS PEOPLE AND CANNOT BE UNDONE: before calling, read the subject, the groups and leads, and the emails count from get_club_message_audience back to the manager and get a clear yes. A notice is facts about training only (a closure, a time change, a venue move); it must not ask anyone to buy or join anything, because promotions are not available yet. Members also see it on their Notifications page and cannot turn it off. Up to 150 go per call: the result's pending says how many are left, and calling again with the same message_id (and the same words) sends those without emailing anybody twice. Members left over also go with the next morning's summary; leads only go when you call again. The list of recipients is fixed by the first call. Returns message_id, sent_at, recipients, emailed, pending. 409 submission_conflict when message_id was already used with different words: mint a new id. 422 no_recipients when nobody ticked can be emailed.",
+      params: [
+        {
+          name: "message_id",
+          required: true,
+          description:
+            "A UUID you mint for this message. Keep it: the same id finishes the same message, and a new id is a new message.",
+        },
+        { name: "kind", required: true, description: "notice. The only kind today." },
+        { name: "subject", required: true, description: "One line, up to 200 characters." },
+        {
+          name: "body",
+          required: true,
+          description: "The message, in Markdown (bold, lists, links). Raw HTML is dropped.",
+        },
+        {
+          name: "groups",
+          required: false,
+          description: "As for get_club_message_audience. At least one group or one lead.",
+        },
+        {
+          name: "lead_ids",
+          required: false,
+          description: "registration_id values from list_message_leads.",
         },
       ],
     },

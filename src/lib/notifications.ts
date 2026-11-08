@@ -22,6 +22,7 @@ export const notificationKinds = [
   "membership_plan_open",
   "insurance_ending_soon",
   "insurance_ended",
+  "club_notice",
 ] as const;
 export type NotificationKind = (typeof notificationKinds)[number];
 
@@ -32,6 +33,7 @@ export const notificationSubjectTypes = [
   "blog_post",
   "membership_plan_announcement",
   "membership",
+  "club_message",
 ] as const;
 export type NotificationSubjectType = (typeof notificationSubjectTypes)[number];
 
@@ -77,6 +79,10 @@ export const preferenceForKind: Record<NotificationKind, EmailPreferenceKey | nu
   // can turn it off either.
   insurance_ending_soon: null,
   insurance_ended: null,
+  // A club notice a manager sent (`club-message.ts`): a closure, a time
+  // change. Facts about training that every person it was sent to needs, so
+  // no switch stops it, the same as an invoice (docs/club-messages.md).
+  club_notice: null,
 };
 
 /** The closed list of kinds no switch governs. See `preferenceForKind`. */
@@ -84,6 +90,7 @@ export const UNSWITCHABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = [
   "membership_plan_open",
   "insurance_ending_soon",
   "insurance_ended",
+  "club_notice",
 ];
 
 /** Whether a person's switches have any say over emailing this kind. */
@@ -188,6 +195,7 @@ export function badgeCount(
 
 /** A digest email, grouped so each section can have its own heading. */
 export type DigestSections = {
+  notices: NotificationItem[];
   membership: NotificationItem[];
   replies: NotificationItem[];
   threads: NotificationItem[];
@@ -211,11 +219,14 @@ export function digestSections(
 ): DigestSections {
   const allowed = rows.filter((r) => shouldEmail(prefs, r.kind, opts));
   return {
-    // First, because it is about the person's own membership. These reach the
+    // A club notice the immediate send could not deliver (`club-message.server.ts`).
+    // First: it is news about training that everybody it was sent to needs.
+    notices: allowed.filter((r) => r.kind === "club_notice"),
+    // Then the person's own membership. These reach the
     // digest only when their own email did not go: the plan announcement's
     // immediate send (`plan-announcement.server.ts`), or an insurance reminder
     // the morning run could not send (`insurance-reminders.server.ts`).
-    membership: allowed.filter((r) => !isSwitchableKind(r.kind)),
+    membership: allowed.filter((r) => !isSwitchableKind(r.kind) && r.kind !== "club_notice"),
     replies: allowed.filter((r) => r.kind === "reply"),
     threads: allowed.filter((r) => r.kind === "thread_activity"),
     posts: allowed.filter((r) => r.kind === "new_blog_post"),
@@ -277,6 +288,7 @@ export function mergeHouseholdItems(rows: DigestCandidate[]): NotificationItem[]
 /** Whether a digest has anything in it. An empty one is not sent. */
 export function hasDigestContent(sections: DigestSections): boolean {
   return (
+    sections.notices.length > 0 ||
     sections.membership.length > 0 ||
     sections.replies.length > 0 ||
     sections.threads.length > 0 ||
@@ -288,6 +300,7 @@ export function hasDigestContent(sections: DigestSections): boolean {
 /** How many items a digest covers, for the subject line and the logs. */
 export function digestItemCount(sections: DigestSections): number {
   return (
+    sections.notices.length +
     sections.membership.length +
     sections.replies.length +
     sections.threads.length +
