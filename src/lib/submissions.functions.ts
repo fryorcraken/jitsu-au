@@ -65,6 +65,9 @@ export const submitInterest = createServerFn({ method: "POST" })
       email: data.email,
       phone: data.phone || null,
       sms_whatsapp_consent: Boolean(data.phone && data.phone.trim()),
+      // Their own tick, never inferred: it is what lets the club send them a
+      // promotion (docs/club-messages.md).
+      promotion_consent: data.promotion_consent,
       message: data.message || null,
       client_submission_id: submissionId,
     });

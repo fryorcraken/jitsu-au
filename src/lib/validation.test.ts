@@ -1014,6 +1014,20 @@ describe("interestSchema", () => {
     expect(result.success && "uts_student" in result.data).toBe(false);
   });
 
+  it("treats a missing promotion box as unticked, never as consent", () => {
+    const result = interestSchema.safeParse(valid);
+    expect(result.success && result.data.promotion_consent).toBe(false);
+  });
+
+  it("carries a ticked promotion box through", () => {
+    const result = interestSchema.safeParse({ ...valid, promotion_consent: true });
+    expect(result.success && result.data.promotion_consent).toBe(true);
+  });
+
+  it("refuses a promotion box that is not a yes or no", () => {
+    expect(interestSchema.safeParse({ ...valid, promotion_consent: "yes" }).success).toBe(false);
+  });
+
   it("rejects an invalid email", () => {
     expect(interestSchema.safeParse({ ...valid, email: "not-an-email" }).success).toBe(false);
   });

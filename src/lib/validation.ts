@@ -509,6 +509,10 @@ export const interestSchema = z.object({
   email: z.string().trim().email().max(255),
   phone: z.string().trim().max(30).optional().or(z.literal("")),
   message: z.string().trim().max(1000).optional().or(z.literal("")),
+  // The optional "Keep me posted about club events and offers" box. Absent
+  // means unticked, so an older page still open in somebody's browser keeps
+  // working and never records consent nobody gave.
+  promotion_consent: z.boolean().optional().default(false),
   hp: honeypot,
 });
 

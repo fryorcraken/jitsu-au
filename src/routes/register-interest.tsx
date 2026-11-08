@@ -5,6 +5,7 @@ import { CheckCircle2, FileSignature } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { SubmitStatus } from "@/components/site/SubmitStatus";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -82,6 +83,8 @@ function RegisterInterest() {
             email,
             phone,
             message: String(fd.get("message") || ""),
+            // Unticked unless they tick it: a pre-ticked box is not consent.
+            promotion_consent: fd.get("promotion_consent") === "on",
             hp: String(fd.get("hp") || ""),
           },
         });
@@ -223,6 +226,18 @@ function RegisterInterest() {
               placeholder="Ask us anything, or leave a note (optional)"
               className="mt-1.5"
             />
+          </div>
+
+          <div className="flex items-start gap-3">
+            <Checkbox id="promotion_consent" name="promotion_consent" className="mt-0.5" />
+            <div>
+              <Label htmlFor="promotion_consent" className="font-normal leading-snug">
+                Keep me posted about club events and offers (optional)
+              </Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                We'll still email you about your trial either way. You can stop these at any time.
+              </p>
+            </div>
           </div>
 
           <Button type="submit" size="lg" disabled={send.busy} className="w-full">
