@@ -59,7 +59,14 @@ export function SaveFailure({
           : "Everything you have typed is still on this screen, so nothing is lost."}{" "}
         Try again when you have a connection.
       </p>
-      <Button className="mt-3" size="sm" variant="outline" disabled={retrying} onClick={onRetry}>
+      <Button
+        type="button"
+        className="mt-3"
+        size="sm"
+        variant="outline"
+        disabled={retrying}
+        onClick={onRetry}
+      >
         <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
         {retrying ? "Saving..." : "Try again"}
       </Button>

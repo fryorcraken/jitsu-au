@@ -1,10 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
+import { SaveFailure } from "@/components/site/SaveFailure";
+import type { PickedDriveFolder } from "@/lib/google-picker";
+import { ActionFailure } from "@/components/site/ActionFailure";
 import { Loading } from "@/components/site/Loading";
 import { describeLoadError } from "@/lib/load-error";
 import { Input } from "@/components/ui/input";
@@ -360,6 +363,18 @@ function AccountPage() {
   );
 }
 
+/**
+ * The two build-time values Google Picker needs, or null when either is
+ * missing. Read here rather than inside `@/lib/google-picker` so the picker
+ * module (and Google's scripts with it) stay lazily loaded until the manager
+ * actually browses.
+ */
+function googlePickerConfig(): { clientId: string; developerKey: string } | null {
+  const clientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
+  const developerKey = import.meta.env.VITE_GOOGLE_PICKER_API_KEY as string | undefined;
+  return clientId && developerKey ? { clientId, developerKey } : null;
+}
+
 function GoogleDriveCard() {
   const status = useServerFn(getGoogleDriveStatus);
   const start = useServerFn(startGoogleDriveConnect);
@@ -377,6 +392,19 @@ function GoogleDriveCard() {
   const [folderNameInput, setFolderNameInput] = useState("");
   const [folderBusy, setFolderBusy] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
+  const [pickedFolder, setPickedFolder] = useState<PickedDriveFolder | null>(null);
+  // Set while Google's dialog is on screen. Everything in that dialog is
+  // Google's and it only talks back on a pick or a cancel, so this is the
+  // manager's own way out if it refuses the pick or shows its own error.
+  const [abandonPicker, setAbandonPicker] = useState<(() => void) | null>(null);
+
+  // Google Picker needs both halves of the same Cloud project: the OAuth client
+  // the connector runs on, and a browser API key with the Picker API enabled.
+  // Without the key the picker is expected to browse and then refuse to hand a
+  // folder back, so the button is disabled rather than left as a dead end.
+  const picker = useMemo(googlePickerConfig, []);
 
   const refresh = () => {
     setLoading(true);
@@ -405,6 +433,14 @@ function GoogleDriveCard() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetch Google's scripts now, while nobody is waiting. Downloading them
+  // inside the Browse click spends its transient activation, and the browser
+  // then blocks the sign-in popup as unsolicited.
+  useEffect(() => {
+    if (!picker || !connected) return;
+    void import("@/lib/google-picker").then((m) => m.preloadGooglePicker()).catch(() => {});
+  }, [picker, connected]);
 
   async function onConnect() {
     setBusy(true);
@@ -445,46 +481,68 @@ function GoogleDriveCard() {
     }
   }
 
-  async function onSaveFolder(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveFolder() {
     const folderName = folderNameInput.trim();
     if (!folderName) return;
     setFolderBusy(true);
+    setSaveError(null);
     try {
       const result = await setFolder({ data: { folderName } });
       setSavedFolderName(result.folderName);
       toast.success(`Waivers will save to "${result.folderName}"`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not save the folder name. Try again.");
+      setSaveError(e instanceof Error ? e.message : "Could not save the folder name. Try again.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function savePickedFolder(folder: PickedDriveFolder) {
+    setFolderBusy(true);
+    setSaveError(null);
+    try {
+      const result = await saveFolderFromPicker({ data: { folderId: folder.id } });
+      setSavedFolderName(result.folderName);
+      setFolderNameInput(result.folderName);
+      setPickedFolder(null);
+      toast.success(`Waivers will save to "${result.folderName}"`);
+    } catch (e) {
+      // Keep the folder, so Try again saves the one they chose. The pick
+      // itself stands: Google has already recorded this site's access to it.
+      setPickedFolder(folder);
+      setSaveError(e instanceof Error ? e.message : "Could not save that folder. Try again.");
     } finally {
       setFolderBusy(false);
     }
   }
 
   async function onBrowseFolder() {
-    const clientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID as string | undefined;
-    if (!clientId) {
-      toast.error("Browsing isn't set up yet. Type the folder name instead.");
-      return;
-    }
+    if (!picker) return;
     setPickerBusy(true);
+    setPickError(null);
+    setSaveError(null);
+    let picked: PickedDriveFolder | null = null;
     try {
       const { pickDriveFolder } = await import("@/lib/google-picker");
-      const picked = await pickDriveFolder(clientId);
-      if (!picked) return;
-      const result = await saveFolderFromPicker({ data: { folderId: picked.id } });
-      setSavedFolderName(result.folderName);
-      setFolderNameInput(result.folderName);
-      toast.success(`Waivers will save to "${result.folderName}"`);
+      picked = await pickDriveFolder({
+        ...picker,
+        connectedEmail: email,
+        onOpen: (close) => setAbandonPicker(() => close),
+      });
     } catch (e) {
-      toast.error(
+      setPickError(
         e instanceof Error
           ? e.message
           : "Could not open the folder picker. Type the folder name instead.",
       );
     } finally {
+      // Google's dialog is gone either way, so the way out of it goes too:
+      // left on screen it would offer to cancel a dialog that has closed.
+      setAbandonPicker(null);
       setPickerBusy(false);
     }
+
+    if (picked) await savePickedFolder(picked);
   }
 
   return (
@@ -522,13 +580,23 @@ function GoogleDriveCard() {
                 {busy ? "Working..." : "Disconnect"}
               </Button>
             </div>
-            <form onSubmit={onSaveFolder} className="space-y-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveFolder();
+              }}
+              className="space-y-2"
+            >
               <Label htmlFor="drive-folder-name">Drive folder</Label>
               <div className="flex flex-wrap items-center gap-2">
                 <Input
                   id="drive-folder-name"
                   value={folderNameInput}
-                  onChange={(e) => setFolderNameInput(e.target.value)}
+                  onChange={(e) => {
+                    setFolderNameInput(e.target.value);
+                    setSaveError(null);
+                    setPickedFolder(null);
+                  }}
                   placeholder={DEFAULT_FOLDER_NAME}
                   className="max-w-xs"
                   disabled={folderBusy}
@@ -541,15 +609,46 @@ function GoogleDriveCard() {
                   variant="outline"
                   size="sm"
                   onClick={onBrowseFolder}
-                  disabled={pickerBusy}
+                  disabled={pickerBusy || !picker}
                 >
                   {pickerBusy ? "Opening..." : "Browse in Drive"}
                 </Button>
+                {abandonPicker ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={abandonPicker}>
+                    Cancel
+                  </Button>
+                ) : null}
               </div>
+              {saveError && (
+                <SaveFailure
+                  what="folder"
+                  message={saveError}
+                  onRetry={() =>
+                    void (pickedFolder ? savePickedFolder(pickedFolder) : saveFolder())
+                  }
+                  retrying={folderBusy}
+                  // This box is not backed by a draft, so the panel must not
+                  // promise the name is kept anywhere but on the screen.
+                  keptOnDevice={false}
+                />
+              )}
+              {pickError && (
+                <ActionFailure
+                  title="Choosing a folder did not finish."
+                  message={pickError}
+                  onDismiss={() => setPickError(null)}
+                />
+              )}
               <p className="text-xs text-muted-foreground">
                 {savedFolderName
-                  ? `Waivers save to "${savedFolderName}". Browsing lets you pick any folder you have access to, including one in a shared drive; typing a name will only find one this app made before (a folder you made yourself in Drive with the same name won't be found).`
-                  : "Browse to pick any folder you have access to, including one in a shared drive, or type a name and we'll create it in your own Drive (a folder you made yourself with the same name won't be found by typing)."}
+                  ? `Waivers save to "${savedFolderName}". `
+                  : "Waivers do not save to Drive until you set a folder. "}
+                {picker
+                  ? "Browsing lets you pick any folder you have access to, including one in a shared drive. In the Google window, click a folder once to highlight it and then press Select: opening a folder does not choose it. "
+                  : "Browsing is off until this site has its Google Picker key, so type a name for now. "}
+                {savedFolderName
+                  ? "Typing a name only finds a folder this app made before, so a folder you made yourself in Drive with the same name will not be found."
+                  : "Typing a name creates that folder in your own Drive, and only finds an existing one this app made before."}
               </p>
             </form>
           </div>

@@ -68,6 +68,10 @@ export const PUBLISHABLE_ENV_KEYS = new Set([
   "VITE_SUPABASE_PROJECT_ID",
   "VITE_SUPABASE_PUBLISHABLE_KEY",
   "VITE_SUPABASE_URL",
+  // The Google Picker browser API key. Publishable by design: it ships inside
+  // the JavaScript bundle, so it is readable from the live site either way, and
+  // what protects it is its referrer and API restrictions (docs/google-drive.md).
+  "VITE_GOOGLE_PICKER_API_KEY",
   "VITE_GOOGLE_OAUTH_CLIENT_ID",
 ]);
 
