@@ -22,9 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Pinned rather than `latest`, and kept the same in ci.yml and e2e.yml:
-      # a run should not change Bun under a commit that already passed. Bump it
-      # here (both files) on purpose.
+      # Pinned rather than `latest`, in `.bun-version` at the repo root, which
+      # both workflows and both install paths read: a run should not change Bun
+      # under a commit that already passed. Bump it there, on purpose.
       #
       # setup-bun downloads from GitHub releases, which has returned 504 on
       # every attempt for an hour at a time (2026-11-08) with nothing wrong in
@@ -35,12 +35,16 @@ jobs:
         id: setup-bun
         continue-on-error: true
         with:
-          bun-version: "1.4.4"
+          bun-version-file: .bun-version
 
+      # Says so in the run summary, so a primary path that stays broken is
+      # noticed rather than quietly worked around on every run.
       - name: Install Bun from npm (GitHub releases unavailable)
         if: steps.setup-bun.outcome == 'failure'
         run: |
-          npm install --global bun@1.4.4
+          version="$(tr -d '[:space:]' < .bun-version)"
+          echo "::warning title=Bun installed from npm::setup-bun could not install Bun ${version}; installed it from npm instead. If this keeps happening, look at setup-bun."
+          npm install --global "bun@${version}"
           bun --version
 
       # This repo is going public and `.env` is tracked (Lovable generates it and
