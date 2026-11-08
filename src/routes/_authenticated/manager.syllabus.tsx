@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loading } from "@/components/site/Loading";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { SaveFailure } from "@/components/site/SaveFailure";
+import { ActionFailure } from "@/components/site/ActionFailure";
 import { DraftRestoreBanner } from "@/components/site/DraftRestoreBanner";
 import { MarkdownEditor } from "@/components/site/MarkdownEditor";
 import { useAuth, useRoles } from "@/hooks/useAuth";
@@ -37,6 +38,7 @@ import {
   beltPageTitle,
   flattenTopics,
   orderBelts,
+  tidyBlock,
   topicTree,
   type SyllabusBelt,
   type SyllabusData,
@@ -259,6 +261,7 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
                 aria-checked={mode === m}
                 variant={mode === m ? "default" : "outline"}
                 onClick={() =>
+                  mode !== m &&
                   void choose(
                     m,
                     m === "belt"
@@ -324,7 +327,7 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
         <div className="space-y-4">
           {cells.map((cell) => {
             const value = current[cell.key] ?? "";
-            const isChanged = value.trim() !== cell.stored.trim();
+            const isChanged = tidyBlock(value) !== tidyBlock(cell.stored);
             const problem = problems.get(cell.key);
             return (
               <div key={cell.key} className={cn("space-y-1.5", cell.depth === 3 && "pl-4 sm:pl-8")}>
@@ -488,11 +491,13 @@ function BeltsTab({ data, confirm, onSaved }: TabProps) {
         updates the page. The colour is only a swatch beside the name.
       </p>
       {failure && (
-        <SaveFailure
-          what="change"
+        // Not a retry: a one-press change that failed has nothing typed to
+        // keep, and pressing it again is the manager's call once they have
+        // read what went wrong.
+        <ActionFailure
+          title="That change did not go through."
           message={failure}
-          keptOnDevice={false}
-          onRetry={() => setFailure(null)}
+          onDismiss={() => setFailure(null)}
         />
       )}
       {belts.map((belt) => (
@@ -539,6 +544,10 @@ function BeltRow({
     colour: belt.colour,
     position: belt.position,
   });
+  // Reset to what is stored only when what is stored for THIS belt changes.
+  // Keyed on the values, not the object: every save reloads the whole syllabus
+  // and hands every belt a new object, which would wipe unsaved edits on the
+  // other rows.
   useEffect(
     () =>
       setForm({
@@ -547,7 +556,7 @@ function BeltRow({
         colour: belt.colour,
         position: belt.position,
       }),
-    [belt],
+    [belt.name, belt.grade, belt.colour, belt.position],
   );
   const dirty =
     form.name !== belt.name ||
@@ -823,11 +832,13 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
         it working. Sub-topics sit one level under a topic, like Throws under Techniques.
       </p>
       {failure && (
-        <SaveFailure
-          what="change"
+        // Not a retry: a one-press change that failed has nothing typed to
+        // keep, and pressing it again is the manager's call once they have
+        // read what went wrong.
+        <ActionFailure
+          title="That change did not go through."
           message={failure}
-          keptOnDevice={false}
-          onRetry={() => setFailure(null)}
+          onDismiss={() => setFailure(null)}
         />
       )}
       <ul className="space-y-2">

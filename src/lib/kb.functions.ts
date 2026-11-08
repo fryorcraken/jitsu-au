@@ -32,6 +32,7 @@ import {
   loadKbArticleVersion,
   projectArticle,
 } from "@/lib/kb-admin";
+import { sectionKind } from "@/lib/kb-types";
 import type { KbAnnotationRow, KbArticleRow, KbClient, KbSectionRow } from "@/lib/kb-types";
 import {
   commentDisplayName,
@@ -283,7 +284,7 @@ export const listKnowledgeBase = createServerFn({ method: "GET" }).handler(async
     position: s.position,
     // The syllabus section shows the "by topic" view at its top. Read
     // defensively: a row from before the syllabus migration has no kind.
-    kind: s.kind === "syllabus" ? ("syllabus" as const) : ("standard" as const),
+    kind: sectionKind(s.kind),
   }));
 
   // Titles live on the version, not the article, so the nav needs the live
@@ -1067,7 +1068,7 @@ export const listManagerSections = createServerFn({ method: "GET" }).handler(asy
     slug: s.slug,
     title: s.title,
     position: s.position,
-    kind: s.kind === "syllabus" ? ("syllabus" as const) : ("standard" as const),
+    kind: sectionKind(s.kind),
   }));
 });
 

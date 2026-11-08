@@ -20,6 +20,18 @@ type Tables = Database["public"]["Tables"];
 /** A group of articles in the sidebar. Ordering only: sections hold no text. */
 export type KbSectionRow = Tables["kb_sections"]["Row"];
 
+/** What a section is: the one holding the belt pages, or any other. */
+export type KbSectionKind = "standard" | "syllabus";
+
+/**
+ * `kind` is a text column with a CHECK, so the generator says `string`; the
+ * union is asserted here once, the same way `visibility` is. Anything else
+ * (including a row read before the column existed) is an ordinary section.
+ */
+export function sectionKind(kind: string | null | undefined): KbSectionKind {
+  return kind === "syllabus" ? "syllabus" : "standard";
+}
+
 /**
  * An article's identity: its URL key, who may read it, and where it sits.
  *

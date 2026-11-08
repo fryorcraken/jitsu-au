@@ -23,6 +23,7 @@ import {
   composeBeltPage,
   orderBelts,
   sameBlocks,
+  tidyBlock,
   type SyllabusBelt,
   type SyllabusData,
   type SyllabusEntry,
@@ -263,6 +264,23 @@ export async function republishBeltPages(
   const hasText = new Set(rows.entries.map((e) => e.belt_id));
   const scope = beltIds === "all" ? rows.belts : rows.belts.filter((b) => beltIds.includes(b.id));
 
+  // Every live version in scope in one read, rather than one round trip per
+  // belt before anything can be compared.
+  const pageIds = scope.flatMap((b) => {
+    const page = pageByBelt.get(b.id);
+    return page ? [page.id] : [];
+  });
+  const liveByPage = new Map<string, { title: string; body_md: string }>();
+  if (pageIds.length) {
+    const { data: liveRows, error } = await db
+      .from("kb_article_versions")
+      .select("article_id, title, body_md")
+      .in("article_id", pageIds)
+      .eq("is_current", true);
+    if (error) throw new Error(error.message);
+    for (const row of liveRows ?? []) liveByPage.set(row.article_id, row);
+  }
+
   const results: BeltPageResult[] = [];
   const failures: string[] = [];
   for (const belt of orderBelts(scope)) {
@@ -277,13 +295,7 @@ export async function republishBeltPages(
 
       const title = beltPageTitle(belt);
       const body = composeBeltPage(belt.slug, data.topics, data.entries);
-      const { data: live, error } = await db
-        .from("kb_article_versions")
-        .select("title, body_md")
-        .eq("article_id", page.id)
-        .eq("is_current", true)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
+      const live = liveByPage.get(page.id);
       if (live && live.title === title && sameBlocks(live.body_md, body)) {
         results.push({ belt: belt.slug, page: page.slug, version: null, created });
         continue;
@@ -654,7 +666,7 @@ export async function saveSyllabusEntries(
     .map((e) => ({
       belt_id: beltId.get(e.belt)!,
       topic_id: topicId.get(e.topic)!,
-      body_md: e.body_md.trim(),
+      body_md: tidyBlock(e.body_md),
       updated_by: actingAs,
       updated_at: now,
     }));

@@ -7,6 +7,7 @@ import {
   entryProblem,
   flattenTopics,
   orderBelts,
+  tidyBlock,
   topicTree,
   type SyllabusData,
   type SyllabusTopic,
@@ -70,15 +71,15 @@ export function editorCells(data: SyllabusData, mode: EditorMode, selection: str
 
 /**
  * The blocks a save sends: only the boxes that differ from what is saved,
- * compared trimmed, since the server trims and a stray trailing newline is not
- * an edit anybody made on purpose.
+ * compared as the server stores them (`tidyBlock`), since a stray trailing
+ * newline is not an edit anybody made on purpose.
  */
 export function changedEntries(
   cells: EditorCell[],
   values: Record<string, string>,
 ): { belt: string; topic: string; body_md: string }[] {
   return cells
-    .filter((cell) => (values[cell.key] ?? cell.stored).trim() !== cell.stored.trim())
+    .filter((cell) => tidyBlock(values[cell.key] ?? cell.stored) !== tidyBlock(cell.stored))
     .map((cell) => ({ belt: cell.belt, topic: cell.topic, body_md: values[cell.key] ?? "" }));
 }
 

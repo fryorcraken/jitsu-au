@@ -152,10 +152,10 @@ export function composeBeltPage(
     const kids = root.children.filter((child) => text.has(child.slug));
     if (own === undefined && kids.length === 0) continue;
     parts.push(topicHeading(root, 2));
-    if (own !== undefined) parts.push(own.trim());
+    if (own !== undefined) parts.push(tidyBlock(own));
     for (const child of kids) {
       parts.push(topicHeading(child, 3));
-      parts.push(text.get(child.slug)!.trim());
+      parts.push(tidyBlock(text.get(child.slug)!));
     }
   }
   return parts.length ? parts.join("\n\n") : EMPTY_BELT_PAGE;
@@ -175,6 +175,19 @@ export function sameBlocks(a: string, b: string): boolean {
   const left = splitBlocks(a).map((block) => normalizeBlockText(block.markdown));
   const right = splitBlocks(b).map((block) => normalizeBlockText(block.markdown));
   return left.length === right.length && left.every((text, i) => text === right[i]);
+}
+
+/**
+ * A block's text with blank lines and trailing space dropped from either end,
+ * but NEVER the indentation on its first line. A plain `.trim()` would turn a
+ * block that opens with an indented code sample into a paragraph, the same
+ * trap `splitBlocks` in kb.ts avoids.
+ */
+export function tidyBlock(body: string): string {
+  return body
+    .replace(/\r\n?/g, "\n")
+    .replace(/^(?:[ \t]*\n)+/, "")
+    .replace(/\s+$/, "");
 }
 
 /**
@@ -315,7 +328,7 @@ export function syllabusViewMarkdown(view: SyllabusView): string {
     parts.push(`${section.depth === 2 ? "##" : "###"} ${section.title}`);
     for (const entry of section.entries) {
       parts.push(`**${label(entry.belt)}**`);
-      parts.push(entry.body_md.trim());
+      parts.push(tidyBlock(entry.body_md));
     }
     section.children.forEach(write);
   };

@@ -10,6 +10,7 @@ import {
   sameBlocks,
   syllabusView,
   syllabusViewMarkdown,
+  tidyBlock,
   topicHeading,
   topicTree,
   type SyllabusBelt,
@@ -311,5 +312,20 @@ describe("syllabusView", () => {
     expect(md).toBe(
       "## Breakfalling\n\n**Yellow belt**\n\n- Peg leg\n\n**Green belt**\n\n- Judo rolls",
     );
+  });
+});
+
+describe("tidyBlock", () => {
+  it("drops blank lines and trailing space at the ends, but keeps a first line's indentation", () => {
+    expect(tidyBlock("\n\n    const a = 1;\n    const b = 2;\n\n  ")).toBe(
+      "    const a = 1;\n    const b = 2;",
+    );
+  });
+
+  it("keeps an indented code block a code block on the assembled page", () => {
+    const page = composeBeltPage("yellow", TOPICS, [
+      entry("yellow", "uke", "    count: 1, 2, 3\n"),
+    ]);
+    expect(page).toBe("## Uke\n\n    count: 1, 2, 3");
   });
 });
