@@ -59,6 +59,7 @@ import { Route as AuthenticatedManagerMembershipsRouteImport } from './routes/_a
 import { Route as AuthenticatedManagerReconciliationRouteImport } from './routes/_authenticated/manager.reconciliation'
 import { Route as AuthenticatedManagerSettingsRouteImport } from './routes/_authenticated/manager.settings'
 import { Route as AuthenticatedManagerSiteBannerRouteImport } from './routes/_authenticated/manager.site-banner'
+import { Route as AuthenticatedManagerSyllabusRouteImport } from './routes/_authenticated/manager.syllabus'
 import { Route as AuthenticatedManagerUsersRouteImport } from './routes/_authenticated/manager.users'
 import { Route as AuthenticatedManagerWaiverTemplateRouteImport } from './routes/_authenticated/manager.waiver-template'
 import { Route as AuthenticatedManagerWaiversRouteImport } from './routes/_authenticated/manager.waivers'
@@ -340,6 +341,12 @@ const AuthenticatedManagerSiteBannerRoute =
     path: '/manager/site-banner',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedManagerSyllabusRoute =
+  AuthenticatedManagerSyllabusRouteImport.update({
+    id: '/manager/syllabus',
+    path: '/manager/syllabus',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedManagerUsersRoute =
   AuthenticatedManagerUsersRouteImport.update({
     id: '/manager/users',
@@ -467,6 +474,7 @@ export interface FileRoutesByFullPath {
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
+  '/manager/syllabus': typeof AuthenticatedManagerSyllabusRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -531,6 +539,7 @@ export interface FileRoutesByTo {
   '/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
+  '/manager/syllabus': typeof AuthenticatedManagerSyllabusRoute
   '/manager/users': typeof AuthenticatedManagerUsersRoute
   '/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -598,6 +607,7 @@ export interface FileRoutesById {
   '/_authenticated/manager/reconciliation': typeof AuthenticatedManagerReconciliationRoute
   '/_authenticated/manager/settings': typeof AuthenticatedManagerSettingsRoute
   '/_authenticated/manager/site-banner': typeof AuthenticatedManagerSiteBannerRoute
+  '/_authenticated/manager/syllabus': typeof AuthenticatedManagerSyllabusRoute
   '/_authenticated/manager/users': typeof AuthenticatedManagerUsersRoute
   '/_authenticated/manager/waiver-template': typeof AuthenticatedManagerWaiverTemplateRoute
   '/_authenticated/manager/waivers': typeof AuthenticatedManagerWaiversRoute
@@ -665,6 +675,7 @@ export interface FileRouteTypes {
     | '/manager/reconciliation'
     | '/manager/settings'
     | '/manager/site-banner'
+    | '/manager/syllabus'
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
@@ -729,6 +740,7 @@ export interface FileRouteTypes {
     | '/manager/reconciliation'
     | '/manager/settings'
     | '/manager/site-banner'
+    | '/manager/syllabus'
     | '/manager/users'
     | '/manager/waiver-template'
     | '/manager/waivers'
@@ -795,6 +807,7 @@ export interface FileRouteTypes {
     | '/_authenticated/manager/reconciliation'
     | '/_authenticated/manager/settings'
     | '/_authenticated/manager/site-banner'
+    | '/_authenticated/manager/syllabus'
     | '/_authenticated/manager/users'
     | '/_authenticated/manager/waiver-template'
     | '/_authenticated/manager/waivers'
@@ -1202,6 +1215,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedManagerSiteBannerRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/manager/syllabus': {
+      id: '/_authenticated/manager/syllabus'
+      path: '/manager/syllabus'
+      fullPath: '/manager/syllabus'
+      preLoaderRoute: typeof AuthenticatedManagerSyllabusRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/manager/users': {
       id: '/_authenticated/manager/users'
       path: '/manager/users'
@@ -1322,6 +1342,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedManagerReconciliationRoute: typeof AuthenticatedManagerReconciliationRoute
   AuthenticatedManagerSettingsRoute: typeof AuthenticatedManagerSettingsRoute
   AuthenticatedManagerSiteBannerRoute: typeof AuthenticatedManagerSiteBannerRoute
+  AuthenticatedManagerSyllabusRoute: typeof AuthenticatedManagerSyllabusRoute
   AuthenticatedManagerUsersRoute: typeof AuthenticatedManagerUsersRoute
   AuthenticatedManagerWaiverTemplateRoute: typeof AuthenticatedManagerWaiverTemplateRoute
   AuthenticatedManagerWaiversRoute: typeof AuthenticatedManagerWaiversRoute
@@ -1355,6 +1376,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedManagerReconciliationRoute,
   AuthenticatedManagerSettingsRoute: AuthenticatedManagerSettingsRoute,
   AuthenticatedManagerSiteBannerRoute: AuthenticatedManagerSiteBannerRoute,
+  AuthenticatedManagerSyllabusRoute: AuthenticatedManagerSyllabusRoute,
   AuthenticatedManagerUsersRoute: AuthenticatedManagerUsersRoute,
   AuthenticatedManagerWaiverTemplateRoute:
     AuthenticatedManagerWaiverTemplateRoute,
