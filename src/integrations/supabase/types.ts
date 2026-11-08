@@ -113,6 +113,39 @@ export type Database = {
           },
         ]
       }
+      belts: {
+        Row: {
+          colour: string
+          created_at: string
+          grade: string | null
+          id: string
+          name: string
+          position: number
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          colour: string
+          created_at?: string
+          grade?: string | null
+          id?: string
+          name: string
+          position?: number
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          colour?: string
+          created_at?: string
+          grade?: string | null
+          id?: string
+          name?: string
+          position?: number
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       blog_blocked_commenters: {
         Row: {
           blocked_at: string
@@ -441,6 +474,78 @@ export type Database = {
         }
         Relationships: []
       }
+      club_message_lead_recipients: {
+        Row: {
+          created_at: string
+          emailed_at: string | null
+          id: string
+          interest_registration_id: string
+          message_id: string
+        }
+        Insert: {
+          created_at?: string
+          emailed_at?: string | null
+          id?: string
+          interest_registration_id: string
+          message_id: string
+        }
+        Update: {
+          created_at?: string
+          emailed_at?: string | null
+          id?: string
+          interest_registration_id?: string
+          message_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_message_lead_recipients_interest_registration_id_fkey"
+            columns: ["interest_registration_id"]
+            isOneToOne: false
+            referencedRelation: "interest_registrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_message_lead_recipients_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "club_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      club_messages: {
+        Row: {
+          audience: Json
+          body: string
+          created_at: string
+          id: string
+          kind: string
+          recipients_written_at: string | null
+          sent_by: string | null
+          subject: string
+        }
+        Insert: {
+          audience?: Json
+          body: string
+          created_at?: string
+          id: string
+          kind: string
+          recipients_written_at?: string | null
+          sent_by?: string | null
+          subject: string
+        }
+        Update: {
+          audience?: Json
+          body?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          recipients_written_at?: string | null
+          sent_by?: string | null
+          subject?: string
+        }
+        Relationships: []
+      }
       club_settings: {
         Row: {
           key: string
@@ -665,6 +770,7 @@ export type Database = {
           message: string | null
           name: string
           phone: string | null
+          promotion_consent: boolean
           sms_whatsapp_consent: boolean
           uts_student: boolean
         }
@@ -677,6 +783,7 @@ export type Database = {
           message?: string | null
           name: string
           phone?: string | null
+          promotion_consent?: boolean
           sms_whatsapp_consent?: boolean
           uts_student?: boolean
         }
@@ -689,6 +796,7 @@ export type Database = {
           message?: string | null
           name?: string
           phone?: string | null
+          promotion_consent?: boolean
           sms_whatsapp_consent?: boolean
           uts_student?: boolean
         }
@@ -895,6 +1003,7 @@ export type Database = {
       kb_articles: {
         Row: {
           annotations_enabled: boolean
+          belt_id: string | null
           created_at: string
           created_by: string | null
           id: string
@@ -908,6 +1017,7 @@ export type Database = {
         }
         Insert: {
           annotations_enabled?: boolean
+          belt_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -921,6 +1031,7 @@ export type Database = {
         }
         Update: {
           annotations_enabled?: boolean
+          belt_id?: string | null
           created_at?: string
           created_by?: string | null
           id?: string
@@ -934,6 +1045,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "kb_articles_belt_id_fkey"
+            columns: ["belt_id"]
+            isOneToOne: true
+            referencedRelation: "belts"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "kb_articles_section_id_fkey"
             columns: ["section_id"]
             isOneToOne: false
@@ -946,6 +1064,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          kind: string
           position: number
           slug: string
           title: string
@@ -954,6 +1073,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          kind?: string
           position?: number
           slug: string
           title: string
@@ -962,6 +1082,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          kind?: string
           position?: number
           slug?: string
           title?: string
@@ -1454,6 +1575,86 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      syllabus_entries: {
+        Row: {
+          belt_id: string
+          body_md: string
+          created_at: string
+          topic_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          belt_id: string
+          body_md: string
+          created_at?: string
+          topic_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          belt_id?: string
+          body_md?: string
+          created_at?: string
+          topic_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "syllabus_entries_belt_id_fkey"
+            columns: ["belt_id"]
+            isOneToOne: false
+            referencedRelation: "belts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "syllabus_entries_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "syllabus_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      syllabus_topics: {
+        Row: {
+          created_at: string
+          id: string
+          parent_id: string | null
+          position: number
+          slug: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          position?: number
+          slug: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          position?: number
+          slug?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "syllabus_topics_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "syllabus_topics"
+            referencedColumns: ["id"]
           },
         ]
       }
