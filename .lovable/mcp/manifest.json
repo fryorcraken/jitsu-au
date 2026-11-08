@@ -129,6 +129,7 @@
                 "save_belt",
                 "delete_belt",
                 "save_syllabus_topic",
+                "reorder_syllabus_topics",
                 "delete_syllabus_topic",
                 "save_syllabus_entries",
                 "save_item",

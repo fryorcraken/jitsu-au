@@ -12,7 +12,7 @@
 // save and an agent's are the same write.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, ExternalLink, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,19 +41,22 @@ import {
   tidyBlock,
   topicTree,
   type SyllabusBelt,
+  type SyllabusTopicNode,
   type SyllabusData,
 } from "@/lib/syllabus";
 import {
   cellProblems,
   changedEntries,
   editorCells,
-  movedPosition,
+  moveTopic,
+  positionChanges,
   type EditorMode,
 } from "@/lib/syllabus-editor";
 import {
   deleteManagerBelt,
   deleteManagerSyllabusTopic,
   getManagerSyllabus,
+  reorderManagerSyllabusTopics,
   saveManagerBelt,
   saveManagerSyllabusEntries,
   saveManagerSyllabusTopic,
@@ -769,10 +772,107 @@ function NewBelt({
 function TopicsTab({ data, confirm, onSaved }: TabProps) {
   const saveTopic = useServerFn(saveManagerSyllabusTopic);
   const removeTopic = useServerFn(deleteManagerSyllabusTopic);
-  const tree = useMemo(() => topicTree(data.topics), [data.topics]);
+  const reorder = useServerFn(reorderManagerSyllabusTopics);
+  const storedTree = useMemo(() => topicTree(data.topics), [data.topics]);
   const used = useMemo(() => new Set(data.entries.map((e) => e.topic)), [data.entries]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  // A failure is shown beside the topic it was about (or under the add form),
+  // not at the top of a list fifteen rows long where a phone has scrolled away
+  // from it.
+  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+
+  // ---- Order: moved on screen at once, saved once per burst ----
+  //
+  // Each arrow press used to be its own save, and each save republished every
+  // belt page, so moving Drills up two places took two rounds of several
+  // seconds each and wrote two new versions of every page. Now a press moves
+  // the topic on screen immediately, and the order is saved once the presses
+  // stop, as one call that republishes each page once.
+  const [order, setOrder] = useState<SyllabusTopicNode[] | null>(null);
+  const [orderState, setOrderState] = useState<"idle" | "waiting" | "saving" | "saved">("idle");
+  const tree = order ?? storedTree;
+  const latest = useRef<SyllabusTopicNode[] | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saving = useRef(false);
+  const again = useRef(false);
+  const stored = useRef(data.topics);
+  stored.current = data.topics;
+
+  const saveOrder = useCallback(async () => {
+    timer.current = null;
+    if (saving.current) {
+      again.current = true;
+      return;
+    }
+    const target = latest.current;
+    if (!target) return;
+    const changes = positionChanges(stored.current, target);
+    if (!changes.length) {
+      setOrder(null);
+      setOrderState("idle");
+      return;
+    }
+    saving.current = true;
+    setOrderState("saving");
+    try {
+      await reorder({ data: { topics: changes } });
+      if (again.current) {
+        // More presses landed while that save was out: save again from the
+        // order now on screen, then reload once at the end.
+        // The target is absolute (renumbered in tens), so sending it against
+        // the not-yet-reloaded positions is safe: the server skips every
+        // topic already where it should be.
+        again.current = false;
+        saving.current = false;
+        await saveOrder();
+        return;
+      }
+      await onSaved();
+      latest.current = null;
+      setOrder(null);
+      setOrderState("saved");
+    } catch (e) {
+      // The order on screen was never saved, so it goes back to what is.
+      latest.current = null;
+      setOrder(null);
+      setOrderState("idle");
+      setFailure({
+        key: "order",
+        message: errorText(
+          e,
+          "The new order could not be saved. The topics are back as they were.",
+        ),
+      });
+      await onSaved();
+    } finally {
+      saving.current = false;
+    }
+  }, [onSaved, reorder]);
+
+  // Leaving the tab unmounts it: save what was moved rather than drop it.
+  useEffect(
+    () => () => {
+      if (timer.current) {
+        clearTimeout(timer.current);
+        void saveOrder();
+      }
+    },
+    [saveOrder],
+  );
+
+  function move(slug: string, direction: "up" | "down") {
+    const next = moveTopic(latest.current ?? tree, slug, direction);
+    if (!next) return;
+    latest.current = next;
+    setOrder(next);
+    setOrderState("waiting");
+    setFailure(null);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => void saveOrder(), ORDER_SAVE_DELAY_MS);
+  }
+
+  // ---- Everything else: one save per press ----
+  const orderPending = order !== null;
 
   async function run(key: string, action: () => Promise<unknown>, done: string) {
     setBusy(key);
@@ -783,30 +883,11 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
       await onSaved();
       return true;
     } catch (e) {
-      setFailure(errorText(e, "That did not go through."));
+      setFailure({ key, message: errorText(e, "That did not go through.") });
       return false;
     } finally {
       setBusy(null);
     }
-  }
-
-  async function move(
-    slug: string,
-    siblings: { slug: string; position: number }[],
-    direction: "up" | "down",
-  ) {
-    const plan = movedPosition(siblings, slug, direction);
-    if (!plan) return;
-    await run(
-      slug,
-      async () => {
-        await saveTopic({ data: { slug, position: plan.position } });
-        if (plan.swapWith) {
-          await saveTopic({ data: { slug: plan.swapWith.slug, position: plan.swapWith.position } });
-        }
-      },
-      "Moved",
-    );
   }
 
   async function remove(slug: string, title: string) {
@@ -819,31 +900,41 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
     if (ok) await run(slug, () => removeTopic({ data: { slug } }), "Topic deleted");
   }
 
+  const failureFor = (key: string) =>
+    failure?.key === key ? (
+      <FailureNear message={failure.message} onDismiss={() => setFailure(null)} />
+    ) : null;
+
   const row = (
-    topic: { slug: string; title: string; position: number; parent: string | null },
-    siblings: { slug: string; position: number }[],
+    topic: { slug: string; title: string; parent: string | null },
+    siblings: { slug: string }[],
     index: number,
     hasChildren: boolean,
   ) => (
-    <TopicRow
-      key={topic.slug}
-      topic={topic}
-      roots={tree.filter((r) => r.slug !== topic.slug)}
-      hasChildren={hasChildren}
-      busy={busy === topic.slug}
-      first={index === 0}
-      last={index === siblings.length - 1}
-      deletable={!hasChildren && !used.has(topic.slug)}
-      onMove={(direction) => void move(topic.slug, siblings, direction)}
-      onSave={(patch) =>
-        run(
-          topic.slug,
-          () => saveTopic({ data: { slug: topic.slug, ...patch } }),
-          patch.title ? "Topic renamed. The belt pages are updated." : "Topic saved",
-        )
-      }
-      onDelete={() => void remove(topic.slug, topic.title)}
-    />
+    <>
+      <TopicRow
+        topic={topic}
+        roots={tree.filter((r) => r.slug !== topic.slug)}
+        hasChildren={hasChildren}
+        busy={busy === topic.slug}
+        // Renaming, refiling or deleting waits for a reorder to be saved, so
+        // the two never race each other's republish.
+        editsHeld={orderPending}
+        first={index === 0}
+        last={index === siblings.length - 1}
+        deletable={!hasChildren && !used.has(topic.slug)}
+        onMove={(direction) => move(topic.slug, direction)}
+        onSave={(patch) =>
+          run(
+            topic.slug,
+            () => saveTopic({ data: { slug: topic.slug, ...patch } }),
+            patch.title ? "Topic renamed. The belt pages are updated." : "Topic saved",
+          )
+        }
+        onDelete={() => void remove(topic.slug, topic.title)}
+      />
+      {failureFor(topic.slug)}
+    </>
   );
 
   return (
@@ -852,16 +943,15 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
         Topics are the headings on every belt page, in this order. Renaming one keeps every link to
         it working. Sub-topics sit one level under a topic, like Throws under Techniques.
       </p>
-      {failure && (
-        // Not a retry: a one-press change that failed has nothing typed to
-        // keep, and pressing it again is the manager's call once they have
-        // read what went wrong.
-        <ActionFailure
-          title="That change did not go through."
-          message={failure}
-          onDismiss={() => setFailure(null)}
-        />
-      )}
+      {/* Where the order stands, announced, and kept in one place above the
+          list: the arrows are all over it. */}
+      <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
+        {orderState === "waiting" && "New order not saved yet. It saves a moment after you stop."}
+        {orderState === "saving" && "Saving the new order and updating the belt pages..."}
+        {orderState === "saved" &&
+          "New order saved. Members who read a page are not told it changed."}
+      </p>
+      {failureFor("order")}
       <ul className="space-y-2">
         {tree.map((root, i) => (
           <li key={root.slug} className="space-y-2">
@@ -869,7 +959,9 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
             {root.children.length > 0 && (
               <ul className="space-y-2 pl-4 sm:pl-8">
                 {root.children.map((child, j) => (
-                  <li key={child.slug}>{row(child, root.children, j, false)}</li>
+                  <li key={child.slug} className="space-y-2">
+                    {row(child, root.children, j, false)}
+                  </li>
                 ))}
               </ul>
             )}
@@ -878,11 +970,35 @@ function TopicsTab({ data, confirm, onSaved }: TabProps) {
       </ul>
       <NewTopic
         roots={tree}
-        busy={busy === "new"}
+        busy={busy === "new" || orderPending}
         onCreate={(input) =>
           run("new", () => saveTopic({ data: { ...input, expect_new: true } }), "Topic added")
         }
       />
+      {failureFor("new")}
+    </div>
+  );
+}
+
+/** How long after the last arrow press the order is saved. */
+const ORDER_SAVE_DELAY_MS = 1200;
+
+/**
+ * A one-press change that failed, shown where it was pressed and brought into
+ * view: on a phone a panel at the top of a long list is somewhere the manager
+ * has scrolled away from.
+ */
+function FailureNear({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [message]);
+  return (
+    <div ref={ref}>
+      {/* Not a retry: a one-press change that failed has nothing typed to
+          keep, and pressing it again is the manager's call once they have read
+          what went wrong. */}
+      <ActionFailure title="That did not go through." message={message} onDismiss={onDismiss} />
     </div>
   );
 }
@@ -892,6 +1008,7 @@ function TopicRow({
   roots,
   hasChildren,
   busy,
+  editsHeld,
   first,
   last,
   deletable,
@@ -903,6 +1020,8 @@ function TopicRow({
   roots: { slug: string; title: string }[];
   hasChildren: boolean;
   busy: boolean;
+  /** A new order is waiting to be saved: other edits wait for it. */
+  editsHeld: boolean;
   first: boolean;
   last: boolean;
   deletable: boolean;
@@ -975,7 +1094,7 @@ function TopicRow({
         <Button
           type="button"
           size="sm"
-          disabled={!dirty || !title.trim() || busy}
+          disabled={!dirty || !title.trim() || busy || editsHeld}
           onClick={() =>
             void onSave({
               ...(title.trim() !== topic.title ? { title: title.trim() } : {}),
@@ -991,7 +1110,7 @@ function TopicRow({
             size="icon"
             variant="ghost"
             aria-label={`Delete ${topic.title}`}
-            disabled={busy}
+            disabled={busy || editsHeld}
             onClick={onDelete}
           >
             <Trash2 className="h-4 w-4" />

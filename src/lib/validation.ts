@@ -3150,6 +3150,7 @@ export const managerAgentActions = [
   "delete_belt",
   "list_syllabus_topics",
   "save_syllabus_topic",
+  "reorder_syllabus_topics",
   "delete_syllabus_topic",
   "get_syllabus",
   "save_syllabus_entries",
@@ -4323,6 +4324,26 @@ export const saveSyllabusTopicSchema = z
     message: "A topic cannot sit under itself.",
   });
 export type SaveSyllabusTopicInput = z.infer<typeof saveSyllabusTopicSchema>;
+
+/**
+ * Put topics in a new order: the positions a burst of moves on the screen
+ * produced, saved together so the belt pages are republished once. Each topic
+ * once; positions only.
+ */
+export const reorderSyllabusTopicsSchema = z
+  .object({
+    topics: z
+      .array(z.object({ slug: topicSlugSchema, position: positionSchema }).strict())
+      .min(1)
+      .max(200),
+    change_note: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .strict()
+  .refine((value) => new Set(value.topics.map((t) => t.slug)).size === value.topics.length, {
+    path: ["topics"],
+    message: "Each topic once.",
+  });
+export type ReorderSyllabusTopicsInput = z.infer<typeof reorderSyllabusTopicsSchema>;
 
 export const deleteSyllabusTopicSchema = z.object({ slug: topicSlugSchema }).strict();
 export type DeleteSyllabusTopicInput = z.infer<typeof deleteSyllabusTopicSchema>;

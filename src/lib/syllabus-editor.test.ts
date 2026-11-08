@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { cellProblems, changedEntries, editorCells, movedPosition } from "./syllabus-editor";
-import type { SyllabusData } from "./syllabus";
+import {
+  cellProblems,
+  changedEntries,
+  editorCells,
+  moveTopic,
+  positionChanges,
+} from "./syllabus-editor";
+import { topicTree, type SyllabusData } from "./syllabus";
 
 const DATA: SyllabusData = {
   belts: [
@@ -88,37 +94,48 @@ describe("cellProblems", () => {
   });
 });
 
-describe("movedPosition", () => {
-  const siblings = [
-    { slug: "a", position: 10 },
-    { slug: "b", position: 20 },
-    { slug: "c", position: 30 },
+describe("moveTopic and positionChanges", () => {
+  const stored = [
+    { slug: "a", title: "A", parent: null, position: 10 },
+    { slug: "b", title: "B", parent: null, position: 20 },
+    { slug: "c", title: "C", parent: null, position: 30 },
+    { slug: "x", title: "X", parent: "b", position: 10 },
+    { slug: "y", title: "Y", parent: "b", position: 20 },
   ];
+  const tree = topicTree(stored);
+  const slugs = (t: ReturnType<typeof topicTree> | null) => t?.map((n) => n.slug);
 
-  it("lands between the neighbour and the one beyond, in one save", () => {
-    expect(movedPosition(siblings, "c", "up")).toEqual({ position: 15 });
-    expect(movedPosition(siblings, "a", "down")).toEqual({ position: 25 });
+  it("moves a topic one place among its siblings", () => {
+    expect(slugs(moveTopic(tree, "c", "up"))).toEqual(["a", "c", "b"]);
+    expect(slugs(moveTopic(tree, "a", "down"))).toEqual(["b", "a", "c"]);
   });
 
-  it("goes before the first or after the last", () => {
-    expect(movedPosition(siblings, "b", "up")).toEqual({ position: 0 });
-    expect(movedPosition(siblings, "b", "down")).toEqual({ position: 40 });
-  });
-
-  it("swaps when there is no gap left", () => {
-    const tight = [
-      { slug: "a", position: 10 },
-      { slug: "b", position: 11 },
-      { slug: "c", position: 12 },
-    ];
-    expect(movedPosition(tight, "c", "up")).toEqual({
-      position: 11,
-      swapWith: { slug: "b", position: 12 },
-    });
+  it("moves a sub-topic within its own topic", () => {
+    const moved = moveTopic(tree, "y", "up")!;
+    expect(moved[1].children.map((c) => c.slug)).toEqual(["y", "x"]);
   });
 
   it("does nothing at either end", () => {
-    expect(movedPosition(siblings, "a", "up")).toBeNull();
-    expect(movedPosition(siblings, "c", "down")).toBeNull();
+    expect(moveTopic(tree, "a", "up")).toBeNull();
+    expect(moveTopic(tree, "y", "down")).toBeNull();
+  });
+
+  // Three presses, one save: what is sent is the end state, not the steps.
+  it("saves only the positions a burst of moves changed, renumbered in tens", () => {
+    const moved = moveTopic(moveTopic(tree, "c", "up")!, "c", "up")!;
+    expect(positionChanges(stored, moved)).toEqual([
+      { slug: "c", position: 10 },
+      { slug: "a", position: 20 },
+      { slug: "b", position: 30 },
+    ]);
+    expect(positionChanges(stored, tree)).toEqual([]);
+  });
+
+  it("renumbers a group whose numbers had drifted", () => {
+    const drifted = [
+      { slug: "a", title: "A", parent: null, position: 10 },
+      { slug: "b", title: "B", parent: null, position: 65 },
+    ];
+    expect(positionChanges(drifted, topicTree(drifted))).toEqual([{ slug: "b", position: 20 }]);
   });
 });
