@@ -42,7 +42,10 @@ the confirm repeats.
   `aggregateClubUsers`), so the lists agree with the users page. Visitors and
   lapsed members are separate on purpose: somebody whose trial is over and who
   has not joined yet is told something different from somebody who was paying
-  and did not renew.
+  and did not renew. The funnel itself calls both "lapsed" once a membership
+  has ended, a free trial included, so the message's groups correct it: lapsed
+  only counts somebody who ever held a paid membership (`groupForPerson`), and
+  a finished trial stays a visitor.
 - **What is sent.** A group ticked in full is sent as the group; a group with
   somebody unticked is sent as the people kept (`choiceFromTicks`). So the
   history can say "Members", and a person ticked one by one is still reached

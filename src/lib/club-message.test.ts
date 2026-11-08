@@ -4,6 +4,7 @@ import {
   LEAD_PRESELECT_DAYS,
   choiceFromTicks,
   clubMessageHref,
+  groupForPerson,
   groupForStatus,
   groupPeople,
   leadCandidates,
@@ -45,6 +46,17 @@ describe("groupForStatus", () => {
     expect(groupForStatus("lapsed")).toBe("lapsed");
     expect(groupForStatus("applicant")).toBe("applicants");
     expect(groupForStatus("lead")).toBeNull();
+  });
+});
+
+describe("groupForPerson", () => {
+  it("counts a finished free trial as a visitor, not a lapsed member", () => {
+    expect(groupForPerson({ lifecycle_status: "lapsed", ever_paid: false })).toBe("visitors");
+    expect(groupForPerson({ lifecycle_status: "lapsed" })).toBe("visitors");
+  });
+
+  it("keeps somebody who used to pay as a lapsed member", () => {
+    expect(groupForPerson({ lifecycle_status: "lapsed", ever_paid: true })).toBe("lapsed");
   });
 });
 
@@ -123,7 +135,7 @@ describe("groupPeople", () => {
     person(PARENT, "lead", { name: "Pat" }),
     person(CHILD, "member", { guardian_user_id: PARENT, name: "Bea" }),
     person(MEMBER, "member", { name: "Mo" }),
-    person(LAPSED, "lapsed", { name: "Lu" }),
+    person(LAPSED, "lapsed", { name: "Lu", ever_paid: true }),
     person(ARCHIVED, "member", { archived: true, name: "Gone" }),
   ];
 

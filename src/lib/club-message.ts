@@ -84,11 +84,30 @@ export function groupForStatus(status: LifecycleStatus): ClubMessageGroup | null
   }
 }
 
+/**
+ * Which group a person is in for a message. The funnel phase, with one
+ * correction: somebody "lapsed" only because their free trial ran out never
+ * paid, so they are a visitor here, not a lapsed member. That is the person
+ * the two groups were split to tell apart.
+ */
+export function groupForPerson(
+  person: Pick<MessagePerson, "lifecycle_status" | "ever_paid">,
+): ClubMessageGroup | null {
+  const group = groupForStatus(person.lifecycle_status);
+  return group === "lapsed" && !person.ever_paid ? "visitors" : group;
+}
+
 /** A person as the audience reads them. */
 export type MessagePerson = HouseholdLink & {
   /** What to call them, for "this is for Bea". */
   name: string;
   lifecycle_status: LifecycleStatus;
+  /**
+   * Whether they ever held a paid membership (not the free trial). The funnel
+   * calls anybody whose membership ended "lapsed", a finished trial included;
+   * a message tells those two apart (`groupForPerson`).
+   */
+  ever_paid?: boolean;
   /** Set when a manager has marked them as having left the club. */
   archived: boolean;
 };
@@ -125,7 +144,7 @@ export function messageAudience(input: {
 
   for (const person of input.people) {
     if (person.archived) continue;
-    const group = groupForStatus(person.lifecycle_status);
+    const group = groupForPerson(person);
     const id = person.user_id.toLowerCase();
     if (!group || !(groups.has(group) || named.has(id))) continue;
 
@@ -171,7 +190,7 @@ export function groupPeople(people: MessagePerson[]): GroupPerson[] {
   const out: GroupPerson[] = [];
   for (const person of people) {
     if (person.archived) continue;
-    const group = groupForStatus(person.lifecycle_status);
+    const group = groupForPerson(person);
     if (!group) continue;
     const id = person.user_id.toLowerCase();
     const contactId = contactUserIdFor(person).toLowerCase();

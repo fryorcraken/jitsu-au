@@ -267,7 +267,7 @@ async function deleteUnderAddress(
   // file, and the safe direction to fail on a delete.
   if ((rows ?? []).length >= REGISTRATIONS_PER_LEAD_LIMIT) {
     console.warn(
-      `[deleteLeadRegistrations] capped at ${REGISTRATIONS_PER_LEAD_LIMIT}; older registrations under this address are not deleted yet`,
+      `[deleteLeadRegistrations] ${table} capped at ${REGISTRATIONS_PER_LEAD_LIMIT}; older rows under this address are not deleted yet`,
     );
   }
 

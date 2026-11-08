@@ -459,8 +459,9 @@ Core tables:
   panel, and settled by the same bank statement import or a manager marking
   them paid. Deliberately minimal. Product flows: `docs/item-invoices.md`.
 - `club_messages` / `club_message_lead_recipients` — club notices a manager
-  emails to the people they tick (members, visitors, applicants, chosen
-  leads) from `/manager/messages` or the agent API, and which leads each went
+  emails to the people they tick (members, visitors, lapsed members,
+  applicants, and leads from the interest form or the contact form) from
+  `/manager/messages` or the agent API, and which leads each went
   to; the members' copies are `notifications` rows. Sent through Lovable
   Emails only because the club is small; promotions are not built and will
   need a separate sender. Product rules: `docs/club-messages.md`.

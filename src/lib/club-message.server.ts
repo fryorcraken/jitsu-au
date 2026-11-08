@@ -196,6 +196,14 @@ export async function loadMessageDirectory(
   const archived = new Set(
     profiles.filter((p) => p.archived_at).map((p) => p.user_id.toLowerCase()),
   );
+  // Who ever held a paid membership, whatever its state now, so a finished
+  // free trial is not mistaken for a lapsed member (`groupForPerson`).
+  const kindByPlan = new Map(plans.map((pl) => [pl.id, pl.kind]));
+  const everPaid = new Set(
+    memberships
+      .filter((m) => m.user_id && kindByPlan.get(m.plan_id) !== "trial" && m.price_cents > 0)
+      .map((m) => m.user_id!.toLowerCase()),
+  );
   const people: MessagePerson[] = aggregated.flatMap((u) =>
     u.user_id
       ? [
@@ -204,6 +212,7 @@ export async function loadMessageDirectory(
             guardian_user_id: u.guardian_user_id,
             name: u.greeting_name ?? u.name ?? "",
             lifecycle_status: u.lifecycle_status,
+            ever_paid: everPaid.has(u.user_id.toLowerCase()),
             archived: archived.has(u.user_id.toLowerCase()),
           },
         ]
