@@ -370,7 +370,15 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
         />
       )}
 
-      <div className="sticky bottom-0 -mx-4 space-y-2 border-t bg-background/95 px-4 py-3 backdrop-blur">
+      {/* Pinned to the bottom of the screen only once there is something to
+          save: on a phone it is a fair slice of the screen, and while nothing
+          has changed it would only cover the boxes being read. */}
+      <div
+        className={cn(
+          "-mx-4 space-y-2 border-t bg-background/95 px-4 py-3 backdrop-blur",
+          changed.length > 0 && "sticky bottom-0",
+        )}
+      >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex-1 space-y-1">
             <Label htmlFor="syllabus-change-note" className="text-xs">
@@ -395,7 +403,7 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
                 : "Nothing to save"}
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="hidden text-xs text-muted-foreground sm:block">
           Saving updates each belt page that changed, straight away. Members who read a page are
           told it was updated.
         </p>
