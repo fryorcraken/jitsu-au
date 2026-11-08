@@ -290,6 +290,9 @@ function useActiveTopic(slugs: string[]): {
   const key = slugs.join(" ");
 
   useEffect(() => {
+    // A new belt or topic is a new page: a topic tapped on the last one says
+    // nothing about where the reader is on this one.
+    chosen.current = null;
     let frame = 0;
     const top = (slug: string) =>
       document.getElementById(topicAnchor(slug))?.getBoundingClientRect().top ?? Infinity;

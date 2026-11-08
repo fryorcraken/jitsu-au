@@ -36,10 +36,13 @@ export const cellKey = (belt: string, topic: string) => `${belt}/${topic}`;
  * The boxes for one selection, in reading order.
  *
  * By belt: every topic, each sub-topic straight after its topic, so the boxes
- * read top to bottom the way the belt page does. By topic: every belt, junior
- * first, including belts with no page yet, because writing a belt's first
- * block is how its page is made. A parent topic chosen by topic is its OWN text
- * only; its sub-topics are topics in their own right, one pick away.
+ * read top to bottom the way the belt page does. By topic: every belt that has
+ * a page, junior first. A belt with no page is left out there on purpose:
+ * writing its first block MAKES its page, and that should be a decision taken
+ * by picking the belt, not a side effect of filling a column of boxes (white,
+ * which has no syllabus, would otherwise get a page from one stray line). A
+ * parent topic chosen by topic is its OWN text only; its sub-topics are topics
+ * in their own right, one pick away.
  */
 export function editorCells(data: SyllabusData, mode: EditorMode, selection: string): EditorCell[] {
   const stored = new Map(data.entries.map((e) => [cellKey(e.belt, e.topic), e.body_md]));
@@ -59,7 +62,7 @@ export function editorCells(data: SyllabusData, mode: EditorMode, selection: str
 
   const topic = topics.find((t) => t.slug === selection);
   if (!topic) return [];
-  return orderBelts(data.belts).map((belt) => ({
+  return orderBelts(data.belts.filter((belt) => belt.page_slug !== null)).map((belt) => ({
     key: cellKey(belt.slug, topic.slug),
     belt: belt.slug,
     topic: topic.slug,

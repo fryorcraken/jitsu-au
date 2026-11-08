@@ -155,7 +155,9 @@ that says every member will be able to read it, or
 
 - **Write**: one belt's every topic, or one topic across every belt, as a column
   of boxes. The second is how a progression is kept coherent: breakfalling from
-  yellow to brown, on one screen. Each box has the knowledge base's formatting
+  yellow to brown, on one screen. A topic's column lists the belts that have a
+  page; a belt with none (white, or one just added) gets its first block by
+  picking that belt, because writing it is what makes the page. Each box has the knowledge base's formatting
   toolbar and shortcuts. Boxes that changed are marked, a heading typed into one
   is flagged before saving, and "Save N changes" sends only those. A change note
   is optional and shown on each republished page.

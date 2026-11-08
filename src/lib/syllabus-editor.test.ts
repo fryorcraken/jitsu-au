@@ -41,12 +41,16 @@ describe("editorCells", () => {
     ]);
   });
 
-  it("shows every belt for a topic, junior first, including one with no page yet", () => {
+  it("shows every belt with a page for a topic, junior first", () => {
     const cells = editorCells(DATA, "topic", "throws");
-    expect(cells.map((c) => [c.belt, c.label])).toEqual([
-      ["yellow", "Yellow belt (7th Kyu)"],
-      ["green", "Green belt (5th Kyu)"],
-    ]);
+    expect(cells.map((c) => [c.belt, c.label])).toEqual([["yellow", "Yellow belt (7th Kyu)"]]);
+  });
+
+  // Writing a belt's first block makes its page, which should be a choice made
+  // by picking that belt, not a side effect of filling a topic's column.
+  it("leaves a belt with no page out of a topic's boxes, but not out of its own", () => {
+    expect(editorCells(DATA, "topic", "throws").map((c) => c.belt)).not.toContain("green");
+    expect(editorCells(DATA, "belt", "green")).toHaveLength(3);
   });
 
   it("shows nothing for a selection that does not exist", () => {

@@ -141,7 +141,10 @@ function SyllabusManager() {
             <TabsTrigger value="belts">Belts</TabsTrigger>
             <TabsTrigger value="topics">Topics</TabsTrigger>
           </TabsList>
-          <TabsContent value="write" className="pt-4">
+          {/* Kept mounted while another tab is open: Radix unmounts inactive
+              tabs, which threw away whatever was typed in the boxes the
+              moment a manager glanced at the Belts tab. */}
+          <TabsContent value="write" forceMount className="pt-4 data-[state=inactive]:hidden">
             <WriteTab data={data} confirm={confirm} onSaved={afterWrite} />
           </TabsContent>
           <TabsContent value="belts" className="pt-4">
@@ -188,12 +191,18 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
   const changed = useMemo(() => changedEntries(cells, current), [cells, current]);
   const problems = useMemo(() => cellProblems(cells, current), [cells, current]);
 
+  // Compared the way a save compares (`tidyBlock`), so a stray trailing
+  // newline is not unsaved work here when Save says there is nothing to save.
+  const tidy = (fields: Record<string, string>) =>
+    Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, tidyBlock(v)]));
+  const draftValue = useMemo(() => tidy(current), [current]);
+  const draftBaseline = useMemo(() => tidy(baseline), [baseline]);
   const draft = useEditorDraft<Record<string, string>>({
     kind: "syllabus",
     scope: `${mode}:${selection}`,
     owner: user?.id ?? null,
-    value: current,
-    baseline,
+    value: draftValue,
+    baseline: draftBaseline,
     shape: Object.fromEntries(cells.map((c) => [c.key, ""])),
     enabled: cells.length > 0,
   });
@@ -229,9 +238,12 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
         );
       }
       draft.clear();
+      // Reload BEFORE letting go of the edits: cleared first, every box showed
+      // the old stored text until the reload landed, and stayed that way if it
+      // failed, as if the save had not happened.
+      await onSaved();
       setValues({});
       setChangeNote("");
-      await onSaved();
     } catch (e) {
       // Not a toast: the boxes look exactly as they would after a save, and a
       // manager who glanced away would walk off believing it was filed.
@@ -312,6 +324,7 @@ function WriteTab({ data, confirm, onSaved }: TabProps) {
             const offered = draft.offered;
             if (!offered) return;
             setValues(Object.fromEntries(Object.entries(offered).filter(([k]) => k in baseline)));
+            draft.restore();
           }}
           onDiscard={draft.discard}
         />
