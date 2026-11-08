@@ -1347,20 +1347,20 @@ clear by being fixed.
 
 ### `notifications`
 
-| Column         | Type          | Null | Notes                                                                                                                            |
-| -------------- | ------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `id`           | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                     |
-| `user_id`      | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The recipient.                                                                 |
-| `kind`         | `text`        | no   | `reply\|thread_activity\|new_blog_post\|blog_comment\|kb_comment\|membership_plan_open\|insurance_ending_soon\|insurance_ended`. |
-| `subject_type` | `text`        | no   | `blog_comment\|kb_annotation\|blog_post\|membership_plan_announcement\|membership`.                                              |
-| `subject_id`   | `uuid`        | no   | What happened. **No FK**: it points at four tables (or at an announcement, which has none), and must outlive its subject.        |
-| `actor_id`     | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who did it.                                                                      |
-| `title`        | `text`        | no   | 1–200 chars. Frozen at write time.                                                                                               |
-| `body`         | `text`        | yes  | ≤ 500 chars. A preview of the comment (`commentPreview`).                                                                        |
-| `href`         | `text`        | no   | Site-relative (`CHECK href LIKE '/%'`); the sender prefixes the origin.                                                          |
-| `read_at`      | `timestamptz` | yes  | NULL = unread. Drives the badge.                                                                                                 |
-| `emailed_at`   | `timestamptz` | yes  | NULL = not yet considered for email.                                                                                             |
-| `created_at`   | `timestamptz` | no   | Default `now()`.                                                                                                                 |
+| Column         | Type          | Null | Notes                                                                                                                                         |
+| -------------- | ------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | `uuid` PK     | no   | Default `gen_random_uuid()`.                                                                                                                  |
+| `user_id`      | `uuid`        | no   | `REFERENCES profiles(user_id) ON DELETE CASCADE`. The recipient.                                                                              |
+| `kind`         | `text`        | no   | `reply\|thread_activity\|new_blog_post\|blog_comment\|kb_comment\|membership_plan_open\|insurance_ending_soon\|insurance_ended\|club_notice`. |
+| `subject_type` | `text`        | no   | `blog_comment\|kb_annotation\|blog_post\|membership_plan_announcement\|membership\|club_message`.                                             |
+| `subject_id`   | `uuid`        | no   | What happened. **No FK**: it points at four tables (or at an announcement, which has none), and must outlive its subject.                     |
+| `actor_id`     | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`. Who did it.                                                                                   |
+| `title`        | `text`        | no   | 1–200 chars. Frozen at write time.                                                                                                            |
+| `body`         | `text`        | yes  | ≤ 500 chars. A preview of the comment (`commentPreview`).                                                                                     |
+| `href`         | `text`        | no   | Site-relative (`CHECK href LIKE '/%'`); the sender prefixes the origin.                                                                       |
+| `read_at`      | `timestamptz` | yes  | NULL = unread. Drives the badge.                                                                                                              |
+| `emailed_at`   | `timestamptz` | yes  | NULL = not yet considered for email.                                                                                                          |
+| `created_at`   | `timestamptz` | no   | Default `now()`.                                                                                                                              |
 
 `UNIQUE (user_id, kind, subject_id)`, plus indexes on `(user_id, created_at
 DESC)`, a partial `(user_id) WHERE read_at IS NULL` for the badge, and a partial
@@ -1392,6 +1392,13 @@ app; the title names them instead. They have no switch in
 never reads them, and one it could not send is retried the next morning. A row exists only while the reminder is or was owed, so
 `emailed_at` on one of these always means the email went out. See
 `docs/memberships.md`, "When yearly insurance ends".
+
+**A club notice** (`20261108000000_club_messages.sql`) is `kind = 'club_notice'`,
+`subject_type = 'club_message'` and `subject_id` = the `club_messages` row. One
+row per inbox, on the parent for a family, like the plan announcement; `title`
+is the message's subject, `body` a plain excerpt, and `href` is
+`/messages/<id>`, where the reader opens the whole message. No email switch.
+See "Club messages" below and `docs/club-messages.md`.
 
 **Titles are frozen, not joined.** A notification is a record of a moment, the
 same call `waivers` makes about its person fields. Rendering from a live join
@@ -1711,12 +1718,52 @@ so nothing here is reachable from a browser and `client-grants-expected.txt`
 needs no entry. Every read and write runs through a server function on the
 service role, which enforces visibility in code.
 
+## Club messages
+
+A club notice a manager sent from `/manager/messages` or the agent API, and
+who it went to. Product rules: **`docs/club-messages.md`**. Added by
+`20261108000000_club_messages.sql`. Both tables are **service role only**
+(`REVOKE ALL ... FROM PUBLIC, anon, authenticated`, RLS on, no policies): every
+read and write goes through a manager-gated server function, and a member's
+own copy is read through `getMyClubMessage`, which checks their
+`notifications` row first.
+
+### `club_messages`
+
+| Column                  | Type          | Null | Notes                                                                       |
+| ----------------------- | ------------- | ---- | --------------------------------------------------------------------------- |
+| `id`                    | `uuid` PK     | no   | Minted by the caller: the retry key. The same id finishes the same message. |
+| `kind`                  | `text`        | no   | `notice`. `promotion` joins it when promotions ship.                        |
+| `subject`               | `text`        | no   | 1–200 chars after trimming. The email's subject line.                       |
+| `body`                  | `text`        | no   | 1–20000 chars. The manager's markdown, as sent.                             |
+| `audience`              | `jsonb`       | no   | `{ groups, lead_ids }` as ticked. Never an address.                         |
+| `sent_by`               | `uuid`        | yes  | `REFERENCES auth.users(id) ON DELETE SET NULL`.                             |
+| `recipients_written_at` | `timestamptz` | yes  | Set once every recipient row exists. From then on the list is frozen.       |
+| `created_at`            | `timestamptz` | no   | Default `now()`. When it was sent.                                          |
+
+The members' half of the recipients is `notifications` rows (`club_notice`,
+above): that is what puts it on `/notifications` and lets the morning summary
+send anything the immediate send did not.
+
+### `club_message_lead_recipients`
+
+`id` PK, `message_id` (`→ club_messages ON DELETE CASCADE`),
+`interest_registration_id` (`→ interest_registrations ON DELETE CASCADE`),
+`emailed_at`, `created_at`, `UNIQUE (message_id, interest_registration_id)`.
+One row per lead per message, because a lead has no profile and so no
+`notifications` row. It holds no address: the address is read from the
+registration at send time, and deleting a lead (`deleteLead`) takes these rows
+with it.
+
 ## Public intake (anon insert-only)
 
 ### `interest_registrations`
 
 `id` PK, `name`, `email`, `phone`, `uts_student`, `experience`, `message`,
-`sms_whatsapp_consent`, `client_submission_id`, `created_at`. **RLS:** anon
+`sms_whatsapp_consent`, `promotion_consent`, `client_submission_id`,
+`created_at`. `promotion_consent` (`boolean NOT NULL DEFAULT false`) is the
+interest form's optional, unticked "Keep me posted about club events and
+offers" box, the lead's own tick (`docs/club-messages.md`). **RLS:** anon
 INSERT under a validating `WITH CHECK` (name/email/phone/experience/message
 length + email format). Each row is a **lead**: kept exactly as submitted,
 creating no person record. The manager directory merges leads in by normalized

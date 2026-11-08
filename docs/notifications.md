@@ -752,6 +752,19 @@ agent API does the same through `save_membership_plan` with `announce: true`
 - **No eligibility rule.** Any plan can be announced, on sale or not, the trial
   included. The club owner chose that over guarding it.
 
+### A club notice is sent
+
+A manager emails the people they tick from `/manager/messages` (or an agent,
+with `send_club_message`). The members' half is one `club_notice` row per
+inbox, written and then sent straight away by `sendPendingNotifications`,
+exactly as a plan announcement is; leads, who have no person record, have
+recipient rows of their own. Like the plan announcement it has no switch
+(`club_notice` is in `UNSWITCHABLE_NOTIFICATION_KINDS`). A row the immediate
+send left pending goes with the next morning's summary under its own heading,
+"From the club", ahead of Membership. The row links to `/messages/<id>`, the
+whole message. Every rule beyond that (who is in each group, the 90-day lead
+default, why it is sent through Lovable Emails): `docs/club-messages.md`.
+
 ### Turning email off
 
 The switches are on `/notifications` for somebody signed in, and at

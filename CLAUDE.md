@@ -134,6 +134,7 @@ you are working in their area, not before.
 | Changing the schema — **read first**   | `docs/database-changes.md`  |
 | Manager agent HTTP API                 | `docs/manager-agent-api.md` |
 | Every email: who, why, and the sender  | `docs/emails.md`            |
+| Club notices a manager emails out      | `docs/club-messages.md`     |
 | End-to-end tests (the browser suite)   | `docs/e2e-tests.md`         |
 | Routing conventions                    | `src/routes/README.md`      |
 | Product flows, one file per flow       | the rest of `docs/`         |
@@ -447,6 +448,12 @@ Core tables:
   raised from it against a person, emailed, shown in the member's "How to pay"
   panel, and settled by the same bank statement import or a manager marking
   them paid. Deliberately minimal. Product flows: `docs/item-invoices.md`.
+- `club_messages` / `club_message_lead_recipients` — club notices a manager
+  emails to the people they tick (members, visitors, applicants, chosen
+  leads) from `/manager/messages` or the agent API, and which leads each went
+  to; the members' copies are `notifications` rows. Sent through Lovable
+  Emails only because the club is small; promotions are not built and will
+  need a separate sender. Product rules: `docs/club-messages.md`.
 - `user_roles` — role assignments; managed by managers / service role.
 - `manager_api_tokens` — manager-issued bearer tokens for the manager agent API
   (`/api/manager/agent`); stores only a SHA-256 hash + display prefix,
