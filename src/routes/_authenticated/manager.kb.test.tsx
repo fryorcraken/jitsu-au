@@ -16,7 +16,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => (opts: Record<string, unknown>) => opts,
+  createFileRoute: () => (opts: Record<string, unknown>) => ({
+    ...opts,
+    useSearch: () => routeSearch,
+  }),
   useNavigate: () => vi.fn(),
   Link: ({
     to,
@@ -59,6 +62,12 @@ vi.mock("react-markdown", () => ({
  * this declaration.
  */
 let managerAnnotations: Record<string, unknown>[] = [];
+
+/** The address's `?article=`, set by the tests that open one by link. */
+let routeSearch: { article?: string } = {};
+
+/** Articles added by a test on top of the fixture below. */
+let extraArticles: Record<string, unknown>[] = [];
 
 const article = {
   slug: "our-history",
@@ -121,7 +130,8 @@ const stray = {
 // needs a query client, which this suite renders without.
 vi.mock("@/hooks/useKbArticle", () => ({ useInvalidateKbReader: () => vi.fn() }));
 vi.mock("@/lib/kb.functions", () => ({
-  listManagerArticles: () => Promise.resolve([article, houseRules, syllabus, firstClass, stray]),
+  listManagerArticles: () =>
+    Promise.resolve([article, houseRules, syllabus, firstClass, stray, ...extraArticles]),
   listManagerSections: () =>
     Promise.resolve([
       { slug: "belts", title: "Belts and grading", position: 10 },
@@ -175,6 +185,49 @@ describe("/manager/kb autoload", () => {
 
     await screen.findByLabelText(/sidebar label/i);
     expect(screen.queryByText(/unsaved changes/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("/manager/kb opened from a link", () => {
+  // The syllabus screen links each belt to `?article=<its page>` for its
+  // comments and history, which is no use if the editor opens something else.
+  it("opens the article the address names", async () => {
+    routeSearch = { article: "house-rules" };
+    try {
+      render(<KnowledgeBaseManager />);
+      expect(await screen.findByDisplayValue("house-rules")).toBeInTheDocument();
+    } finally {
+      routeSearch = {};
+    }
+  });
+
+  // A belt page's text is the syllabus screen's, and a settings save writes no
+  // version, so a change note there would be dropped without a word.
+  it("on a belt page, offers settings only and links back to the syllabus", async () => {
+    routeSearch = { article: "green-belt" };
+    extraArticles = [
+      {
+        ...article,
+        slug: "green-belt",
+        title: "Green belt",
+        section: "belts",
+        position: 40,
+        nav_title: null,
+        is_belt_page: true,
+        belt: "green",
+      },
+    ];
+    try {
+      render(<KnowledgeBaseManager />);
+      expect(
+        await screen.findByRole("link", { name: /edit this belt.s syllabus/i }),
+      ).toHaveAttribute("href", "/manager/syllabus");
+      expect(screen.getByRole("button", { name: "Save settings" })).toBeInTheDocument();
+      expect(screen.queryByLabelText(/what changed/i)).not.toBeInTheDocument();
+    } finally {
+      routeSearch = {};
+      extraArticles = [];
+    }
   });
 });
 
