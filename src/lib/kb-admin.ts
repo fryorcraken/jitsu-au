@@ -248,30 +248,28 @@ function refuseBeltPageEdits(
 ): void {
   if (!article && RESERVED_ARTICLE_SLUGS.has(input.slug)) {
     throw new Error(
-      `/kb/${input.slug} is where the knowledge base shows the syllabus by topic, so an article cannot use that URL key. Pick another.`,
+      `/kb/${input.slug} is the page members read the syllabus on, topic by topic, so an article cannot use that address. Pick another.`,
     );
   }
   if (article?.belt_id) {
     if (writingText || input.link_path) {
       throw new Error(
-        `"${input.slug}" is a belt's syllabus page. Its text is put together from the syllabus, so change it there (save_syllabus_entries, or the syllabus screen) rather than here.`,
+        `"${input.slug}" is a belt page. Its text is put together from the syllabus, so change it on the Syllabus screen (through the agent API: save_syllabus_entries).`,
       );
     }
     if (section !== undefined && section?.kind !== "syllabus") {
-      throw new Error(
-        `"${input.slug}" is a belt's syllabus page, so it stays in the syllabus section.`,
-      );
+      throw new Error(`"${input.slug}" is a belt page, so it stays in the Syllabus section.`);
     }
     if (input.position !== undefined) {
       throw new Error(
-        `"${input.slug}" is a belt's syllabus page, and belt pages are ordered by belt. Move the belt instead (save_belt, or the syllabus screen).`,
+        `"${input.slug}" is a belt page, and belt pages are in belt order. Move the belt on the Syllabus screen instead (through the agent API: save_belt).`,
       );
     }
     return;
   }
   if (section?.kind === "syllabus") {
     throw new Error(
-      "The syllabus section holds belt pages only. A belt page is made by writing that belt's syllabus; file this article in another section.",
+      "The Syllabus section holds belt pages only, and a belt page is made by writing that belt's syllabus. File this article in another section.",
     );
   }
 }

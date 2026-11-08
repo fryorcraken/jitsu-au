@@ -250,7 +250,7 @@ export type SyllabusView = {
   /** The topic's parent, when the topic is a sub-topic, for the heading above it. */
   topicParent: SyllabusTopic | null;
   sections: ViewTopic[];
-  /** Every topic in order, for the "jump to" list and the topic picker. */
+  /** Every topic in order, for the topic row and the topic picker. */
   allTopics: SyllabusTopicNode[];
   /** A `up_to` that names no belt on offer, so the page can say so. */
   unknownUpTo: string | null;

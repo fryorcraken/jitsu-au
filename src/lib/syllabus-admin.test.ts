@@ -250,6 +250,25 @@ describe("saveBelt", () => {
       grade: null,
     });
   });
+
+  // Refused before anything is made: on its first block would be too late,
+  // with a box of text written that cannot be published.
+  it("refuses a new belt whose page address an article already has", async () => {
+    const tables = club();
+    tables.kb_articles.push({
+      id: "a-brown",
+      slug: "brown-belt",
+      visibility: "members",
+      belt_id: null,
+      section_id: null,
+      position: 0,
+      link_path: null,
+    });
+    await expect(
+      saveBelt(memoryDb(tables), { slug: "brown", name: "Brown", colour: "#7b4a2a" }, null),
+    ).rejects.toThrow(/already an article at \/kb\/brown-belt/);
+    expect(tables.belts.some((b) => b.slug === "brown")).toBe(false);
+  });
 });
 
 describe("deleteBelt", () => {
