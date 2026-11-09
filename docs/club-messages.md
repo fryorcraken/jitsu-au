@@ -30,23 +30,38 @@ unsubscribe.
 
 ## Who gets one
 
-The manager ticks groups, and leads one by one. The count on the screen is the
-server's (`countClubMessageAudience`), asked again on every tick, and it is the
-number the confirm repeats.
+Each group, and the leads, is a tick box for the whole list with the people
+folded away underneath ("Choose who, one by one"), closed by default. Everybody
+in a group starts ticked; a manager opens a list only to untick somebody, or to
+tick an older lead. The count on the screen is the server's
+(`countClubMessageAudience`), asked again on every tick, and it is the number
+the confirm repeats.
 
-- **Members**, **Visitors and lapsed members**, **Applicants**: a person's group
-  is their funnel phase (`deriveLifecycleStatus`, through `aggregateClubUsers`),
-  so the boxes agree with the users page. Lapsed sits with visitors.
-- **Leads**: everybody who filled in the interest form and has no person
-  record, one row per address with the newest registration standing for it.
-  Those from the last 90 days (`LEAD_PRESELECT_DAYS`) start ticked; the manager
-  can untick anyone (somebody already followed up by SMS) or tick an older
-  lead. An address that now belongs to a person is not a lead: they get the
-  message as that person if their group is ticked.
+- **Members**, **Visitors**, **Lapsed members**, **Applicants**: a person's
+  group is their funnel phase (`deriveLifecycleStatus`, through
+  `aggregateClubUsers`), so the lists agree with the users page. Visitors and
+  lapsed members are separate on purpose: somebody whose trial is over and who
+  has not joined yet is told something different from somebody who was paying
+  and did not renew. The funnel itself calls both "lapsed" once a membership
+  has ended, a free trial included, so the message's groups correct it: lapsed
+  only counts somebody who ever held a paid membership (`groupForPerson`), and
+  a finished trial stays a visitor.
+- **What is sent.** A group ticked in full is sent as the group; a group with
+  somebody unticked is sent as the people kept (`choiceFromTicks`). So the
+  history can say "Members", and a person ticked one by one is still reached
+  only while they are in some group: naming the id of a lead, or of somebody
+  who has left, reaches nobody.
+- **Leads**: everybody who filled in the interest form or wrote in through the
+  contact form and has no person record, one row per address across both forms,
+  the newest entry standing for it. Those whose newest entry is from the last
+  90 days (`LEAD_PRESELECT_DAYS`) start ticked. An address that now belongs to
+  a person is not a lead: they get the message as that person if they are
+  ticked. The users page lists the same leads, labelling the contact-form ones.
 - **One inbox, one email.** A family is one email to the parent, naming the
-  children it is about, the same fold the plan announcement makes.
-- **Nobody who has left.** An archived person is never included, and nor is a
-  family whose account holder is archived.
+  children it is about, the same fold the plan announcement makes. A child's
+  row in the list says whose inbox it goes to.
+- **Nobody who has left.** An archived person is never listed or included, and
+  nor is a family whose account holder is archived.
 
 ## Sending
 
@@ -114,16 +129,19 @@ a list through the same service, under the same terms.
 
 ## Leads' consent
 
-The interest form carries an optional, unticked box: "Keep me posted about club
-events and offers". It is stored as `interest_registrations.promotion_consent`
-and is the lead's own tick, never inferred. Nothing reads it yet: it ships ahead
-of promotions so consent builds up in the meantime. `list_message_leads` and the
-screen's lead list report it.
+The interest form and the contact form both carry an optional, unticked box:
+"Keep me posted about club events and offers". It is stored as
+`promotion_consent` on `interest_registrations` and on `contact_messages`, and
+is the lead's own tick, never inferred. Nothing reads it yet: it ships ahead of
+promotions so consent builds up in the meantime. `list_message_leads` and the
+screen's lead list report it, true when any of the address's entries ticked it.
 
 ## Erasure
 
 Deleting a lead (the users page's only erasure, `docs/erasing-personal-data.md`)
-deletes their registrations, and `club_message_lead_recipients` rows go with
-them (`ON DELETE CASCADE`). Those rows hold no address: it is read from the
-registration at send time. A message's own row keeps the subject and body the
-manager wrote, and which groups were ticked, never an address.
+deletes every interest-form entry **and every contact message** under their
+address: either alone would leave them a lead. The confirm says how many of
+each. `club_message_lead_recipients` rows go with them (`ON DELETE CASCADE`,
+from whichever form the row points at). Those rows hold no address: it is read
+from the entry at send time. A message's own row keeps the subject and body the
+manager wrote, and which groups and ids were ticked, never an address.

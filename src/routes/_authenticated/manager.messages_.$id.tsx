@@ -88,6 +88,9 @@ function SentMessagePage() {
             <dd>
               {[
                 ...message.groups.map((g) => CLUB_MESSAGE_GROUP_LABELS[g]),
+                ...(message.person_count > 0
+                  ? [`${peopleCount(message.person_count)} picked one by one`]
+                  : []),
                 ...(message.lead_count > 0
                   ? [`${peopleCount(message.lead_count)} from the leads`]
                   : []),

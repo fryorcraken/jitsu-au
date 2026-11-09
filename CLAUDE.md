@@ -386,10 +386,12 @@ RLS, relationships, storage); it is the source of truth for the data model and
 Core tables:
 
 - `interest_registrations`, `contact_messages` — public insert-only (anon), with
-  column-length/format CHECK constraints in the RLS `WITH CHECK`. A manager can
-  **delete** an enquiry from either (service role, behind the manager gate);
-  that is the product's only erasure path, and what it deliberately does not
-  touch is `docs/erasing-personal-data.md`.
+  column-length/format CHECK constraints in the RLS `WITH CHECK`. Either form
+  makes somebody a **lead** (on the users page and in Messages) until their
+  address belongs to a person. A manager can **delete** a contact message on its
+  own, or a lead, which takes both forms' entries under the address (service
+  role, behind the manager gate); that is the product's only erasure path, and
+  what it deliberately does not touch is `docs/erasing-personal-data.md`.
 - `profiles` — the person fields for an auth user, keyed by `user_id` (PK →
   `auth.users`). **The only email lives on `auth.users`** — no email column in
   `public`; the server resolves emails via the service-role-only
@@ -457,8 +459,9 @@ Core tables:
   panel, and settled by the same bank statement import or a manager marking
   them paid. Deliberately minimal. Product flows: `docs/item-invoices.md`.
 - `club_messages` / `club_message_lead_recipients` — club notices a manager
-  emails to the people they tick (members, visitors, applicants, chosen
-  leads) from `/manager/messages` or the agent API, and which leads each went
+  emails to the people they tick (members, visitors, lapsed members,
+  applicants, and leads from the interest form or the contact form) from
+  `/manager/messages` or the agent API, and which leads each went
   to; the members' copies are `notifications` rows. Sent through Lovable
   Emails only because the club is small; promotions are not built and will
   need a separate sender. Product rules: `docs/club-messages.md`.

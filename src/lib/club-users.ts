@@ -85,12 +85,21 @@ export type ClubUserWaiver = {
   approval_status: string;
 };
 
-/** An interest registration (lead) row the aggregation reads. */
+/** Where a lead came from: the interest form, or the contact form. */
+export type ClubUserLeadSource = "interest" | "contact";
+
+/**
+ * A lead row the aggregation reads: an interest registration, or a contact
+ * message. Both make somebody a lead (docs/club-messages.md); `source` defaults
+ * to the interest form, which is what every lead was before contact messages
+ * counted.
+ */
 export type ClubUserLead = {
   email: string;
   name: string;
   phone: string | null;
   created_at: string;
+  source?: ClubUserLeadSource;
 };
 
 /** The membership fields the aggregation reads. */
@@ -202,6 +211,12 @@ export type ClubUser = {
   /** Classes this person has been checked in to, all-time. Always 0 for a lead. */
   sessions_attended: number;
   first_seen_at: string | null;
+  /**
+   * For a lead, how many entries of each form are filed under their address:
+   * what the users page labels them with ("Contact form") and what deleting
+   * them deletes. Null for a person, who is not a lead.
+   */
+  lead_sources: Record<ClubUserLeadSource, number> | null;
 };
 
 /** True for a non-empty (after trim) student number. */
@@ -463,18 +478,24 @@ export function aggregateClubUsers(input: {
       membership_count: ms.length,
       sessions_attended: checkinsByUser.get(p.user_id) ?? 0,
       first_seen_at,
+      lead_sources: null,
     };
   });
 
-  // Leads: interest registrations whose email doesn't belong to a person yet.
-  // Latest registration wins per (normalized) email.
+  // Leads: interest registrations and contact messages whose email doesn't
+  // belong to a person yet. One row per (normalized) email across both forms,
+  // the latest entry standing for it, with a count of each form's entries.
   const personEmails = new Set([...emailByUser.values()].map((e) => normalizeEmail(e)));
   const leadByEmail = new Map<string, ClubUserLead>();
+  const sourcesByEmail = new Map<string, Record<ClubUserLeadSource, number>>();
   for (const lead of input.leads) {
     const email = normalizeEmail(lead.email);
     if (personEmails.has(email)) continue;
     const prev = leadByEmail.get(email);
     if (!prev || prev.created_at < lead.created_at) leadByEmail.set(email, lead);
+    const counts = sourcesByEmail.get(email) ?? { interest: 0, contact: 0 };
+    counts[lead.source ?? "interest"] += 1;
+    sourcesByEmail.set(email, counts);
   }
   for (const [email, lead] of leadByEmail) {
     users.push({
@@ -506,6 +527,7 @@ export function aggregateClubUsers(input: {
       // A lead has never been on the mat: there is no person record to check in.
       sessions_attended: 0,
       first_seen_at: lead.created_at,
+      lead_sources: sourcesByEmail.get(email) ?? { interest: 1, contact: 0 },
     });
   }
 

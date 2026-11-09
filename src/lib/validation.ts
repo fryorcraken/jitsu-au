@@ -535,6 +535,9 @@ export const contactSchema = z.object({
   email: z.string().trim().email().max(255),
   subject: z.string().trim().max(150).regex(singleLine).optional().or(z.literal("")),
   message: z.string().trim().min(1).max(2000),
+  // The same optional "Keep me posted about club events and offers" box as the
+  // interest form. Absent means unticked.
+  promotion_consent: z.boolean().optional().default(false),
   hp: honeypot,
 });
 
@@ -3190,6 +3193,7 @@ export const managerAgentActions = [
   "list_club_messages",
   "get_club_message",
   "list_message_leads",
+  "list_message_people",
   "get_club_message_audience",
   "send_club_message_test",
   "send_club_message",

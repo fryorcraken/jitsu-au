@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   LEAD_PRESELECT_DAYS,
+  choiceFromTicks,
   clubMessageHref,
+  groupForPerson,
   groupForStatus,
+  groupPeople,
   leadCandidates,
   messageAudience,
   messageProgress,
@@ -37,12 +40,23 @@ function person(
 }
 
 describe("groupForStatus", () => {
-  it("puts lapsed members with visitors, and reaches no lead", () => {
+  it("keeps lapsed members apart from visitors, and reaches no lead", () => {
     expect(groupForStatus("member")).toBe("members");
     expect(groupForStatus("visitor")).toBe("visitors");
-    expect(groupForStatus("lapsed")).toBe("visitors");
+    expect(groupForStatus("lapsed")).toBe("lapsed");
     expect(groupForStatus("applicant")).toBe("applicants");
     expect(groupForStatus("lead")).toBeNull();
+  });
+});
+
+describe("groupForPerson", () => {
+  it("counts a finished free trial as a visitor, not a lapsed member", () => {
+    expect(groupForPerson({ lifecycle_status: "lapsed", ever_paid: false })).toBe("visitors");
+    expect(groupForPerson({ lifecycle_status: "lapsed" })).toBe("visitors");
+  });
+
+  it("keeps somebody who used to pay as a lapsed member", () => {
+    expect(groupForPerson({ lifecycle_status: "lapsed", ever_paid: true })).toBe("lapsed");
   });
 });
 
@@ -73,9 +87,26 @@ describe("messageAudience", () => {
   });
 
   it("never includes somebody who has left the club", () => {
-    const inboxes = messageAudience({ people, groups: ["members", "visitors", "applicants"] });
+    const inboxes = messageAudience({
+      people,
+      groups: ["members", "visitors", "lapsed", "applicants"],
+    });
     expect(inboxes.map((i) => i.contactUserId)).not.toContain(ARCHIVED);
     expect(inboxes).toHaveLength(4);
+  });
+
+  it("reaches a person ticked one by one without their whole group", () => {
+    const inboxes = messageAudience({ people, groups: [], personIds: [LAPSED.toUpperCase()] });
+    expect(inboxes.map((i) => i.contactUserId)).toEqual([LAPSED]);
+  });
+
+  it("never reaches somebody who has left, even ticked one by one", () => {
+    expect(messageAudience({ people, groups: [], personIds: [ARCHIVED] })).toEqual([]);
+  });
+
+  it("does not reach a lead by naming their id", () => {
+    // PARENT is lead-shaped in this fixture: no group reaches them.
+    expect(messageAudience({ people, groups: [], personIds: [PARENT] })).toEqual([]);
   });
 
   it("sends nothing to a family whose account holder has left", () => {
@@ -99,6 +130,48 @@ describe("messageAudience", () => {
   });
 });
 
+describe("groupPeople", () => {
+  const people = [
+    person(PARENT, "lead", { name: "Pat" }),
+    person(CHILD, "member", { guardian_user_id: PARENT, name: "Bea" }),
+    person(MEMBER, "member", { name: "Mo" }),
+    person(LAPSED, "lapsed", { name: "Lu", ever_paid: true }),
+    person(ARCHIVED, "member", { archived: true, name: "Gone" }),
+  ];
+
+  it("lists everybody a group reaches, by name, and says whose inbox a child's goes to", () => {
+    expect(groupPeople(people)).toEqual([
+      { user_id: CHILD, name: "Bea", group: "members", inbox_user_id: PARENT, inbox_name: "Pat" },
+      { user_id: LAPSED, name: "Lu", group: "lapsed", inbox_user_id: LAPSED, inbox_name: null },
+      { user_id: MEMBER, name: "Mo", group: "members", inbox_user_id: MEMBER, inbox_name: null },
+    ]);
+  });
+});
+
+describe("choiceFromTicks", () => {
+  const listed = [
+    { user_id: "a", name: "A", group: "members" as const, inbox_user_id: "a", inbox_name: null },
+    { user_id: "b", name: "B", group: "members" as const, inbox_user_id: "b", inbox_name: null },
+    { user_id: "c", name: "C", group: "lapsed" as const, inbox_user_id: "c", inbox_name: null },
+    { user_id: "d", name: "D", group: "visitors" as const, inbox_user_id: "d", inbox_name: null },
+  ];
+
+  it("sends a fully ticked group as the group, and a partly ticked one as its people", () => {
+    expect(choiceFromTicks(listed, new Set(["a", "b", "c"]))).toEqual({
+      groups: ["members", "lapsed"],
+      person_ids: [],
+    });
+    expect(choiceFromTicks(listed, new Set(["a", "c"]))).toEqual({
+      groups: ["lapsed"],
+      person_ids: ["a"],
+    });
+  });
+
+  it("sends nothing for a group nobody in it is ticked for", () => {
+    expect(choiceFromTicks(listed, new Set())).toEqual({ groups: [], person_ids: [] });
+  });
+});
+
 describe("leadCandidates", () => {
   const now = new Date("2026-11-08T00:00:00Z");
   const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
@@ -107,6 +180,7 @@ describe("leadCandidates", () => {
     name: `Lead ${id}`,
     email,
     created_at,
+    source: "interest",
     promotion_consent: false,
     ...extra,
   });
@@ -149,6 +223,24 @@ describe("leadCandidates", () => {
       now,
     });
     expect(out).toEqual([]);
+  });
+
+  it("makes a contact-form sender a lead, and folds both forms into one row", () => {
+    const out = leadCandidates({
+      registrations: [
+        reg("i", "sam@example.com", daysAgo(40)),
+        reg("c", "sam@example.com", daysAgo(2), { source: "contact" }),
+        reg("x", "kim@example.com", daysAgo(200), { source: "contact" }),
+      ],
+      personEmails: [],
+      now,
+    });
+    expect(
+      out.map((l) => [l.email, l.registration_id, l.source, l.sources, l.preselected]),
+    ).toEqual([
+      ["sam@example.com", "c", "contact", ["interest", "contact"], true],
+      ["kim@example.com", "x", "contact", ["contact"], false],
+    ]);
   });
 
   it("keeps consent if any of their registrations ticked the box", () => {

@@ -35,9 +35,11 @@ const lead = {
   membership_count: 0,
   sessions_attended: 0,
   first_seen_at: "2026-08-05T10:00:00.000Z",
+  lead_sources: { interest: 1, contact: 2 } as { interest: number; contact: number } | null,
 };
 const member = {
   ...lead,
+  lead_sources: null,
   user_id: "user-1",
   name: "Kim Tran",
   email: "kim@example.com",
@@ -134,24 +136,26 @@ describe("/manager/users", () => {
     expect(screen.getByText("Sam Lee")).toBeInTheDocument();
   });
 
-  it("names the address, and says the contact inbox is separate", async () => {
+  it("names the address, and says the contact messages go with it", async () => {
     await renderLoaded();
     await userEvent.click(screen.getByRole("button", { name: "Delete the enquiry from Sam Lee" }));
 
     const dialog = within(await screen.findByRole("alertdialog"));
     expect(dialog.getByText(/Delete the enquiry from Sam Lee\?/)).toBeInTheDocument();
-    // A manager pressing this is entitled to think it removes everything about
-    // the person. It does not: their contact-form messages live in another
-    // inbox, and the confirm has to say so before the click, not after.
-    //
-    // Pinned as "does not touch it" rather than a looser match on the inbox's
-    // name. The first wording here read "...is separate, and is deleted from
-    // Contact messages", which says the opposite of what the code does, and a
-    // test matching only /deleted from Contact messages/ passed on it happily.
-    // A confirm for something irreversible is wrong if it merely mentions the
-    // right nouns, so assert the claim, not the vocabulary.
-    expect(dialog.getByText(/does not touch it/)).toBeVisible();
-    expect(dialog.getByText(/stays in Contact messages until you delete it there/)).toBeVisible();
+    // Deleting a lead takes both forms' entries under the address, or a contact
+    // message would put them straight back on the list. The confirm says how
+    // many of each, before the click: a manager is entitled to know that their
+    // contact messages go too. This used to say the opposite, when deleting a
+    // lead left the contact inbox alone, so assert the claim itself.
+    expect(
+      dialog.getByText(/1 interest form entry and 2 contact messages under sam@example.com/),
+    ).toBeVisible();
+    expect(dialog.getByText(/can't be undone/)).toBeVisible();
+  });
+
+  it("labels a lead who wrote in through the contact form", async () => {
+    await renderLoaded();
+    expect(screen.getByText("Contact form")).toBeInTheDocument();
   });
 
   it("takes the lead off the list once the server confirms", async () => {

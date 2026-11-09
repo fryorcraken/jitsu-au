@@ -508,7 +508,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "38",
+  version: "39",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -521,6 +521,16 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "39",
+      // A group's meaning narrows: `visitors` stops including lapsed members.
+      breaking: true,
+      notes: [
+        'BREAKING: the club message group `visitors` no longer includes lapsed members. They are their own group, `lapsed` (used to pay for training, and their membership ended). A call that sent to `visitors` now reaches fewer people; send `["visitors", "lapsed"]` for the old meaning.',
+        "People can be picked one by one: get_club_message_audience and send_club_message take person_ids (user ids from the new read action list_message_people, which lists everybody each group reaches, by name, with whose inbox a child's email goes to). groups, person_ids and lead_ids all default to none; at least one is needed to send.",
+        "Contact-form senders are leads too. list_message_leads reports source (which form the newest entry came from) and sources (every form the address has used); its registration_id may be a contact message's id, and send_club_message takes it in lead_ids the same way. list_users reports lead_sources on a lead (how many entries of each form are under the address) and lists contact-form senders as leads.",
+      ],
+    },
     {
       version: "38",
       // A new action and two quieter behaviours. Nothing that worked before
@@ -2425,20 +2435,33 @@ export const AGENT_MANIFEST: {
       name: "list_message_leads",
       method: "POST",
       summary:
-        "Every lead a club notice could go to, newest first, the same list the Messages screen ticks from: registration_id (what send_club_message's lead_ids takes), name, email, registered_at, promotion_consent (they ticked 'keep me posted about club events and offers') and preselected (registered in the last 90 days, ticked to start with on the screen). One row per address, the newest registration standing for it; an address that now belongs to a person is left out, because they get messages as that person.",
+        "Every lead a club notice could go to, newest first, the same list the Messages screen ticks from. A lead is anybody who filled in the interest form or wrote in through the contact form and has no person record. Each row: registration_id (what send_club_message's lead_ids takes; the id of their newest entry, from either form), source (which form that entry came from: interest | contact), sources (every form the address has used), name, email, registered_at, promotion_consent (they ticked 'keep me posted about club events and offers') and preselected (their newest entry is from the last 90 days, ticked to start with on the screen). One row per address across both forms; an address that now belongs to a person is left out, because they get messages as that person.",
+      params: [],
+    },
+    {
+      name: "list_message_people",
+      method: "POST",
+      summary:
+        "Everybody each club message group reaches, person by person, in name order: the lists the Messages screen ticks from under each group. Each row: user_id (what person_ids takes), name, group (members | visitors | lapsed | applicants), inbox_user_id and inbox_name (whose inbox their email goes to, when it is not theirs: the parent, for a child). Nobody who has left the club is listed.",
       params: [],
     },
     {
       name: "get_club_message_audience",
       method: "POST",
       summary:
-        "How many emails a club notice would send right now to these groups and leads, without sending anything: emails (the number to read back to the manager before sending), inboxes (households), leads, and by_group (households each group reaches on its own). A family is one email, to the parent. Nobody who has left the club is counted.",
+        "How many emails a club notice would send right now to these groups, people and leads, without sending anything: emails (the number to read back to the manager before sending), inboxes (households), leads, and by_group (households each group reaches on its own). A family is one email, to the parent. Nobody who has left the club is counted.",
       params: [
         {
           name: "groups",
           required: false,
           description:
-            "Any of members (paying for training now), visitors (waiver approved, not paying now, lapsed members included) and applicants (waiver still waiting for approval). Default none.",
+            "Whole groups, any of: members (paying for training now), visitors (waiver approved, never paid for training, such as a finished trial), lapsed (used to pay, and their membership ended) and applicants (waiver still waiting for approval). Default none.",
+        },
+        {
+          name: "person_ids",
+          required: false,
+          description:
+            "People picked one by one, outside the whole groups: user_id values from list_message_people. Default none.",
         },
         {
           name: "lead_ids",
@@ -2489,7 +2512,12 @@ export const AGENT_MANIFEST: {
         {
           name: "groups",
           required: false,
-          description: "As for get_club_message_audience. At least one group or one lead.",
+          description: "As for get_club_message_audience. At least one group, person or lead.",
+        },
+        {
+          name: "person_ids",
+          required: false,
+          description: "user_id values from list_message_people, as for get_club_message_audience.",
         },
         {
           name: "lead_ids",

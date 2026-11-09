@@ -1098,6 +1098,13 @@ describe("contactSchema", () => {
     expect(contactSchema.safeParse(valid).success).toBe(true);
   });
 
+  it("treats a missing promotion box as unticked, and carries a tick through", () => {
+    const plain = contactSchema.safeParse(valid);
+    expect(plain.success && plain.data.promotion_consent).toBe(false);
+    const ticked = contactSchema.safeParse({ ...valid, promotion_consent: true });
+    expect(ticked.success && ticked.data.promotion_consent).toBe(true);
+  });
+
   it("rejects a filled honeypot", () => {
     expect(contactSchema.safeParse({ ...valid, hp: "bot" }).success).toBe(false);
   });

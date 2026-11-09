@@ -18,13 +18,16 @@ async function adminClient() {
   return supabaseAdmin;
 }
 
-/** Every lead a message could go to, newest first, the last 90 days marked. */
-export const listMessageLeads = createServerFn({ method: "GET" })
+/**
+ * Everybody the screen can tick: the people in each group, and every lead
+ * newest first with the last 90 days marked. One read of the club for both.
+ */
+export const listMessageRecipients = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requireManager(context);
     const server = await import("@/lib/club-message.server");
-    return server.listMessageLeads(await adminClient());
+    return server.listMessageRecipients(await adminClient());
   });
 
 /** How many emails a choice of groups and leads would send right now. */
@@ -36,6 +39,7 @@ export const countClubMessageAudience = createServerFn({ method: "POST" })
     const server = await import("@/lib/club-message.server");
     return server.countClubMessageAudience(await adminClient(), {
       groups: data.groups,
+      personIds: data.person_ids,
       leadIds: data.lead_ids,
     });
   });
@@ -69,6 +73,7 @@ export const sendClubMessage = createServerFn({ method: "POST" })
         subject: data.subject,
         body: data.body,
         groups: data.groups,
+        personIds: data.person_ids,
         leadIds: data.lead_ids,
         actorId: context.userId,
       });

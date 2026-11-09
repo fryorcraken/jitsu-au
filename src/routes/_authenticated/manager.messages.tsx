@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useServerFn } from "@tanstack/react-start";
 
 import { ActionFailure } from "@/components/site/ActionFailure";
@@ -21,16 +21,18 @@ import {
   CLUB_MESSAGE_GROUP_HINTS,
   CLUB_MESSAGE_GROUP_LABELS,
   LEAD_PRESELECT_DAYS,
+  choiceFromTicks,
   clubMessageGroups,
   peopleCount,
   sendConfirmTitle,
   type ClubMessageGroup,
+  type GroupPerson,
   type LeadCandidate,
 } from "@/lib/club-message";
 import {
   countClubMessageAudience,
   listClubMessages,
-  listMessageLeads,
+  listMessageRecipients,
   sendClubMessage,
   sendClubMessageTest,
 } from "@/lib/club-message.functions";
@@ -66,6 +68,11 @@ const DRAFT_SHAPE: DraftFields = { subject: "", body: "" };
  *   starts a new message with a new id.
  * - **The writing is kept on the device** until it has gone, because a phone
  *   that closes the app mid-sentence would otherwise lose it.
+ *
+ * Every group, and the leads, is a tick box for the whole list with the list
+ * itself folded away underneath: everybody in a group starts ticked, the leads
+ * from the last 90 days start ticked, and a manager opens a list only to untick
+ * somebody (or tick an older lead).
  */
 function MessagesPage() {
   const navigate = useNavigate();
@@ -81,7 +88,7 @@ function MessagesPage() {
 }
 
 function Composer({ userId }: { userId: string | null }) {
-  const fetchLeads = useServerFn(listMessageLeads);
+  const fetchRecipients = useServerFn(listMessageRecipients);
   const fetchCount = useServerFn(countClubMessageAudience);
   const fetchHistory = useServerFn(listClubMessages);
   const send = useServerFn(sendClubMessage);
@@ -95,9 +102,14 @@ function Composer({ userId }: { userId: string | null }) {
 
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [groups, setGroups] = useState<Set<ClubMessageGroup>>(new Set(clubMessageGroups));
+  // Everybody the screen can tick, read once: the people in each group and the
+  // leads. Null until it loads, and sending stays off until it has.
+  const [people, setPeople] = useState<GroupPerson[] | null>(null);
   const [leads, setLeads] = useState<LeadCandidate[] | null>(null);
-  const [leadsError, setLeadsError] = useState<string | null>(null);
+  const [recipientsError, setRecipientsError] = useState<string | null>(null);
+  /** Ticked people, by user id. Everybody starts ticked. */
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  /** Ticked leads, by registration id. The last 90 days start ticked. */
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [count, setCount] = useState<Count | null>(null);
   const [countError, setCountError] = useState<string | null>(null);
@@ -118,6 +130,7 @@ function Composer({ userId }: { userId: string | null }) {
     subject: string;
     body: string;
     groups: ClubMessageGroup[];
+    personIds: string[];
     leadIds: string[];
   } | null>(null);
 
@@ -131,16 +144,19 @@ function Composer({ userId }: { userId: string | null }) {
     shape: DRAFT_SHAPE,
   });
 
-  const loadLeads = useCallback(() => {
-    setLeadsError(null);
+  const loadRecipients = useCallback(() => {
+    setRecipientsError(null);
+    setPeople(null);
     setLeads(null);
-    fetchLeads()
-      .then((rows) => {
-        setLeads(rows);
-        setPicked(new Set(rows.filter((l) => l.preselected).map((l) => l.registration_id)));
+    fetchRecipients()
+      .then((res) => {
+        setPeople(res.people);
+        setLeads(res.leads);
+        setTicked(new Set(res.people.map((p) => p.user_id)));
+        setPicked(new Set(res.leads.filter((l) => l.preselected).map((l) => l.registration_id)));
       })
-      .catch((e) => setLeadsError(describeLoadError(e, "Could not load the leads")));
-  }, [fetchLeads]);
+      .catch((e) => setRecipientsError(describeLoadError(e, "Could not load who this can go to")));
+  }, [fetchRecipients]);
 
   const loadHistory = useCallback(() => {
     setHistoryError(null);
@@ -150,23 +166,25 @@ function Composer({ userId }: { userId: string | null }) {
   }, [fetchHistory]);
 
   useEffect(() => {
-    loadLeads();
+    loadRecipients();
     loadHistory();
-  }, [loadLeads, loadHistory]);
+  }, [loadRecipients, loadHistory]);
 
   // The count follows every tick, a moment after the last one, so a manager
   // going down the lead list is not firing a request per box.
-  const groupList = useMemo(() => [...groups], [groups]);
+  const choice = useMemo(() => choiceFromTicks(people ?? [], ticked), [people, ticked]);
   const leadList = useMemo(() => [...picked], [picked]);
   const countSeq = useRef(0);
   // Bumped by the "Count again" button after a failed count.
   const [recount, setRecount] = useState(0);
   useEffect(() => {
-    if (leads === null) return;
+    if (people === null || leads === null) return;
     const seq = ++countSeq.current;
     const t = setTimeout(() => {
       setCountError(null);
-      fetchCount({ data: { groups: groupList, lead_ids: leadList } })
+      fetchCount({
+        data: { groups: choice.groups, person_ids: choice.person_ids, lead_ids: leadList },
+      })
         .then((c) => {
           if (seq === countSeq.current) setCount(c);
         })
@@ -179,7 +197,7 @@ function Composer({ userId }: { userId: string | null }) {
         });
     }, 300);
     return () => clearTimeout(t);
-  }, [fetchCount, groupList, leadList, leads, recount]);
+  }, [fetchCount, choice, leadList, people, leads, recount]);
 
   // Changing the words or the people after a send started is a new message.
   const { reset } = submit;
@@ -192,22 +210,19 @@ function Composer({ userId }: { userId: string | null }) {
     reset();
   }
 
-  function toggleGroup(g: ClubMessageGroup, on: boolean) {
+  /** Tick or untick some ids in one of the two sets. */
+  function toggle(
+    set: (update: (prev: Set<string>) => Set<string>) => void,
+    ids: string[],
+    on: boolean,
+  ) {
     edited();
-    setGroups((prev) => {
+    set((prev) => {
       const next = new Set(prev);
-      if (on) next.add(g);
-      else next.delete(g);
-      return next;
-    });
-  }
-
-  function toggleLead(id: string, on: boolean) {
-    edited();
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
   }
@@ -257,6 +272,7 @@ function Composer({ userId }: { userId: string | null }) {
             subject: what.subject,
             body: what.body,
             groups: what.groups,
+            person_ids: what.personIds,
             lead_ids: what.leadIds,
           },
         });
@@ -280,23 +296,33 @@ function Composer({ userId }: { userId: string | null }) {
   async function onSend() {
     const p = problem();
     if (p) return setFormError(p);
-    if (!count || count.emails === 0) return setFormError("Tick at least one group or one lead.");
+    if (!count || count.emails === 0) return setFormError("Tick at least one person.");
     setFormError(null);
     const ok = await confirm({
       title: sendConfirmTitle(subject.trim(), count.emails),
       description:
         "Everyone ticked gets this email from the club, and members also see it on their Notifications page.",
       details: [
-        ...clubMessageGroups
-          .filter((g) => groups.has(g))
-          .map((g) => `${CLUB_MESSAGE_GROUP_LABELS[g]}: ${peopleCount(count.by_group[g])}`),
+        ...clubMessageGroups.flatMap((g) => {
+          const inGroup = (people ?? []).filter((p) => p.group === g);
+          const kept = inGroup.filter((p) => ticked.has(p.user_id)).length;
+          return kept === 0
+            ? []
+            : [`${CLUB_MESSAGE_GROUP_LABELS[g]}: ${kept} of ${inGroup.length}`];
+        }),
         ...(count.leads > 0 ? [`Leads: ${peopleCount(count.leads)}`] : []),
       ],
       footnote: "This can't be undone.",
       confirmLabel: `Email ${peopleCount(count.emails)}`,
     });
     if (!ok) return;
-    confirmed.current = { subject, body, groups: groupList, leadIds: leadList };
+    confirmed.current = {
+      subject,
+      body,
+      groups: choice.groups,
+      personIds: choice.person_ids,
+      leadIds: leadList,
+    };
     await deliver();
   }
 
@@ -389,32 +415,53 @@ function Composer({ userId }: { userId: string | null }) {
 
             <fieldset className="space-y-3">
               <legend className="font-medium">Who gets it</legend>
-              {clubMessageGroups.map((g) => (
-                <div key={g} className="flex items-start gap-3">
-                  <Checkbox
-                    id={`group-${g}`}
-                    checked={groups.has(g)}
-                    onCheckedChange={(v) => toggleGroup(g, v === true)}
-                    className="mt-0.5"
+              {recipientsError ? (
+                <LoadFailure
+                  what="Who this can go to"
+                  message={recipientsError}
+                  hint="Sending is off until the lists load, so nobody is left out by mistake."
+                  onRetry={loadRecipients}
+                />
+              ) : people === null || leads === null ? (
+                <Loading label="Loading who this can go to..." />
+              ) : (
+                <>
+                  {clubMessageGroups.map((g) => (
+                    <TickList
+                      key={g}
+                      id={`group-${g}`}
+                      title={CLUB_MESSAGE_GROUP_LABELS[g]}
+                      hint={CLUB_MESSAGE_GROUP_HINTS[g]}
+                      empty="Nobody in this group right now."
+                      ticked={ticked}
+                      onToggle={(ids, on) => toggle(setTicked, ids, on)}
+                      items={people
+                        .filter((p) => p.group === g)
+                        .map((p) => ({
+                          id: p.user_id,
+                          name: p.name,
+                          label: <UserLink userId={p.user_id} name={p.name} />,
+                          detail: p.inbox_name ? `Email goes to ${p.inbox_name}` : null,
+                        }))}
+                    />
+                  ))}
+                  <TickList
+                    id="leads"
+                    title="Leads"
+                    hint={`Filled in the interest form or the contact form, and have not signed a waiver. Those from the last ${LEAD_PRESELECT_DAYS} days start ticked.`}
+                    empty="No leads right now."
+                    ticked={picked}
+                    onToggle={(ids, on) => toggle(setPicked, ids, on)}
+                    items={leads.map((l) => ({
+                      id: l.registration_id,
+                      name: l.name,
+                      label: <UserLink userId={null} name={l.name} />,
+                      detail: `${l.email} · ${l.sources.map(leadSourceLabel).join(" and ")} · ${formatDate(l.registered_at)}`,
+                    }))}
                   />
-                  <div>
-                    <Label htmlFor={`group-${g}`}>
-                      {CLUB_MESSAGE_GROUP_LABELS[g]}
-                      {count ? ` (${count.by_group[g]})` : ""}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">{CLUB_MESSAGE_GROUP_HINTS[g]}</p>
-                  </div>
-                </div>
-              ))}
+                </>
+              )}
             </fieldset>
-
-            <LeadPicker
-              leads={leads}
-              error={leadsError}
-              picked={picked}
-              onToggle={toggleLead}
-              onRetry={loadLeads}
-            />
 
             <div aria-live="polite" className="text-sm">
               {countError ? (
@@ -431,7 +478,7 @@ function Composer({ userId }: { userId: string | null }) {
                   This will send <strong>{count.emails}</strong>{" "}
                   {count.emails === 1 ? "email" : "emails"}. A family gets one email, to the parent.
                 </p>
-              ) : leads !== null ? (
+              ) : people !== null && leads !== null ? (
                 <p className="text-muted-foreground">Counting...</p>
               ) : null}
             </div>
@@ -452,7 +499,9 @@ function Composer({ userId }: { userId: string | null }) {
               </Button>
               <Button
                 onClick={() => void onSend()}
-                disabled={submit.busy || leads === null || !count || result !== null}
+                disabled={
+                  submit.busy || people === null || leads === null || !count || result !== null
+                }
               >
                 {submit.busy ? "Sending..." : "Send"}
               </Button>
@@ -510,64 +559,84 @@ function Composer({ userId }: { userId: string | null }) {
   );
 }
 
-function LeadPicker({
-  leads,
-  error,
-  picked,
-  onToggle,
-  onRetry,
-}: {
-  leads: LeadCandidate[] | null;
-  error: string | null;
-  picked: Set<string>;
-  onToggle: (id: string, on: boolean) => void;
-  onRetry: () => void;
-}) {
-  if (error)
-    return (
-      <LoadFailure
-        what="The leads"
-        message={error}
-        hint="Sending is off until they load, so nobody is left out by mistake."
-        onRetry={onRetry}
-      />
-    );
-  if (leads === null) return <Loading label="Loading leads..." />;
+/** How a lead's source reads on the screen. */
+function leadSourceLabel(source: LeadCandidate["source"]): string {
+  return source === "contact" ? "Contact form" : "Interest form";
+}
 
+/**
+ * One group (or the leads) as a tick box for the whole list, with the list of
+ * people folded away underneath. Closed by default: most sends go to whole
+ * groups, and a manager opens a list only to change who is in it.
+ */
+function TickList({
+  id,
+  title,
+  hint,
+  empty,
+  items,
+  ticked,
+  onToggle,
+}: {
+  id: string;
+  title: string;
+  hint: string;
+  empty: string;
+  items: { id: string; name: string; label: ReactNode; detail: string | null }[];
+  ticked: ReadonlySet<string>;
+  onToggle: (ids: string[], on: boolean) => void;
+}) {
+  const kept = items.filter((i) => ticked.has(i.id)).length;
+  const all = items.length > 0 && kept === items.length;
   return (
-    <details className="rounded-lg border p-3" open={leads.some((l) => l.preselected)}>
-      <summary className="font-medium">
-        Leads ({picked.size} of {leads.length} ticked)
-      </summary>
-      <p className="mt-2 text-xs text-muted-foreground">
-        People who filled in the interest form and have not signed a waiver. Those from the last{" "}
-        {LEAD_PRESELECT_DAYS} days start ticked. Untick anyone you have already been in touch with.
-      </p>
-      {leads.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">No leads right now.</p>
+    <div className="rounded-lg border p-3">
+      <div className="flex items-start gap-3">
+        <Checkbox
+          id={id}
+          checked={all ? true : kept > 0 ? "indeterminate" : false}
+          disabled={items.length === 0}
+          onCheckedChange={(v) =>
+            onToggle(
+              items.map((i) => i.id),
+              v === true,
+            )
+          }
+          className="mt-0.5"
+        />
+        <div>
+          <Label htmlFor={id}>
+            {title} ({kept} of {items.length})
+          </Label>
+          <p className="text-xs text-muted-foreground">{hint}</p>
+        </div>
+      </div>
+      {items.length === 0 ? (
+        <p className="mt-2 pl-7 text-xs text-muted-foreground">{empty}</p>
       ) : (
-        <ul className="mt-3 space-y-2">
-          {leads.map((l) => (
-            <li key={l.registration_id} className="flex items-start gap-3">
-              <Checkbox
-                id={`lead-${l.registration_id}`}
-                checked={picked.has(l.registration_id)}
-                onCheckedChange={(v) => onToggle(l.registration_id, v === true)}
-                className="mt-0.5"
-                aria-label={`Send to ${l.name}`}
-              />
-              <div className="text-sm">
-                <UserLink userId={null} name={l.name} />
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {l.email} · registered {formatDate(l.registered_at)}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <details className="mt-2 pl-7">
+          <summary className="text-sm underline underline-offset-2">Choose who, one by one</summary>
+          <ul className="mt-2 space-y-2">
+            {items.map((i) => (
+              <li key={i.id} className="flex items-start gap-3">
+                <Checkbox
+                  id={`${id}-${i.id}`}
+                  checked={ticked.has(i.id)}
+                  onCheckedChange={(v) => onToggle([i.id], v === true)}
+                  className="mt-0.5"
+                  aria-label={`Send to ${i.name}`}
+                />
+                <div className="text-sm">
+                  {i.label}
+                  {i.detail ? (
+                    <span className="block text-xs text-muted-foreground">{i.detail}</span>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
-    </details>
+    </div>
   );
 }
 

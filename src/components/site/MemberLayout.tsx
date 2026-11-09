@@ -74,7 +74,6 @@ const managerNav: NavItem[] = [
   // Then: the highest-frequency manager screen, used at the door every class.
   { to: "/manager/check-in", label: "Check in", icon: ClipboardCheck },
   { to: "/manager/users", label: "Users", icon: Users },
-  { to: "/manager/messages", label: "Messages", icon: Send },
   { to: "/manager/memberships", label: "Memberships", icon: CreditCard },
   { to: "/manager/membership-plans", label: "Membership plans", icon: ScrollText },
   { to: "/manager/items", label: "Items", icon: ShoppingBag },
@@ -89,6 +88,8 @@ const managerNav: NavItem[] = [
   { to: "/manager/blog", label: "Blog posts", icon: Newspaper },
   { to: "/manager/blog-comments", label: "Blog comments", icon: MessageSquare },
   { to: "/manager/contact-messages", label: "Contact messages", icon: Mail },
+  // Beside the inbox it answers: the club's email tools sit together.
+  { to: "/manager/messages", label: "Messages", icon: Send },
   { to: "/manager/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/manager/site-banner", label: "Site banner", icon: Megaphone },
   { to: "/manager/reconciliation", label: "Bank reconciliation", icon: Wallet },

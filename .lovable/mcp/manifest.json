@@ -79,6 +79,7 @@
                 "list_club_messages",
                 "get_club_message",
                 "list_message_leads",
+                "list_message_people",
                 "get_club_message_audience"
               ],
               "description": "The read-only action to run."

@@ -127,6 +127,8 @@ export const submitContact = createServerFn({ method: "POST" })
       email: data.email,
       subject: data.subject || null,
       message: data.message,
+      // Their own tick, never inferred (docs/club-messages.md).
+      promotion_consent: data.promotion_consent,
       client_submission_id: submissionId,
     });
     if (error) {

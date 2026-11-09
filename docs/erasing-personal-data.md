@@ -18,8 +18,10 @@ One thing: **a manager can delete an enquiry.**
   and words on it. `deleteContactMessage`
   (`src/lib/contact-messages.functions.ts`).
 - `/manager/users` deletes a **lead**, meaning every interest-form registration
-  filed under one address. `deleteLead` / `deleteLeadRegistrations`
-  (`src/lib/leads.functions.ts`).
+  **and every contact message** filed under one address: both forms make
+  somebody a lead (`docs/club-messages.md`), so deleting one form's entries
+  alone would leave them on the list. The confirm says how many of each go.
+  `deleteLead` / `deleteLeadRegistrations` (`src/lib/leads.functions.ts`).
 
 Both go through the service-role client behind the manager gate, so neither
 needed a grant, a policy or a migration: `interest_registrations` and
@@ -37,7 +39,7 @@ Three rules hold that path together, and all of them are load-bearing:
   separate round trips, so a waiver signed in the sub-second gap between them
   still loses its lead row. The address survives on the waiver as submitted,
   which is the copy that matters.
-- **The search is not the decision.** Registrations store the address as typed,
+- **The search is not the decision.** Both forms store the address as typed,
   so one person can hold two rows differing only in capitalisation, and both
   have to go or the lead reappears. The query prefilters with `ilike`, which
   **over**-matches (`_` is a LIKE wildcard and is legal in an email local part,

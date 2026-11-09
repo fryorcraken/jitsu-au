@@ -1531,6 +1531,7 @@ export const listClubUsers = createServerFn({ method: "GET" })
       { data: waivers, error: wErr },
       { data: checkins, error: cErr },
       { data: leadRows, error: lErr },
+      { data: contactRows, error: ctErr },
     ] = await Promise.all([
       admin
         .from("profiles")
@@ -1552,6 +1553,13 @@ export const listClubUsers = createServerFn({ method: "GET" })
         .select("email, name, phone, created_at")
         .order("created_at", { ascending: false })
         .limit(LEADS_LIMIT),
+      // Somebody who wrote in through the contact form is a lead too
+      // (docs/club-messages.md), and merged with any registration by address.
+      admin
+        .from("contact_messages")
+        .select("email, name, created_at")
+        .order("created_at", { ascending: false })
+        .limit(LEADS_LIMIT),
     ]);
     // Every read here fails the whole screen. A failed query must never reach
     // the aggregation as an empty list: an errored waivers read would drop every
@@ -1563,8 +1571,12 @@ export const listClubUsers = createServerFn({ method: "GET" })
     if (wErr) throw new Error(wErr.message);
     if (cErr) throw new Error(cErr.message);
     if (lErr) throw new Error(lErr.message);
+    if (ctErr) throw new Error(ctErr.message);
 
-    const leads = (leadRows ?? []) as ClubUserLead[];
+    const leads: ClubUserLead[] = [
+      ...((leadRows ?? []) as ClubUserLead[]).map((l) => ({ ...l, source: "interest" as const })),
+      ...(contactRows ?? []).map((c) => ({ ...c, phone: null, source: "contact" as const })),
+    ];
 
     // Surface the caps rather than silently truncating. A truncated check-in
     // read would under-report attendance, which reads as a real number.
