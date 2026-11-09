@@ -586,7 +586,7 @@ export type ClubUserRead = Awaited<ReturnType<typeof loadClubUser>>;
 
 export const getClubUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ userId: z.guid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context as { supabase: MembershipClient; userId: string });
 

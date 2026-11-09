@@ -1463,7 +1463,7 @@ export const submitWaiverWithPdf = createServerFn({ method: "POST" })
 // manager filed it, there is no browser mid-submit to reassure, so answering
 // costs nobody anything and not answering closes the hole.
 export const checkWaiverSubmission = createServerFn({ method: "POST" })
-  .validator((data: unknown) => z.object({ client_submission_id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ client_submission_id: z.guid() }).parse(data))
   .handler(
     async ({
       data,
@@ -2739,7 +2739,7 @@ export async function waiverPdfPathForCaller(
 
 export const getWaiverPdfUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.guid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const path = await waiverPdfPathForCaller(

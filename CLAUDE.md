@@ -259,6 +259,10 @@ Read `src/routes/README.md` before touching routes. Key points:
   `useServerFn(fn)` (see `src/routes/register-interest.tsx`). Validate every
   input with a Zod `.validator(...)`, never `.inputValidator(...)` (see "The
   TanStack versions are pinned exactly").
+- **Zod is v4.** Write ID fields as `z.guid()`, not `z.string().uuid()`: v4's
+  `uuid()` only accepts RFC version/variant digits and refuses the
+  hand-written IDs the tests and seed data use, while `z.guid()` keeps the
+  plain 8-4-4-4-12 hex check v3's `uuid()` had.
 - ⚠️ **`*.functions.ts` and route files are bundled to the client.** Do **not**
   top-level `import` `client.server.ts` (service-role key) from them. Instead
   lazy-load inside the handler:

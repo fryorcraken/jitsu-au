@@ -11,7 +11,7 @@ export default defineTool({
   inputSchema: {
     action: z.enum(CHANGE_ACTIONS).describe("The action to run."),
     params: z
-      .record(z.unknown())
+      .record(z.string(), z.unknown())
       .optional()
       .describe("The action's params, exactly as club_manifest lists them."),
   },

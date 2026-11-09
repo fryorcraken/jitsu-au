@@ -397,13 +397,13 @@ export const clubMessageDraftSchema = z.object({
  */
 export const clubMessageAudienceSchema = z.object({
   groups: z.array(z.enum(clubMessageGroups)).max(clubMessageGroups.length).default([]),
-  person_ids: z.array(z.string().uuid()).max(5000).default([]),
-  lead_ids: z.array(z.string().uuid()).max(5000).default([]),
+  person_ids: z.array(z.guid()).max(5000).default([]),
+  lead_ids: z.array(z.guid()).max(5000).default([]),
 });
 
 const sendClubMessageObject = clubMessageDraftSchema
   .merge(clubMessageAudienceSchema)
-  .extend({ message_id: z.string().uuid() });
+  .extend({ message_id: z.guid() });
 
 const someoneTicked = <T extends { groups: unknown[]; person_ids: unknown[]; lead_ids: unknown[] }>(
   d: T,
@@ -419,13 +419,13 @@ export const sendClubMessageSchema = sendClubMessageObject.refine(
 );
 
 export const sendClubMessageTestSchema = clubMessageDraftSchema.extend({
-  client_submission_id: z.string().uuid(),
+  client_submission_id: z.guid(),
 });
 
 // The manager agent API's shapes: the same rules, refusing unknown keys so a
 // misspelt param is an error rather than silently ignored.
 
-export const agentClubMessageIdSchema = z.object({ id: z.string().uuid() }).strict();
+export const agentClubMessageIdSchema = z.object({ id: z.guid() }).strict();
 
 export const agentClubMessageAudienceSchema = z
   .object({
@@ -440,5 +440,5 @@ export const agentSendClubMessageSchema = sendClubMessageObject
   .refine(someoneTicked, someoneTickedMessage);
 
 export const agentSendClubMessageTestSchema = clubMessageDraftSchema
-  .extend({ client_submission_id: z.string().uuid().optional() })
+  .extend({ client_submission_id: z.guid().optional() })
   .strict();

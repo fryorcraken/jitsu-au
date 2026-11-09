@@ -1165,7 +1165,7 @@ export const saveManagerArticle = createServerFn({ method: "POST" })
  * retyping the version they want back.
  */
 export const setCurrentArticleVersion = createServerFn({ method: "POST" })
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.guid() }).parse(d))
   .handler(async ({ data }) => {
     const db = await adminClient();
     await requireManagerViewer(db);

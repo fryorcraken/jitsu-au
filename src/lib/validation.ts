@@ -458,7 +458,7 @@ export function decodeDataUrlPng(dataUrl: string): Uint8Array | null {
  * empty-string branch mirrors the other optional fields here, which is what the
  * forms send for "not set".
  */
-export const clientSubmissionId = z.string().uuid().optional().or(z.literal(""));
+export const clientSubmissionId = z.guid().optional().or(z.literal(""));
 
 /**
  * The hidden field every write-from-a-form path carries, spelled once here so
@@ -571,7 +571,7 @@ export type MarkContactMessagesSeenInput = z.infer<typeof markContactMessagesSee
 // See docs/erasing-personal-data.md.
 
 /** Manager: delete one message from the contact inbox. */
-export const deleteContactMessageSchema = z.object({ id: z.string().uuid() }).strict();
+export const deleteContactMessageSchema = z.object({ id: z.guid() }).strict();
 export type DeleteContactMessageInput = z.infer<typeof deleteContactMessageSchema>;
 
 /**
@@ -936,7 +936,7 @@ export type SaveTemplateInput = z.infer<typeof saveTemplateSchema>;
 // template that arrived any other way (a migration seeding a draft, say) goes
 // live without being retyped into the editor first.
 export const setCurrentTemplateSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
 });
 export type SetCurrentTemplateInput = z.infer<typeof setCurrentTemplateSchema>;
 
@@ -1018,7 +1018,7 @@ export const waiverApprovalStatuses = ["pending", "approved"] as const;
 export type WaiverApprovalStatus = (typeof waiverApprovalStatuses)[number];
 
 export const waiverApprovalSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   status: z.enum(waiverApprovalStatuses),
 });
 export type WaiverApprovalInput = z.infer<typeof waiverApprovalSchema>;
@@ -1042,7 +1042,7 @@ export const saveCodeOfConductSchema = z.object({
   asks_reagreement: z.boolean().default(false),
   // One per press of Save, resent unchanged on a retry, so a save whose reply
   // was lost comes back as the version it already wrote rather than a second.
-  client_submission_id: z.string().uuid().optional(),
+  client_submission_id: z.guid().optional(),
 });
 export type SaveCodeOfConductInput = z.infer<typeof saveCodeOfConductSchema>;
 
@@ -1067,7 +1067,7 @@ export const agentSaveCodeOfConductSchema = z
     body_md: z.string().trim().min(1).max(CODE_OF_CONDUCT_BODY_MAX).optional(),
     asks_reagreement: z.boolean().optional().default(false),
     base_version: z.number().int().positive().optional(),
-    client_submission_id: z.string().uuid().optional(),
+    client_submission_id: z.guid().optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -1356,7 +1356,7 @@ export const paperWaiverUploadSchema = z
     // unique index (20260729020000), so the database refuses the second write
     // and the loser adopts the winner's row. Same mechanism the online signing
     // path uses. Optional: a caller that sends none just gets no retry safety.
-    client_submission_id: z.string().uuid().optional(),
+    client_submission_id: z.guid().optional(),
   })
   // Strict, matching editInvoiceSchema. Without it Zod silently STRIPS an
   // unknown key, so `confirmDuplicate` or `confirm_duplicates` would vanish,
@@ -1478,7 +1478,7 @@ export function isReservedDependantEmail(email: string): boolean {
 }
 
 export const managerEmailChangeSchema = z.object({
-  userId: z.string().uuid(),
+  userId: z.guid(),
   email: z
     .string()
     .trim()
@@ -2564,7 +2564,7 @@ export const membershipSearchSchema = z.object({
    * than a `#fragment` because the sign-in gate keeps the query on its way
    * back from `/auth`, and drops a fragment.
    */
-  plan: z.string().uuid().optional().catch(undefined),
+  plan: z.guid().optional().catch(undefined),
 });
 export type MembershipSearch = z.infer<typeof membershipSearchSchema>;
 
@@ -2609,7 +2609,7 @@ export type StartMembershipInput = z.infer<typeof startMembershipSchema>;
  */
 export const savePlanSchema = z
   .object({
-    id: z.string().uuid().optional(),
+    id: z.guid().optional(),
     code: z
       .string()
       .trim()
@@ -2661,8 +2661,8 @@ export type SavePlanInput = z.infer<typeof savePlanSchema>;
  * the same announcement rather than a second email to the whole club.
  */
 export const announcePlanSchema = z.object({
-  plan_id: z.string().uuid(),
-  client_submission_id: z.string().uuid(),
+  plan_id: z.guid(),
+  client_submission_id: z.guid(),
 });
 export type AnnouncePlanInput = z.infer<typeof announcePlanSchema>;
 
@@ -2679,7 +2679,7 @@ export type AnnouncePlanInput = z.infer<typeof announcePlanSchema>;
 export const agentPlanAnnounceSchema = z
   .object({
     announce: z.boolean().optional(),
-    announcement_id: z.string().uuid().optional(),
+    announcement_id: z.guid().optional(),
   })
   .refine((d) => !d.announce || Boolean(d.announcement_id), {
     message:
@@ -2922,7 +2922,7 @@ export function planEditsDiffer(edited: PlanEditFields, saved: PlanEditFields): 
 // ---- Manager: set a membership's status ----
 
 export const setMembershipStatusSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   status: z.enum(membershipStatuses),
 });
 export type SetMembershipStatusInput = z.infer<typeof setMembershipStatusSchema>;
@@ -2935,7 +2935,7 @@ export type SetMembershipStatusInput = z.infer<typeof setMembershipStatusSchema>
 // length it was sold at (`rescheduleMembershipStart`).
 
 export const setMembershipStartSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   starts_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 export type SetMembershipStartInput = z.infer<typeof setMembershipStartSchema>;
@@ -3038,7 +3038,7 @@ export function paidAtFor(paidOn?: string, now: Date = new Date()): string {
 }
 
 export const markMembershipPaidSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   payment_method: z.enum(["bank_transfer", "stripe", "manual"]).default("manual"),
   ...paymentReceivedFields,
 });
@@ -3046,7 +3046,7 @@ export type MarkMembershipPaidInput = z.infer<typeof markMembershipPaidSchema>;
 
 // ---- Manager: delete a membership ----
 
-export const deleteMembershipSchema = z.object({ id: z.string().uuid() });
+export const deleteMembershipSchema = z.object({ id: z.guid() });
 export type DeleteMembershipInput = z.infer<typeof deleteMembershipSchema>;
 
 // ---- Manager: raise a membership for somebody ----
@@ -3060,7 +3060,7 @@ export type DeleteMembershipInput = z.infer<typeof deleteMembershipSchema>;
 // unticks it and has no cover, and does not refuse a manager.
 
 export const createMembershipSchema = z.object({
-  user_id: z.string().uuid(),
+  user_id: z.guid(),
   plan_code: z.string().trim().min(1).max(64),
   uts_student_number: z.string().trim().max(32).nullable().optional(),
   session_date: z
@@ -3102,16 +3102,16 @@ export const importBankStatementSchema = z.object({
 export type ImportBankStatementInput = z.infer<typeof importBankStatementSchema>;
 
 export const matchTransactionSchema = z.object({
-  transaction_id: z.string().uuid(),
-  membership_id: z.string().uuid(),
+  transaction_id: z.guid(),
+  membership_id: z.guid(),
 });
 export type MatchTransactionInput = z.infer<typeof matchTransactionSchema>;
 
 /** The same manual link, to an item invoice rather than a membership. */
 export const matchTransactionToItemInvoiceSchema = z
   .object({
-    transaction_id: z.string().uuid(),
-    item_invoice_id: z.string().uuid(),
+    transaction_id: z.guid(),
+    item_invoice_id: z.guid(),
   })
   .strict();
 
@@ -3202,7 +3202,7 @@ export type ManagerAgentAction = (typeof managerAgentActions)[number];
 
 /** Which email to resend, for which record (`docs/emails.md`, "Resending"). */
 export const resendPreviewSchema = z
-  .object({ kind: z.enum(resendKinds), record_id: z.string().uuid() })
+  .object({ kind: z.enum(resendKinds), record_id: z.guid() })
   .strict();
 
 /**
@@ -3212,7 +3212,7 @@ export const resendPreviewSchema = z
  * key and once-a-minute limit need (`email-resend.ts`).
  */
 export const resendEmailSchema = resendPreviewSchema
-  .extend({ client_submission_id: z.string().uuid() })
+  .extend({ client_submission_id: z.guid() })
   .strict();
 
 /**
@@ -3221,7 +3221,7 @@ export const resendEmailSchema = resendPreviewSchema
  * each call, still held to once a minute per email per record.
  */
 export const agentResendEmailSchema = resendPreviewSchema
-  .extend({ client_submission_id: z.string().uuid().optional() })
+  .extend({ client_submission_id: z.guid().optional() })
   .strict();
 
 /** Payment methods an invoice can carry (mirrors the memberships CHECK). */
@@ -3241,7 +3241,7 @@ export const invoicePaymentMethods = ["bank_transfer", "stripe", "manual"] as co
  */
 export const editInvoiceSchema = z
   .object({
-    id: z.string().uuid(),
+    id: z.guid(),
     price_cents: z.number().int().min(0).max(1_000_000).optional(),
     // Nullable: notes is a nullable column, and once a manager has written one
     // there was otherwise no way back to blank. `null` clears it; `undefined`
@@ -3283,7 +3283,7 @@ export type EditInvoiceInput = z.infer<typeof editInvoiceSchema>;
  * that block a delete (see `whyMembershipCannotBeDeleted`) are not a caller's
  * judgement call. A paid invoice is cancelled, never erased.
  */
-export const deleteInvoiceSchema = z.object({ id: z.string().uuid() }).strict();
+export const deleteInvoiceSchema = z.object({ id: z.guid() }).strict();
 export type DeleteInvoiceInput = z.infer<typeof deleteInvoiceSchema>;
 
 /**
@@ -3318,7 +3318,7 @@ export type ListAgentUsersInput = z.infer<typeof listAgentUsersSchema>;
  * a caller that sends `id` (the invoice actions' name for a key) is told so,
  * rather than having it stripped and being refused for a missing `user_id`.
  */
-export const getAgentUserSchema = z.object({ user_id: z.string().uuid() }).strict();
+export const getAgentUserSchema = z.object({ user_id: z.guid() }).strict();
 export type GetAgentUserInput = z.infer<typeof getAgentUserSchema>;
 
 /** `list_invoices` params — optional membership-status filter + result cap. */
@@ -3338,7 +3338,7 @@ export type CreateApiTokenInput = z.infer<typeof createApiTokenSchema>;
 
 /** Revoke an existing token by id. */
 export const revokeApiTokenSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
 });
 export type RevokeApiTokenInput = z.infer<typeof revokeApiTokenSchema>;
 
@@ -3725,8 +3725,8 @@ const blankToUndefined = (max: number) =>
     .string()
     .trim()
     .max(max)
-    .optional()
-    .transform((v) => (v ? v : undefined));
+    .transform((v) => (v ? v : undefined))
+    .optional();
 
 const calendarEntryDetails = {
   title: z.string().trim().min(1, "Give it a title.").max(120),
@@ -3873,7 +3873,7 @@ export const agentCreateCalendarEntrySchema = z.preprocess(
 export const updateCalendarEntrySchema = z
   .object({
     scope: z.enum(["event", "series"]),
-    id: z.string().uuid(),
+    id: z.guid(),
     title: z.string().trim().min(1).max(120).optional(),
     description: z.string().trim().max(4000).nullish(),
     instructor_name: z.string().trim().max(80).nullish(),
@@ -3885,7 +3885,7 @@ export const updateCalendarEntrySchema = z
 export type UpdateCalendarEntryInput = z.infer<typeof updateCalendarEntrySchema>;
 
 /** Manager: stop a repeating entry. Future dates go; history is untouched. */
-export const stopRepeatingSchema = z.object({ series_id: z.string().uuid() }).strict();
+export const stopRepeatingSchema = z.object({ series_id: z.guid() }).strict();
 export type StopRepeatingInput = z.infer<typeof stopRepeatingSchema>;
 
 /**
@@ -3896,23 +3896,23 @@ export type StopRepeatingInput = z.infer<typeof stopRepeatingSchema>;
 export const cancelEventSchema = z
   .object({
     scope: z.enum(["event", "series"]).default("event"),
-    id: z.string().uuid(),
+    id: z.guid(),
     cancelled: z.boolean(),
   })
   .strict();
 export type CancelEventInput = z.infer<typeof cancelEventSchema>;
 
 /** Manager: delete an event outright (use cancel to keep the record). */
-export const deleteEventSchema = z.object({ id: z.string().uuid() }).strict();
+export const deleteEventSchema = z.object({ id: z.guid() }).strict();
 export type DeleteEventInput = z.infer<typeof deleteEventSchema>;
 
 /** Manager: list who responded to one event. */
-export const eventRsvpsSchema = z.object({ event_id: z.string().uuid() }).strict();
+export const eventRsvpsSchema = z.object({ event_id: z.guid() }).strict();
 export type EventRsvpsInput = z.infer<typeof eventRsvpsSchema>;
 
 /** Member: set (upsert) an RSVP to an event. */
 export const rsvpSchema = z.object({
-  event_id: z.string().uuid(),
+  event_id: z.guid(),
   response: z.enum(rsvpResponses),
 });
 export type RsvpInput = z.infer<typeof rsvpSchema>;
@@ -3955,19 +3955,19 @@ export const checkInWarnings = [
 export type CheckInWarning = (typeof checkInWarnings)[number];
 
 /** Manager: the roster and coverage preview for one class. */
-export const checkInBoardSchema = z.object({ event_id: z.string().uuid() });
+export const checkInBoardSchema = z.object({ event_id: z.guid() });
 export type CheckInBoardInput = z.infer<typeof checkInBoardSchema>;
 
 /** Manager: check one person in to one class. */
 export const checkInSchema = z.object({
-  event_id: z.string().uuid(),
-  user_id: z.string().uuid(),
+  event_id: z.guid(),
+  user_id: z.guid(),
   note: z.string().trim().max(500).optional().or(z.literal("")),
 });
 export type CheckInInput = z.infer<typeof checkInSchema>;
 
 /** Manager: undo a check-in, refunding whatever credit it spent. */
-export const undoCheckInSchema = z.object({ id: z.string().uuid() });
+export const undoCheckInSchema = z.object({ id: z.guid() });
 export type UndoCheckInInput = z.infer<typeof undoCheckInSchema>;
 
 /**
@@ -3977,8 +3977,8 @@ export type UndoCheckInInput = z.infer<typeof undoCheckInSchema>;
  * override for when a manager wants a specific membership to absorb it.
  */
 export const attachCheckInSchema = z.object({
-  id: z.string().uuid(),
-  membership_id: z.string().uuid().optional(),
+  id: z.guid(),
+  membership_id: z.guid().optional(),
 });
 export type AttachCheckInInput = z.infer<typeof attachCheckInSchema>;
 
@@ -3992,8 +3992,8 @@ export type AttachCheckInInput = z.infer<typeof attachCheckInSchema>;
  * mind. It is what clears a membership of the classes blocking its deletion.
  */
 export const transferCheckInSchema = z.object({
-  id: z.string().uuid(),
-  membership_id: z.string().uuid(),
+  id: z.guid(),
+  membership_id: z.guid(),
 });
 export type TransferCheckInInput = z.infer<typeof transferCheckInSchema>;
 
@@ -4009,7 +4009,7 @@ export const agentNoCheckInParamsSchema = z.object({}).strict();
 export const agentListAttendanceSchema = checkInBoardSchema.strict();
 /** `get_check_in_preview`: what checking one person in to one class would spend. */
 export const agentCheckInPreviewSchema = z
-  .object({ event_id: z.string().uuid(), user_id: z.string().uuid() })
+  .object({ event_id: z.guid(), user_id: z.guid() })
   .strict();
 export const agentCheckInSchema = checkInSchema.strict();
 export const agentUndoCheckInSchema = undoCheckInSchema.strict();
@@ -4456,7 +4456,7 @@ export const createAnnotationSchema = z.object({
   quote: z.string().trim().max(2000).optional().or(z.literal("")),
   visibility: z.enum(annotationVisibilities),
   /** Set to reply to an existing shared annotation. */
-  parent_id: z.string().uuid().optional(),
+  parent_id: z.guid().optional(),
   body: z.string().trim().min(1).max(5000),
   hp: honeypot,
 });
@@ -4464,18 +4464,18 @@ export type CreateAnnotationInput = z.infer<typeof createAnnotationSchema>;
 
 /** Edit your own annotation's text. Nothing else about it can change. */
 export const updateAnnotationSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   body: z.string().trim().min(1).max(5000),
 });
 export type UpdateAnnotationInput = z.infer<typeof updateAnnotationSchema>;
 
 /** Delete your own annotation (and, by cascade, its replies). */
-export const deleteAnnotationSchema = z.object({ id: z.string().uuid() });
+export const deleteAnnotationSchema = z.object({ id: z.guid() });
 export type DeleteAnnotationInput = z.infer<typeof deleteAnnotationSchema>;
 
 /** Resolve or reopen a shared thread. */
 export const resolveAnnotationSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   resolved: z.boolean(),
 });
 export type ResolveAnnotationInput = z.infer<typeof resolveAnnotationSchema>;
@@ -4541,7 +4541,7 @@ export const BLOG_SEO_DESCRIPTION_MAX = 300;
  * edit without one keeps what is stored (`kindUpdate`).
  */
 export const blogPostSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.guid().optional(),
   title: z.string().trim().min(1).max(200),
   slug: blogSlug.optional().or(z.literal("")),
   excerpt: z.string().trim().max(500).optional().or(z.literal("")),
@@ -4568,11 +4568,11 @@ export const blogPostSchema = z.object({
 export type BlogPostInput = z.infer<typeof blogPostSchema>;
 
 /** Manager: fetch one post (any status) for editing. */
-export const getBlogPostForEditSchema = z.object({ id: z.string().uuid() });
+export const getBlogPostForEditSchema = z.object({ id: z.guid() });
 export type GetBlogPostForEditInput = z.infer<typeof getBlogPostForEditSchema>;
 
 /** Manager: delete a post. */
-export const deleteBlogPostSchema = z.object({ id: z.string().uuid() });
+export const deleteBlogPostSchema = z.object({ id: z.guid() });
 export type DeleteBlogPostInput = z.infer<typeof deleteBlogPostSchema>;
 
 /** Public: fetch one published post by its slug. */
@@ -4586,17 +4586,17 @@ export type ListBlogPostsInput = z.infer<typeof listBlogPostsSchema>;
 /** The `/blog` route's `?page=` search param. `catch(1)` rather than reject:
  * a mistyped or stale page number should just show page one, not error. */
 export const blogListSearchSchema = z.object({
-  page: z.coerce.number().int().min(1).catch(1),
+  page: z.coerce.number().int().min(1).default(1).catch(1),
 });
 export type BlogListSearch = z.infer<typeof blogListSearchSchema>;
 
 /** Public: comments for one post. */
-export const listBlogCommentsSchema = z.object({ post_id: z.string().uuid() });
+export const listBlogCommentsSchema = z.object({ post_id: z.guid() });
 export type ListBlogCommentsInput = z.infer<typeof listBlogCommentsSchema>;
 
 /** Manager: comments across the blog, optionally filtered to one post. */
 export const listCommentsForModerationSchema = z.object({
-  post_id: z.string().uuid().optional(),
+  post_id: z.guid().optional(),
 });
 export type ListCommentsForModerationInput = z.infer<typeof listCommentsForModerationSchema>;
 
@@ -4617,7 +4617,7 @@ export const MAX_BLOG_IMAGE_BYTES = 8 * 1024 * 1024;
  * an id). */
 export const uploadBlogImageSchema = z
   .object({
-    post_id: z.string().uuid().optional(),
+    post_id: z.guid().optional(),
     name: z.string().trim().min(1).max(255),
     type: z.enum(blogImageMimeTypes),
     /** Raw base64, no `data:` prefix. */
@@ -4633,7 +4633,7 @@ export type UploadBlogImageInput = z.infer<typeof uploadBlogImageSchema>;
 
 /** Agent: read one post, any status, by its id or by the slug in its address. */
 export const agentGetBlogPostSchema = z
-  .object({ id: z.string().uuid().optional(), slug: z.string().trim().min(1).max(200).optional() })
+  .object({ id: z.guid().optional(), slug: z.string().trim().min(1).max(200).optional() })
   .strict()
   .superRefine((d, ctx) => {
     if (Boolean(d.id) === Boolean(d.slug)) {
@@ -4668,7 +4668,7 @@ export type AgentGetBlogPostInput = z.infer<typeof agentGetBlogPostSchema>;
  */
 export const agentSaveBlogPostSchema = z
   .object({
-    id: z.string().uuid().optional(),
+    id: z.guid().optional(),
     title: blogPostSchema.shape.title.optional(),
     slug: blogSlug.optional(),
     excerpt: blogPostSchema.shape.excerpt,
@@ -4726,7 +4726,7 @@ export const agentDeleteBlogPostSchema = deleteBlogPostSchema.strict();
  */
 export const agentUploadBlogImageSchema = z
   .object({
-    post_id: z.string().uuid().optional(),
+    post_id: z.guid().optional(),
     name: z.string().trim().min(1).max(255).optional(),
     alt: z.string().trim().max(300).optional(),
     /** Raw base64, no `data:` prefix. */
@@ -4762,7 +4762,7 @@ export type AgentUploadBlogImageInput = z.infer<typeof agentUploadBlogImageSchem
  */
 export const agentStartBlogImageUploadSchema = z
   .object({
-    post_id: z.string().uuid().optional(),
+    post_id: z.guid().optional(),
     name: z.string().trim().min(1).max(255).optional(),
     alt: z.string().trim().max(300).optional(),
   })
@@ -4776,20 +4776,20 @@ export const agentStartBlogImageUploadSchema = z
 // server-side against the parent row (not expressible in this schema).
 
 export const blogCommentSchema = z.object({
-  post_id: z.string().uuid(),
-  parent_comment_id: z.string().uuid().optional(),
+  post_id: z.guid(),
+  parent_comment_id: z.guid().optional(),
   body: z.string().trim().min(1).max(2000),
   hp: honeypot,
 });
 export type BlogCommentInput = z.infer<typeof blogCommentSchema>;
 
 /** Toggle (add if absent, remove if present) the caller's upvote on a comment. */
-export const toggleUpvoteSchema = z.object({ comment_id: z.string().uuid() });
+export const toggleUpvoteSchema = z.object({ comment_id: z.guid() });
 export type ToggleUpvoteInput = z.infer<typeof toggleUpvoteSchema>;
 
 /** Manager: hide or restore a comment. */
 export const setCommentVisibilitySchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   status: z.enum(blogCommentStatuses),
   reason: z.string().trim().max(500).optional().or(z.literal("")),
 });
@@ -4798,12 +4798,12 @@ export type SetCommentVisibilityInput = z.infer<typeof setCommentVisibilitySchem
 /** Manager: block a person from commenting anywhere on the blog — the extreme
  * moderation action, separate from hiding a single comment. */
 export const blockCommenterSchema = z.object({
-  user_id: z.string().uuid(),
+  user_id: z.guid(),
   reason: z.string().trim().max(500).optional().or(z.literal("")),
 });
 export type BlockCommenterInput = z.infer<typeof blockCommenterSchema>;
 
-export const unblockCommenterSchema = z.object({ user_id: z.string().uuid() });
+export const unblockCommenterSchema = z.object({ user_id: z.guid() });
 export type UnblockCommenterInput = z.infer<typeof unblockCommenterSchema>;
 
 // ---- Notifications ----
@@ -4839,7 +4839,7 @@ export type NotificationPreferencesInput = z.infer<typeof notificationPreference
  * sends, so a notification that arrived while the page was open is not marked
  * read without ever having been on screen. */
 export const markNotificationsReadSchema = z.object({
-  ids: z.array(z.string().uuid()).max(200).optional(),
+  ids: z.array(z.guid()).max(200).optional(),
 });
 export type MarkNotificationsReadInput = z.infer<typeof markNotificationsReadSchema>;
 
@@ -4957,7 +4957,7 @@ export type UpdateMyProfileFields = Omit<UpdateMyProfileInput, "userId">;
 
 /** Manager: correct somebody's kit sizes from their detail page. */
 export const managerKitSizesSchema = z.object({
-  userId: z.string().uuid(),
+  userId: z.guid(),
   gi_size: z.enum(giSizes).nullable(),
   belt_size: z.enum(beltSizes).nullable(),
 });
@@ -4985,7 +4985,7 @@ export const ITEM_INVOICE_MAX_QUANTITY = 99;
 /** Add an item to the price list (no `id`), or rename / reprice one (`id`). */
 export const saveChargeItemSchema = z
   .object({
-    id: z.string().uuid().optional(),
+    id: z.guid().optional(),
     name: z
       .string()
       .trim()
@@ -5001,7 +5001,7 @@ export const saveChargeItemSchema = z
 export type SaveChargeItemInput = z.infer<typeof saveChargeItemSchema>;
 
 /** Anything that names one item, or one item invoice, and nothing else. */
-export const recordIdSchema = z.object({ id: z.string().uuid() }).strict();
+export const recordIdSchema = z.object({ id: z.guid() }).strict();
 export type RecordIdInput = z.infer<typeof recordIdSchema>;
 
 /**
@@ -5022,15 +5022,15 @@ export const createItemInvoiceSchema = z
     // Lowercased, as Postgres returns them: the retry check below compares the
     // stored id with this one, and an agent sending the same uuid in capitals
     // was told its own retry was somebody else's invoice.
-    user_id: z.string().uuid().toLowerCase(),
+    user_id: z.guid().toLowerCase(),
     // One per form fill, resent on every retry: a raise whose reply was lost
     // finds the invoice it already made rather than emailing a second one.
-    client_submission_id: z.string().uuid().toLowerCase().optional(),
+    client_submission_id: z.guid().toLowerCase().optional(),
     lines: z
       .array(
         z
           .object({
-            item_id: z.string().uuid().toLowerCase(),
+            item_id: z.guid().toLowerCase(),
             quantity: z
               .number()
               .int()
@@ -5056,7 +5056,7 @@ export type CreateItemInvoiceInput = z.infer<typeof createItemInvoiceSchema>;
  */
 export const markItemInvoicePaidSchema = z
   .object({
-    id: z.string().uuid(),
+    id: z.guid(),
     payment_method: z.enum(["bank_transfer", "manual"]).optional().default("manual"),
     ...paymentReceivedFields,
   })
@@ -5069,7 +5069,7 @@ export const itemInvoiceStates = ["unpaid", "paid", "cancelled"] as const;
 /** Read item invoices: everybody's, or one person's, optionally one state. */
 export const listItemInvoicesSchema = z
   .object({
-    user_id: z.string().uuid().toLowerCase().optional(),
+    user_id: z.guid().toLowerCase().optional(),
     state: z.enum(itemInvoiceStates).optional(),
   })
   .strict();

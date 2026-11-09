@@ -345,7 +345,7 @@ async function uploadPdfToDrive(params: {
 // ---- Upload a waiver PDF to the manager's Drive ----
 export const uploadWaiverToDrive = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ waiverId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ waiverId: z.guid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
