@@ -3725,8 +3725,8 @@ const blankToUndefined = (max: number) =>
     .string()
     .trim()
     .max(max)
-    .optional()
-    .transform((v) => (v ? v : undefined));
+    .transform((v) => (v ? v : undefined))
+    .optional();
 
 const calendarEntryDetails = {
   title: z.string().trim().min(1, "Give it a title.").max(120),
@@ -4586,7 +4586,7 @@ export type ListBlogPostsInput = z.infer<typeof listBlogPostsSchema>;
 /** The `/blog` route's `?page=` search param. `catch(1)` rather than reject:
  * a mistyped or stale page number should just show page one, not error. */
 export const blogListSearchSchema = z.object({
-  page: z.coerce.number().int().min(1).catch(1),
+  page: z.coerce.number().int().min(1).default(1).catch(1),
 });
 export type BlogListSearch = z.infer<typeof blogListSearchSchema>;
 
