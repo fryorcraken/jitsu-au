@@ -44,6 +44,7 @@
           "openWorldHint": false
         },
         "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
           "properties": {
             "action": {
@@ -85,16 +86,18 @@
               "description": "The read-only action to run."
             },
             "params": {
+              "description": "The action's params, exactly as club_manifest lists them.",
               "type": "object",
-              "additionalProperties": {},
-              "description": "The action's params, exactly as club_manifest lists them."
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
             }
           },
           "required": [
             "action"
           ],
-          "additionalProperties": false,
-          "$schema": "http://json-schema.org/draft-07/schema#"
+          "additionalProperties": false
         },
         "outputSchema": null
       },
@@ -109,6 +112,7 @@
           "openWorldHint": true
         },
         "inputSchema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
           "properties": {
             "action": {
@@ -160,16 +164,18 @@
               "description": "The action to run."
             },
             "params": {
+              "description": "The action's params, exactly as club_manifest lists them.",
               "type": "object",
-              "additionalProperties": {},
-              "description": "The action's params, exactly as club_manifest lists them."
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
             }
           },
           "required": [
             "action"
           ],
-          "additionalProperties": false,
-          "$schema": "http://json-schema.org/draft-07/schema#"
+          "additionalProperties": false
         },
         "outputSchema": null
       }
