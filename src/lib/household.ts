@@ -27,7 +27,7 @@ type AdminClient = SupabaseClient<Database>;
 /**
  * A target user id, lowercased.
  *
- * The normalisation is load-bearing, not tidiness. `z.string().uuid()` accepts
+ * The normalisation is load-bearing, not tidiness. `z.guid()` accepts
  * an uppercase uuid and Postgres does not care about case either, so
  * `.eq("user_id", ID)` matches whichever form arrives -- but the rows it hands
  * back are lowercase, and this module compares ids as JS strings. Without this
@@ -38,7 +38,7 @@ type AdminClient = SupabaseClient<Database>;
  *
  * Exported so every schema that takes a target uses this one and cannot drift.
  */
-export const householdTargetUserId = z.string().uuid().toLowerCase();
+export const householdTargetUserId = z.guid().toLowerCase();
 
 /**
  * The optional target a "...for this person" server function takes. Absent

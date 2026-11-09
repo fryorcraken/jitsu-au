@@ -78,9 +78,9 @@ export type BlogImageTicket = {
 const wireSchema = z
   .object({
     v: z.literal(1),
-    i: z.string().uuid(),
-    u: z.string().uuid(),
-    p: z.string().uuid().optional(),
+    i: z.guid(),
+    u: z.guid(),
+    p: z.guid().optional(),
     n: z.string().max(255).optional(),
     a: z.string().max(300).optional(),
     e: z.number().int().positive(),

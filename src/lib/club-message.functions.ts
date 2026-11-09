@@ -87,7 +87,7 @@ export const sendClubMessage = createServerFn({ method: "POST" })
 /** Finish a part-sent message from the history, by its id. Safe to repeat. */
 export const finishClubMessage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.guid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const server = await import("@/lib/club-message.server");
@@ -114,7 +114,7 @@ export const listClubMessages = createServerFn({ method: "GET" })
 /** One past message in full, for the manager's history. */
 export const getClubMessage = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.guid() }).parse(d))
   .handler(async ({ data, context }) => {
     await requireManager(context);
     const server = await import("@/lib/club-message.server");
@@ -128,7 +128,7 @@ export const getClubMessage = createServerFn({ method: "GET" })
  */
 export const getMyClubMessage = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => z.object({ id: z.guid() }).parse(d))
   .handler(async ({ data, context }) => {
     const server = await import("@/lib/club-message.server");
     return server.getClubMessageForReader(await adminClient(), {

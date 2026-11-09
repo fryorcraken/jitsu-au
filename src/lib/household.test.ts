@@ -350,7 +350,7 @@ describe("listHousehold", () => {
 });
 
 // The uuid a route param or a hand-typed link arrives as is not always the one
-// Postgres hands back: `z.string().uuid()` accepts uppercase, Postgres compares
+// Postgres hands back: `z.guid()` accepts uppercase, Postgres compares
 // uuids by value and returns them lowercase, and this module compares strings.
 describe("uuid case", () => {
   const UPPER = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
