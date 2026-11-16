@@ -15,6 +15,12 @@ export type SitemapPage = {
   changefreq: ChangeFrequency;
   /** Relative importance within this site only (0.0 - 1.0). */
   priority: number;
+  /**
+   * When the page last changed, as an ISO 8601 timestamp. Only set where the
+   * date is real: a blog post's own `updated_at`. The fixed pages leave it out
+   * (see `buildSitemapXml`).
+   */
+  lastmod?: string;
 };
 
 /**
@@ -50,8 +56,9 @@ export const PUBLIC_PAGES: SitemapPage[] = [
  * the signed-in pages, these can never be derived from anything. A new public
  * noindex page has to be listed here or nothing ever looks at it.
  *
- * Not listed, because each needs a token or a session that only its own email
- * gives it: `/update-password`, `/blog/$slug`.
+ * Not listed, because it needs a session that only its own email gives it:
+ * `/update-password`. (`/blog/$slug` is not a noindex page at all: every
+ * published post is indexable, and the sitemap lists each one.)
  *
  * `/email-settings` IS listed, even though the settings behind it need a
  * credential. Its URL no longer carries one (`/email-settings/<token>` sets a

@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, stripSearchParams } from "@tanstack/react-router";
 import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SiteLayout } from "@/components/site/SiteLayout";
@@ -13,6 +13,14 @@ type LoaderData = { result: ListResult | null; error: boolean };
 
 export const Route = createFileRoute("/blog/")({
   validateSearch: blogListSearchSchema,
+  // Page one is `/blog`, never `/blog?page=1`. Without this the router writes
+  // the schema's default back into the address, so a request for `/blog` (the
+  // sitemap entry and this page's own canonical) was answered with a redirect
+  // to `?page=1`, whose canonical pointed back at the redirect. Search Console
+  // reads that as "Page with redirect" and drops the page. Stripping the
+  // default makes `/blog` answer itself, turns every `search={{ page: 1 }}`
+  // link into a plain `/blog`, and sends an old `?page=1` link to `/blog`.
+  search: { middlewares: [stripSearchParams({ page: 1 })] },
   // Keyed on the `page` search param so navigating between pages re-runs the
   // loader (and, on the very first load of any page, ships real post links in
   // the server-rendered HTML rather than a client-only fetch — a blog list

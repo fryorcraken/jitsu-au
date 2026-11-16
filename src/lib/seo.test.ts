@@ -14,6 +14,7 @@ import {
   buildClubJsonLd,
   buildPageMeta,
   buildRobotsTxt,
+  blogPostSitemapPages,
   buildSitemapXml,
   canonicalUrl,
 } from "./seo";
@@ -307,12 +308,62 @@ describe("buildSitemapXml", () => {
     }
   });
 
+  it("gives the fixed pages no <lastmod>, since they have no real date", () => {
+    expect(xml).not.toContain("<lastmod>");
+  });
+
+  it("writes <lastmod> right after <loc> for a page that has a date", () => {
+    const dated = buildSitemapXml([
+      {
+        path: "/blog/x",
+        changefreq: "yearly",
+        priority: 0.5,
+        lastmod: "2026-11-11T09:00:00+00:00",
+      },
+    ]);
+    expect(dated).toContain(
+      "<loc>https://utsjitsu.com.au/blog/x</loc>\n    <lastmod>2026-11-11T09:00:00+00:00</lastmod>",
+    );
+  });
+
   it("escapes XML-significant characters in a path", () => {
     const xmlWithEntities = buildSitemapXml([
       { path: "/search?q=gi&size=a2", changefreq: "monthly", priority: 0.5 },
     ]);
     expect(xmlWithEntities).toContain("<loc>https://utsjitsu.com.au/search?q=gi&amp;size=a2</loc>");
     expect(xmlWithEntities).not.toContain("&size");
+  });
+});
+
+describe("blogPostSitemapPages", () => {
+  it("lists each post at its canonical path, dated by its last edit", () => {
+    expect(
+      blogPostSitemapPages([
+        { slug: "2026-11-11-wednesday-session-log", updated_at: "2026-11-12T01:02:03+00:00" },
+      ]),
+    ).toEqual([
+      {
+        path: "/blog/2026-11-11-wednesday-session-log",
+        changefreq: "yearly",
+        priority: 0.5,
+        lastmod: "2026-11-12T01:02:03+00:00",
+      },
+    ]);
+  });
+
+  it("matches the canonical the post page itself declares", () => {
+    const [page] = blogPostSitemapPages([{ slug: "a-post", updated_at: "2026-01-01T00:00:00Z" }]);
+    const source = readFileSync(
+      join(import.meta.dirname, "..", "routes", "blog", "$slug.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("const path = `/blog/${params.slug}`;");
+    expect(source).toContain('rel: "canonical", href: canonicalUrl(path)');
+    expect(canonicalUrl(page.path)).toBe("https://utsjitsu.com.au/blog/a-post");
+  });
+
+  it("lists nothing when there are no posts", () => {
+    expect(blogPostSitemapPages([])).toEqual([]);
   });
 });
 

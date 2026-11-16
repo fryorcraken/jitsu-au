@@ -241,6 +241,22 @@ export const listPublishedBlogPosts = createServerFn({ method: "GET" })
     };
   });
 
+/**
+ * Every published post's slug and last-edit time, for /sitemap.xml. A plain
+ * function rather than a server function because its one caller is the
+ * sitemap's own server handler. Read as `anon`, like the rest of the public
+ * blog, so a draft can never reach the sitemap.
+ */
+export async function listSitemapBlogPosts() {
+  const { data, error } = await serverSupabase()
+    .from("blog_posts")
+    .select("slug, updated_at")
+    .eq("status", "published")
+    .order("published_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
 export const getBlogPostBySlug = createServerFn({ method: "GET" })
   .validator((d: unknown) => blogPostSlugSchema.parse(d))
   .handler(async ({ data }) => {
