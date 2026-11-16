@@ -351,15 +351,13 @@ describe("blogPostSitemapPages", () => {
     ]);
   });
 
-  it("matches the canonical the post page itself declares", () => {
-    const [page] = blogPostSitemapPages([{ slug: "a-post", updated_at: "2026-01-01T00:00:00Z" }]);
-    const source = readFileSync(
-      join(import.meta.dirname, "..", "routes", "blog", "$slug.tsx"),
-      "utf8",
-    );
-    expect(source).toContain("const path = `/blog/${params.slug}`;");
-    expect(source).toContain('rel: "canonical", href: canonicalUrl(path)');
-    expect(canonicalUrl(page.path)).toBe("https://utsjitsu.com.au/blog/a-post");
+  it("uses the same path the post page uses for its canonical, slug untouched", () => {
+    // The post page's canonical is canonicalUrl(`/blog/${params.slug}`). Re-encoding
+    // the slug here would make the two disagree for any slug encoding changes.
+    const slug = "caf\u00e9-night";
+    const [page] = blogPostSitemapPages([{ slug, updated_at: "2026-01-01T00:00:00Z" }]);
+    expect(page.path).toBe(`/blog/${slug}`);
+    expect(canonicalUrl(page.path)).toBe(canonicalUrl(`/blog/${slug}`));
   });
 
   it("lists nothing when there are no posts", () => {

@@ -18,8 +18,8 @@ export const Route = createFileRoute("/blog/")({
   // sitemap entry and this page's own canonical) was answered with a redirect
   // to `?page=1`, whose canonical pointed back at the redirect. Search Console
   // reads that as "Page with redirect" and drops the page. Stripping the
-  // default makes `/blog` answer itself, turns every `search={{ page: 1 }}`
-  // link into a plain `/blog`, and sends an old `?page=1` link to `/blog`.
+  // default makes `/blog` answer itself, turns every link to page one into a
+  // plain `/blog`, and sends an old `?page=1` link to `/blog`.
   search: { middlewares: [stripSearchParams({ page: 1 })] },
   // Keyed on the `page` search param so navigating between pages re-runs the
   // loader (and, on the very first load of any page, ships real post links in
@@ -170,9 +170,7 @@ function BlogIndex() {
           <div className="mt-10 text-sm text-muted-foreground">
             <p>That page doesn't exist.</p>
             <Button asChild variant="outline" size="sm" className="mt-3">
-              <Link to="/blog" search={{ page: 1 }}>
-                Back to the first page
-              </Link>
+              <Link to="/blog">Back to the first page</Link>
             </Button>
           </div>
         ) : nothingYet ? (
@@ -202,11 +200,7 @@ function BlogIndex() {
               {page > 1 && (result?.articleCount ?? 0) > 0 && (
                 <p className="mt-1 text-sm text-muted-foreground">
                   The articles are on the{" "}
-                  <Link
-                    to="/blog"
-                    search={{ page: 1 }}
-                    className="text-primary underline underline-offset-2"
-                  >
+                  <Link to="/blog" className="text-primary underline underline-offset-2">
                     first page
                   </Link>
                   .

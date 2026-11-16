@@ -315,7 +315,9 @@ export type SitemapBlogPost = { slug: string; updated_at: string };
  */
 export function blogPostSitemapPages(posts: SitemapBlogPost[]): SitemapPage[] {
   return posts.map((post) => ({
-    path: `/blog/${encodeURIComponent(post.slug)}`,
+    // Built exactly as the post page builds its own canonical (`/blog/${params.slug}`),
+    // so the two can never disagree.
+    path: `/blog/${post.slug}`,
     changefreq: "yearly",
     priority: 0.5,
     lastmod: post.updated_at,

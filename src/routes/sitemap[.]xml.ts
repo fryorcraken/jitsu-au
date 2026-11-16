@@ -15,26 +15,30 @@ import { PUBLIC_PAGES, blogPostSitemapPages, buildSitemapXml, type SitemapPage }
  * Lazy-imported so this route file never pulls the blog's server code into the
  * client bundle.
  */
-async function blogPages(): Promise<SitemapPage[]> {
+async function blogPages(): Promise<SitemapPage[] | null> {
   try {
     const { listSitemapBlogPosts } = await import("@/lib/blog.functions");
     return blogPostSitemapPages(await listSitemapBlogPosts());
   } catch (error) {
     console.error("[sitemap] could not list blog posts; serving the fixed pages only", error);
-    return [];
+    return null;
   }
 }
 
 export const Route = createFileRoute("/sitemap.xml")({
   server: {
     handlers: {
-      GET: async () =>
-        new Response(buildSitemapXml([...PUBLIC_PAGES, ...(await blogPages())]), {
+      GET: async () => {
+        const posts = await blogPages();
+        return new Response(buildSitemapXml([...PUBLIC_PAGES, ...(posts ?? [])]), {
           headers: {
             "content-type": "application/xml; charset=utf-8",
-            "cache-control": "public, max-age=3600",
+            // A fallback missing the posts is cached for a minute, not an
+            // hour, so one failed read is not what crawlers keep.
+            "cache-control": posts ? "public, max-age=3600" : "public, max-age=60",
           },
-        }),
+        });
+      },
     },
   },
 });
