@@ -282,6 +282,24 @@ this dynamic route still declares a canonical and is never accidentally
 with no published post behind it throws `notFound()` from the route's loader,
 which is a real 404, not a "soft 404" page a crawler could index.
 
+**Every published post is in `/sitemap.xml`.** The sitemap route reads the
+published posts (as `anon`, so a draft cannot appear) and adds one entry each,
+dated with `<lastmod>` from the post's `updated_at`, which every save sets
+(`blogPostSitemapPages` in `src/lib/seo.ts`). If that read fails, the sitemap
+still serves every fixed page rather than an error.
+
+**Page one of the list is `/blog`, never `/blog?page=1`.** The route strips the
+default `page` from the address, so `/blog` (the sitemap entry and its own
+canonical) answers with the page rather than a redirect, and an old `?page=1`
+link redirects to `/blog`. Before November 2026 it was the other way round, and
+Search Console reported `/blog` as "Page with redirect".
+
+**Every later page of the list names itself.** `/blog?page=2` has its own
+canonical and its own title (`blogListPath` in `src/lib/seo.ts`); until November
+2026 every page pointed at `/blog`, which told search engines page two was a
+copy of page one. A page past the end ("That page doesn't exist") still points
+at `/blog`, so an empty page is never offered for indexing.
+
 ## Future features (out of scope today)
 
 - **Showing an author their own hidden comment.** `listComments` filters
@@ -298,10 +316,6 @@ which is a real 404, not a "soft 404" page a crawler could index.
   until there's a real request for them.
 - **Deeper reply nesting** — one level today (Disqus-style), not unlimited
   threads.
-- **Per-post entries in the XML sitemap** — `/blog` is listed; individual post
-  URLs aren't yet enumerated there (they're still fully indexable via their
-  own canonical + on-site links from `/blog`, just not pre-declared in the
-  static sitemap file).
 - **A "top" comment sort** — comments are shown oldest-first only.
 - **Video file uploads** — videos are embed-by-link only (YouTube renders
   inline; other providers show as a plain link), to avoid storage/bandwidth

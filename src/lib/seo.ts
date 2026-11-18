@@ -303,17 +303,53 @@ function escapeXml(value: string): string {
 }
 
 /**
+ * The address of one page of the blog list, as its canonical gives it.
+ *
+ * Page one is `/blog` (the route strips the default `page` from the address,
+ * so `/blog?page=1` redirects there). Every later page names ITSELF, not page
+ * one: a later page holds different posts, and pointing its canonical at
+ * `/blog` told search engines it was a copy of page one, so they dropped it.
+ */
+export function blogListPath(page: number): string {
+  return page > 1 ? `/blog?page=${page}` : "/blog";
+}
+
+/** A published blog post, as much of it as the sitemap needs. */
+export type SitemapBlogPost = { slug: string; updated_at: string };
+
+/**
+ * One sitemap entry per published blog post.
+ *
+ * Without these a post is only found by following links from `/blog`, which
+ * pages through updates ten at a time, so an older post sits several hops deep.
+ * `lastmod` is the post's own `updated_at`, which every save sets, so unlike
+ * the fixed pages there is a real date to give.
+ */
+export function blogPostSitemapPages(posts: SitemapBlogPost[]): SitemapPage[] {
+  return posts.map((post) => ({
+    // Built exactly as the post page builds its own canonical (`/blog/${params.slug}`),
+    // so the two can never disagree.
+    path: `/blog/${post.slug}`,
+    changefreq: "yearly",
+    priority: 0.5,
+    lastmod: post.updated_at,
+  }));
+}
+
+/**
  * sitemap.xml for the public pages.
  *
- * No `<lastmod>`: we have no trustworthy per-page modification date at request
- * time, and search engines discount a sitemap whose dates are all "now" more
- * than one that simply omits them.
+ * `<lastmod>` only where a page carries a real date (a blog post). The fixed
+ * pages have no trustworthy modification date at request time, and search
+ * engines discount a sitemap whose dates are all "now" more than one that
+ * simply omits them.
  */
 export function buildSitemapXml(pages: SitemapPage[] = PUBLIC_PAGES): string {
   const urls = pages.map((page) =>
     [
       "  <url>",
       `    <loc>${escapeXml(canonicalUrl(page.path))}</loc>`,
+      ...(page.lastmod ? [`    <lastmod>${escapeXml(page.lastmod)}</lastmod>`] : []),
       `    <changefreq>${page.changefreq}</changefreq>`,
       `    <priority>${page.priority.toFixed(1)}</priority>`,
       "  </url>",
