@@ -349,6 +349,39 @@ export function sendConfirmTitle(subject: string, emails: number): string {
 }
 
 /** What a message reached, as the screen and the agent API report it. */
+/**
+ * The first line of a body that opens with its own greeting, or null.
+ *
+ * The email already greets the reader by name ("Hi Sam,") between the subject
+ * and the body, so a body that starts "Hi everyone," goes out as two greetings
+ * in a row. That happened to the first notice an agent sent, to 21 people: the
+ * test copy showed it, but only to somebody who opened the inbox. So both doors
+ * say so before the send, the screen under the message box and the agent API
+ * in the test's `warnings`. A hint, never a refusal: "Dear Santa" in a joke is
+ * the manager's call.
+ *
+ * Markdown a line can open with (a heading's `#`, bold's `**`, a quote's `>`)
+ * is looked past, so "**Hi all**" is caught too.
+ */
+const GREETING =
+  /^(?:hi|hiya|hello|hey|heya|dear|g'?day|greetings|howdy|good (?:morning|afternoon|evening))(?![\w'-])/i;
+
+export function openingGreeting(body: string): string | null {
+  const first = body.split(/\r?\n/).find((l) => l.trim() !== "");
+  if (!first) return null;
+  const line = first.trim();
+  const bare = line.replace(/^[\s#>*_~`-]+/, "");
+  if (!GREETING.test(bare)) return null;
+  return line.length > 80 ? `${line.slice(0, 77)}...` : line;
+}
+
+/** What the screen and the agent API say about a body that greets the reader itself. */
+export function greetingWarning(body: string): string | null {
+  const line = openingGreeting(body);
+  if (!line) return null;
+  return `The message opens with "${line}", but the email already starts with "Hi <first name>," on its own line, so readers would see two greetings. Start with the news instead.`;
+}
+
 export type ClubMessageProgress = {
   /** Emails this message is: one per inbox, plus one per lead. */
   recipients: number;

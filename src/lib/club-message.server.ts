@@ -337,11 +337,15 @@ async function composeEmail(opts: {
  *
  * Keyed per click, so pressing it twice sends two (somebody checking a fix
  * wants the second one), while an automatic retry of one press sends one.
+ *
+ * Returns the plain-text rendering as well as the address, so an agent can
+ * read what the template added around the body (the heading, the greeting,
+ * the footer) without a person opening the inbox for it.
  */
 export async function sendClubMessageTest(
   db: AdminClient,
   input: { managerId: string; subject: string; body: string; clickId: string },
-): Promise<{ to: string }> {
+): Promise<{ to: string; text: string }> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("Email is not set up on this site, so nothing can be sent.");
   const me = await deliveryRecipientFor(db, input.managerId);
@@ -366,7 +370,7 @@ export async function sendClubMessageTest(
     idempotencyKey: `club-message-test-${input.clickId}`,
     replyTo,
   });
-  return { to: me.email };
+  return { to: me.email, text };
 }
 
 export type SendResult = ClubMessageProgress & { message_id: string; sent_at: string };

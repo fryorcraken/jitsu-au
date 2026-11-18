@@ -66,7 +66,9 @@ the confirm repeats.
 ## Sending
 
 - **Test first.** "Send me a test" emails the manager's own address, marked as a
-  test. Nothing is recorded.
+  test. Nothing is recorded. The agent API's `send_club_message_test` also hands
+  back the email as plain text and a `warnings` list, so an agent can see what
+  the template added without a person opening the inbox.
 - **The confirm says the real number**: `Email 23 people about "..."?`, with a
   line per group, and "This can't be undone."
 - **One message, one id.** The screen mints the id (`useResilientSubmit`'s
@@ -92,6 +94,12 @@ the confirm repeats.
   person, "You're getting this because you asked about training at UTS Jitsu"
   for a lead. Raw HTML is dropped and a picture is shown as its words, so a
   notice never makes a mail client fetch anything.
+- **The greeting is the template's, so the body must not bring its own.** The
+  first notice sent through the agent API opened "Hi everyone," and went to 21
+  people under the template's "Hi <first name>,". The screen now says under the
+  message box what the email adds, and both doors flag a body whose first line
+  is a greeting (`greetingWarning`): a hint on the screen, a `warnings` entry
+  from the agent's test send. Neither refuses the send.
 - **The members' copy** is on `/notifications`, linking to `/messages/<id>`, which
   opens only for an inbox the message was sent to.
   An applicant's login is still locked, so they cannot open that page: their
@@ -115,9 +123,16 @@ The club owner chose to send notices this way anyway, because the club is small:
 23 people on 2026-11-08, so a full send is a couple of dozen emails and leaves
 the hourly allowance for invoices. Two consequences follow:
 
-- **There is no "stop emails" list of ours.** Lovable's footer is the
-  unsubscribe, for leads and members alike. A notice says plainly that it is
-  about training, to keep that footer from being pressed.
+- **There is no "stop emails" list of ours.** Lovable's footer ("Unsubscribe
+  from these emails") is the unsubscribe, for leads and members alike. A notice
+  says plainly that it is about training, to keep that footer from being
+  pressed. So "members cannot turn notices off" is true only of the site's own
+  email settings, which have no switch for them. The agent manifest says both
+  halves, because an agent that read only the first and then saw the link in
+  the footer reported them as a contradiction.
+- **The site cannot see who unsubscribed.** Lovable does not tell us, so the
+  count on the screen and `get_club_message_audience` include those addresses,
+  and the manifest says so.
 - **If the club grows into hundreds of inboxes, revisit this** before raising
   any limit: a large send would hold invoices up for hours. Promotions, when
   built, go through Resend on a separate address (for example
