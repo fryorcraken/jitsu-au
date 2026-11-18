@@ -135,7 +135,7 @@ function Composer({ userId }: { userId: string | null }) {
     leadIds: string[];
   } | null>(null);
 
-  const doubledGreeting = useMemo(() => greetingWarning(body), [body]);
+  const doubledGreeting = greetingWarning(body);
   const draftValue = useMemo<DraftFields>(() => ({ subject, body }), [subject, body]);
   const draft = useEditorDraft<DraftFields>({
     kind: "club-message",

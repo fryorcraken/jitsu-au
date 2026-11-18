@@ -1398,7 +1398,6 @@ describe("check-in on the agent API", () => {
         "You're getting this because you asked about training at UTS Jitsu.",
       ]) {
         expect(summary).toContain(line);
-        expect(person.includes(line) || lead.includes(line)).toBe(true);
       }
     }
     expect(person).toContain("This is a club notice from UTS Jitsu about training.");

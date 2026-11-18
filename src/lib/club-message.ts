@@ -364,7 +364,7 @@ export function sendConfirmTitle(subject: string, emails: number): string {
  * is looked past, so "**Hi all**" is caught too.
  */
 const GREETING =
-  /^(?:hi|hiya|hello|hey|heya|dear|g'?day|greetings|howdy|good (?:morning|afternoon|evening))\b/i;
+  /^(?:hi|hiya|hello|hey|heya|dear|g'?day|greetings|howdy|good (?:morning|afternoon|evening))(?![\w'-])/i;
 
 export function openingGreeting(body: string): string | null {
   const first = body.split(/\r?\n/).find((l) => l.trim() !== "");

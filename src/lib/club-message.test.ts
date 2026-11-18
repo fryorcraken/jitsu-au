@@ -320,6 +320,7 @@ describe("openingGreeting", () => {
     expect(openingGreeting("The dojo is closed on 24 December.")).toBeNull();
     expect(openingGreeting("Highlights from grading night")).toBeNull();
     expect(openingGreeting("History of the club, part 2")).toBeNull();
+    expect(openingGreeting("Hi-vis vests are now required.")).toBeNull();
     expect(openingGreeting("We train as usual.\n\nHi to the new starters!")).toBeNull();
     expect(openingGreeting("")).toBeNull();
   });

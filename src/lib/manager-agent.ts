@@ -502,7 +502,7 @@ export type AgentActionSpec = {
  * `email-templates/club-message.tsx` by a test in manager-agent.test.ts.
  */
 const CLUB_NOTICE_EMAIL_LAYOUT =
-  'What the email adds around body: the subject as a heading, then a greeting line of its own, "Hi <first name>," (to a parent, "Hi <first name>, this is about <child>."), then body, then a footer with a reply line and "This is a club notice from UTS Jitsu about training." (to a lead, "You\'re getting this because you asked about training at UTS Jitsu."). So start body with the news: no greeting of your own, which would go out as two.';
+  'What the email adds around body: the subject as a heading, then a greeting line of its own, "Hi <first name>," ("Hi there," when there is no name; to a parent, "Hi <first name>, this is about <child>."), then body, then a footer with a reply line and "This is a club notice from UTS Jitsu about training." (to a lead, "You\'re getting this because you asked about training at UTS Jitsu."). So start body with the news: no greeting of your own, which would go out as two.';
 
 /**
  * The one way out of a club notice, which is not ours. Lovable's email service
