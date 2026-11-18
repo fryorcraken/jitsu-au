@@ -1964,8 +1964,17 @@ the recipients and the history all agree. Product rules:
 - **It emails people and cannot be undone.** Before `send_club_message`, read
   back the subject, the groups, how many leads, and the `emails` number from
   `get_club_message_audience`, and get a clear yes.
-- Members also see it on their Notifications page, and nobody can turn notices
-  off. A family is one email, to the parent.
+- **The email greets the reader itself.** It puts the subject as a heading,
+  then "Hi <first name>," (to a parent, "...this is about <child>."), then the
+  body, then a footer with a reply line. So start the body with the news, never
+  with "Hi everyone," or "Dear members,": that goes out as two greetings.
+- Members also see it on their Notifications page. The site's email settings
+  have no switch for notices, but every email carries the email service's own
+  "Unsubscribe from these emails" link, which the site cannot remove. An
+  address that uses it gets no more email from the site at all (invoices too),
+  and the site is not told who has, so the count still includes them. Say that
+  if a manager asks whether people can opt out. A family is one email, to the
+  parent.
 
 ```bash
 scripts/agent.sh list_message_people '{}'
@@ -1988,7 +1997,10 @@ scripts/agent.sh list_club_messages '{}'
   `preselected: true` (the last 90 days) to start with, so offer the same
   default and let the manager change it.
 - **Test first** when the manager wants to see it: `send_club_message_test`
-  goes only to the acting manager's own address.
+  goes only to the acting manager's own address. It returns `text` (the email
+  as plain text, heading in capitals) and `warnings`. Read the text yourself
+  before asking for the yes, and read any warning to the manager and offer to
+  fix the body.
 - **`pending` above zero** means some emails have not gone yet. Call
   `send_club_message` again with the **same** `message_id` and the same words
   to send the rest; nobody gets it twice. A new `message_id` is a new message.
@@ -2049,7 +2061,7 @@ scripts/agent.sh list_club_messages '{}'
   correct to retry unchanged, and it carries a `Retry-After` header — obey it
   rather than retrying immediately. Nothing was filed. Retryable failures are 5xx;
   a 4xx means the request itself needs to change before it will ever succeed.
-- The manifest's `version` tells generations apart (currently `"39"`), and its
+- The manifest's `version` tells generations apart (currently `"40"`), and its
   `changes` array says what each version actually moved, newest first, with
   `breaking: true` on any version that turns calls which used to succeed into
   errors. **There is no way to pin an older version** — the contract is

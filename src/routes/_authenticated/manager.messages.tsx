@@ -23,6 +23,7 @@ import {
   LEAD_PRESELECT_DAYS,
   choiceFromTicks,
   clubMessageGroups,
+  greetingWarning,
   peopleCount,
   sendConfirmTitle,
   type ClubMessageGroup,
@@ -134,6 +135,7 @@ function Composer({ userId }: { userId: string | null }) {
     leadIds: string[];
   } | null>(null);
 
+  const doubledGreeting = useMemo(() => greetingWarning(body), [body]);
   const draftValue = useMemo<DraftFields>(() => ({ subject, body }), [subject, body]);
   const draft = useEditorDraft<DraftFields>({
     kind: "club-message",
@@ -405,12 +407,22 @@ function Composer({ userId }: { userId: string | null }) {
                   id="message-body"
                   rows={10}
                   value={body}
+                  aria-describedby="message-body-hint"
                   onChange={(next) => {
                     edited();
                     setBody(next);
                   }}
                 />
               </div>
+              <p id="message-body-hint" className="mt-1.5 text-sm text-muted-foreground">
+                The email already puts the subject at the top and &ldquo;Hi&rdquo; with each
+                person&rsquo;s first name above your message, so start with the news.
+              </p>
+              {doubledGreeting && (
+                <p role="status" className="mt-1.5 text-sm font-medium text-foreground">
+                  {doubledGreeting}
+                </p>
+              )}
             </div>
 
             <fieldset className="space-y-3">

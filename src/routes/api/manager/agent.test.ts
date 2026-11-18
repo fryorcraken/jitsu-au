@@ -242,6 +242,15 @@ vi.mock("@/lib/plan-announcement.server", () => {
   };
 });
 
+// The test send's own behaviour (who it goes to, what the template renders) is
+// in club-message.server.ts and the template's tests. What the route owns is
+// what an agent is told back: the rendered text, and a warning when the body
+// would greet the reader a second time.
+const sendClubMessageTestMock = vi.fn();
+vi.mock("@/lib/club-message.server", () => ({
+  sendClubMessageTest: (...args: unknown[]) => sendClubMessageTestMock(...args),
+}));
+
 const MINTED_TOKEN = "utsj_0123456789abcdef0123456789abcdef0123456789abcdef";
 const TOKEN_OWNER = "44444444-4444-4444-4444-444444444444";
 /**
@@ -3262,5 +3271,37 @@ describe("manager agent route: the syllabus", () => {
   it("marks a belt page in list_kb_articles", async () => {
     const { body } = await result(await post({ action: "list_kb_articles", params: {} }));
     expect(body.result.articles[0]).toMatchObject({ slug: "yellow-belt", belt: "yellow" });
+  });
+});
+
+describe("send_club_message_test", () => {
+  const RENDERED = "Test copy, sent only to you.\n\nDojo closed\n\nHi Sam,\n\nHi everyone,";
+
+  beforeEach(() => {
+    vi.resetModules();
+    currentAdmin = {};
+    sendClubMessageTestMock.mockReset();
+    sendClubMessageTestMock.mockResolvedValue({ to: "sam@example.com", text: RENDERED });
+  });
+
+  it("hands back what the email says, and warns about a second greeting", async () => {
+    const res = await post({
+      action: "send_club_message_test",
+      params: { kind: "notice", subject: "Dojo closed", body: "Hi everyone,\n\nClosed Thursday." },
+    });
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result).toMatchObject({ sent: true, to: "sam@example.com", text: RENDERED });
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('"Hi everyone,"');
+    expect(sendClubMessageTestMock.mock.calls[0][1]).toMatchObject({ managerId: TOKEN_OWNER });
+  });
+
+  it("has no warnings for a body that starts with the news", async () => {
+    const res = await post({
+      action: "send_club_message_test",
+      params: { kind: "notice", subject: "Dojo closed", body: "Closed Thursday." },
+    });
+    expect((await res.json()).result.warnings).toEqual([]);
   });
 });

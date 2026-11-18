@@ -494,6 +494,27 @@ export type AgentActionSpec = {
 };
 
 /**
+ * What a club notice's email puts around the manager's words, said in both the
+ * test's and the send's summaries. An agent writes the body blind: the first
+ * notice sent through the API opened with its own "Hi everyone," under the
+ * template's "Hi <first name>," and went to 21 people that way, because nothing here
+ * said the template greets the reader itself. Kept in step with
+ * `email-templates/club-message.tsx` by a test in manager-agent.test.ts.
+ */
+const CLUB_NOTICE_EMAIL_LAYOUT =
+  'What the email adds around body: the subject as a heading, then a greeting line of its own, "Hi <first name>," (to a parent, "Hi <first name>, this is about <child>."), then body, then a footer with a reply line and "This is a club notice from UTS Jitsu about training." (to a lead, "You\'re getting this because you asked about training at UTS Jitsu."). So start body with the news: no greeting of your own, which would go out as two.';
+
+/**
+ * The one way out of a club notice, which is not ours. Lovable's email service
+ * adds its own unsubscribe link to every email the site sends, does not let us
+ * remove it, and does not tell us who used it (docs/club-messages.md, "How it
+ * is sent, and why"). The manifest used to say only that members "cannot turn
+ * it off", which an agent reading the email's footer took as a contradiction.
+ */
+const EMAIL_SERVICE_UNSUBSCRIBE =
+  'Below the footer, the email service adds its own "Unsubscribe from these emails" link to every email the site sends; the site cannot remove it. An address that uses it gets no more email from the site at all, invoices and receipts included, and the site is not told who has, so nobody can be left out of the count for it.';
+
+/**
  * The runtime source of truth for what the endpoint can do. An agent should GET
  * the endpoint to read this before acting, so a skill/MCP wrapper never drifts
  * from the deployed contract. When you add or change an action, update this,
@@ -508,7 +529,7 @@ export const AGENT_MANIFEST: {
   service: "uts-jitsu-manager-agent",
   // Bumped when the behaviour a client can rely on changes, not just the action
   // list. See `changes` for what each version actually moved.
-  version: "39",
+  version: "40",
   // What changed in each version, newest first.
   //
   // A bare version number tells a client THAT something moved, never what — and
@@ -521,6 +542,17 @@ export const AGENT_MANIFEST: {
   // moves between versions is the behaviour INSIDE an action — a new refusal, a
   // new response field — which is what these notes name.
   changes: [
+    {
+      version: "40",
+      // Two new response fields and clearer wording. Nothing that worked before
+      // changes, and nothing that succeeded now fails.
+      breaking: false,
+      notes: [
+        'send_club_message_test now also returns text (the email as plain text, so you can see what the template adds without the inbox) and warnings (a body that opens with its own greeting, which the email\'s "Hi <first name>," line would double).',
+        "send_club_message_test and send_club_message say what the email adds around body: the subject as a heading, the greeting, and the footer.",
+        "send_club_message no longer says members cannot turn notices off without qualification: the site has no switch for them, but the email service adds its own unsubscribe link to every email, which the site cannot remove or see. get_club_message_audience says it cannot leave those addresses out.",
+      ],
+    },
     {
       version: "39",
       // A group's meaning narrows: `visitors` stops including lapsed members.
@@ -2449,7 +2481,7 @@ export const AGENT_MANIFEST: {
       name: "get_club_message_audience",
       method: "POST",
       summary:
-        "How many emails a club notice would send right now to these groups, people and leads, without sending anything: emails (the number to read back to the manager before sending), inboxes (households), leads, and by_group (households each group reaches on its own). A family is one email, to the parent. Nobody who has left the club is counted.",
+        "How many emails a club notice would send right now to these groups, people and leads, without sending anything: emails (the number to read back to the manager before sending), inboxes (households), leads, and by_group (households each group reaches on its own). A family is one email, to the parent. Nobody who has left the club is counted. Somebody who used the email service's own unsubscribe link still is, because the site is not told who has (see send_club_message).",
       params: [
         {
           name: "groups",
@@ -2473,8 +2505,7 @@ export const AGENT_MANIFEST: {
     {
       name: "send_club_message_test",
       method: "POST",
-      summary:
-        "Email a test copy of a club notice to the acting manager's own address only, marked as a test, exactly as everyone else would see it. Nothing is recorded and nobody else is emailed. Returns to.",
+      summary: `Email a test copy of a club notice to the acting manager's own address only, marked as a test, exactly as everyone else would see it. Nothing is recorded and nobody else is emailed. ${CLUB_NOTICE_EMAIL_LAYOUT} Returns sent, to, text (the email as plain text, greeting and footer included and the heading in capitals, so you can check it without the inbox) and warnings (sentences, empty when nothing looks wrong; today only a body that opens with its own greeting). Read any warning to the manager and offer to fix the body before sending.`,
       params: [
         { name: "kind", required: true, description: "notice. The only kind today." },
         { name: "subject", required: true, description: "One line, up to 200 characters." },
@@ -2493,8 +2524,7 @@ export const AGENT_MANIFEST: {
     {
       name: "send_club_message",
       method: "POST",
-      summary:
-        "Send a club notice, the same send as the manager's Messages screen. IT EMAILS PEOPLE AND CANNOT BE UNDONE: before calling, read the subject, the groups and leads, and the emails count from get_club_message_audience back to the manager and get a clear yes. A notice is facts about training only (a closure, a time change, a venue move); it must not ask anyone to buy or join anything, because promotions are not available yet. Members also see it on their Notifications page and cannot turn it off. Up to 150 go per call: the result's pending says how many are left, and calling again with the same message_id (and the same words) sends those without emailing anybody twice. Members left over also go with the next morning's summary; leads only go when you call again. The list of recipients is fixed by the first call. Returns message_id, sent_at, recipients, emailed, pending. 409 submission_conflict when message_id was already used with different words: mint a new id. 422 no_recipients when nobody ticked can be emailed.",
+      summary: `Send a club notice, the same send as the manager's Messages screen. IT EMAILS PEOPLE AND CANNOT BE UNDONE: before calling, read the subject, the groups and leads, and the emails count from get_club_message_audience back to the manager and get a clear yes. A notice is facts about training only (a closure, a time change, a venue move); it must not ask anyone to buy or join anything, because promotions are not available yet. ${CLUB_NOTICE_EMAIL_LAYOUT} Members also see it on their Notifications page. Their email settings on the site have no switch for notices, as for invoices. ${EMAIL_SERVICE_UNSUBSCRIBE} Up to 150 go per call: the result's pending says how many are left, and calling again with the same message_id (and the same words) sends those without emailing anybody twice. Members left over also go with the next morning's summary; leads only go when you call again. The list of recipients is fixed by the first call. Returns message_id, sent_at, recipients, emailed, pending. 409 submission_conflict when message_id was already used with different words: mint a new id. 422 no_recipients when nobody ticked can be emailed.`,
       params: [
         {
           name: "message_id",

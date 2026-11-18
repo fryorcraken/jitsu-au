@@ -6,8 +6,10 @@ import {
   clubMessageHref,
   groupForPerson,
   groupForStatus,
+  greetingWarning,
   groupPeople,
   leadCandidates,
+  openingGreeting,
   messageAudience,
   messageProgress,
   peopleCount,
@@ -296,6 +298,44 @@ describe("wording", () => {
 
   it("links the members' copy to its own page", () => {
     expect(clubMessageHref("ABC")).toBe("/messages/abc");
+  });
+});
+
+describe("openingGreeting", () => {
+  it("catches a body that greets the reader itself", () => {
+    expect(openingGreeting("Hi everyone,\n\nThe dojo is closed.")).toBe("Hi everyone,");
+    expect(openingGreeting("\n\n  Hello all!\nMore")).toBe("Hello all!");
+    expect(openingGreeting("Dear members,")).toBe("Dear members,");
+    expect(openingGreeting("G'day team")).toBe("G'day team");
+    expect(openingGreeting("Good morning, jitsuka")).toBe("Good morning, jitsuka");
+    expect(openingGreeting("HEY")).toBe("HEY");
+  });
+
+  it("looks past markdown at the start of the line", () => {
+    expect(openingGreeting("**Hi all**, quick one")).toBe("**Hi all**, quick one");
+    expect(openingGreeting("## Hello")).toBe("## Hello");
+  });
+
+  it("leaves a body that starts with the news alone", () => {
+    expect(openingGreeting("The dojo is closed on 24 December.")).toBeNull();
+    expect(openingGreeting("Highlights from grading night")).toBeNull();
+    expect(openingGreeting("History of the club, part 2")).toBeNull();
+    expect(openingGreeting("We train as usual.\n\nHi to the new starters!")).toBeNull();
+    expect(openingGreeting("")).toBeNull();
+  });
+
+  it("keeps a long first line short", () => {
+    const out = openingGreeting(`Hi ${"everyone ".repeat(20)}`)!;
+    expect(out.length).toBe(80);
+    expect(out.endsWith("...")).toBe(true);
+  });
+
+  it("says why it matters, without an em dash", () => {
+    const w = greetingWarning("Hi everyone,\n\nClosed.")!;
+    expect(w).toContain('"Hi everyone,"');
+    expect(w).toContain("Hi <first name>,");
+    expect(w).not.toContain("—");
+    expect(greetingWarning("Closed on Thursday.")).toBeNull();
   });
 });
 

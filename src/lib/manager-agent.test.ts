@@ -505,7 +505,7 @@ describe("AGENT_MANIFEST", () => {
   // Round 2 of the dev probes noted that the manifest still said "1" after the
   // behaviour changed, leaving a client no way to tell the generations apart.
   it("advertises a version a client can branch on", () => {
-    expect(AGENT_MANIFEST.version).toBe("39");
+    expect(AGENT_MANIFEST.version).toBe("40");
   });
 
   // The changelog is only worth having if it cannot fall behind the version it
@@ -1355,6 +1355,74 @@ describe("check-in on the agent API", () => {
     expect(send.summary).toMatch(/get_club_message_audience/);
     expect(send.summary).toMatch(/clear yes/);
     expect(send.summary).toMatch(/must not ask anyone to buy or join/);
+  });
+
+  // An agent writes a notice's body without seeing the email. The first one
+  // sent through the API opened "Hi everyone," under the template's own
+  // "Hi <first name>," and went to 21 people. So both sending actions say what the
+  // template adds, and this holds that description to the template itself.
+  it("says what a club notice's email puts around the body, as the template renders it", async () => {
+    const { render } = await import("@react-email/render");
+    const React = await import("react");
+    const { ClubMessageEmail } = await import("@/lib/email-templates/club-message");
+    const text = async (props: { audience: "person" | "lead"; forWhom?: string }) =>
+      render(
+        React.createElement(ClubMessageEmail, {
+          siteName: "UTS Jitsu",
+          siteUrl: "https://utsjitsu.com.au",
+          greeting: "Sam",
+          subject: "Dojo closed",
+          body: "Closed Thursday.",
+          replyTo: null,
+          ...props,
+        }),
+        { plainText: true },
+      );
+    const person = await text({ audience: "person" });
+    const parent = await text({ audience: "person", forWhom: "Bea" });
+    const lead = await text({ audience: "lead" });
+    // Plain text prints the heading in capitals.
+    const heading = person.indexOf("DOJO CLOSED");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(heading).toBeLessThan(person.indexOf("Hi Sam,"));
+    expect(person.indexOf("Hi Sam,")).toBeLessThan(person.indexOf("Closed Thursday."));
+    expect(parent).toContain("Hi Sam, this is about Bea.");
+
+    for (const name of ["send_club_message_test", "send_club_message"]) {
+      const summary = AGENT_MANIFEST.actions.find((a) => a.name === name)!.summary;
+      expect(summary).toContain('"Hi <first name>,"');
+      expect(summary).toContain("this is about <child>.");
+      expect(summary).toContain("no greeting of your own");
+      for (const line of [
+        "This is a club notice from UTS Jitsu about training.",
+        "You're getting this because you asked about training at UTS Jitsu.",
+      ]) {
+        expect(summary).toContain(line);
+        expect(person.includes(line) || lead.includes(line)).toBe(true);
+      }
+    }
+    expect(person).toContain("This is a club notice from UTS Jitsu about training.");
+    expect(lead).toContain("You're getting this because you asked about training at UTS Jitsu.");
+  });
+
+  it("hands an agent the test email's text and its warnings", () => {
+    const test = AGENT_MANIFEST.actions.find((a) => a.name === "send_club_message_test")!;
+    expect(test.summary).toMatch(/\btext\b/);
+    expect(test.summary).toMatch(/\bwarnings\b/);
+  });
+
+  // The footer carries the email service's own unsubscribe link, so "members
+  // cannot turn it off" on its own read as a contradiction to the agent that
+  // opened the email. Both halves are true, and the manifest has to say both.
+  it("explains the email service's unsubscribe link instead of saying notices cannot be stopped", () => {
+    const send = AGENT_MANIFEST.actions.find((a) => a.name === "send_club_message")!;
+    expect(send.summary).not.toMatch(/cannot turn it off/);
+    expect(send.summary).toMatch(/Unsubscribe from these emails/);
+    expect(send.summary).toMatch(/not told who has/);
+    const audience = AGENT_MANIFEST.actions.find((a) => a.name === "get_club_message_audience")!;
+    expect(audience.summary).toMatch(/unsubscribe/);
+    const change = AGENT_MANIFEST.changes.find((c) => c.version === "40")!;
+    expect(change.breaking).toBe(false);
   });
 
   it("records the check-in actions in the changelog", () => {

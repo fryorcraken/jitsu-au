@@ -248,6 +248,7 @@ import {
   agentClubMessageIdSchema,
   agentSendClubMessageSchema,
   agentSendClubMessageTestSchema,
+  greetingWarning,
 } from "@/lib/club-message";
 import {
   attachCheckInRow,
@@ -2203,7 +2204,13 @@ async function handleSendClubMessageTest(params: unknown, actingAs: string) {
     body: input.body,
     clickId: input.client_submission_id ?? crypto.randomUUID(),
   });
-  return { sent: true as const, to: result.to };
+  const greeting = greetingWarning(input.body);
+  return {
+    sent: true as const,
+    to: result.to,
+    text: result.text,
+    warnings: greeting ? [greeting] : [],
+  };
 }
 
 async function handleSendClubMessage(params: unknown, actingAs: string) {

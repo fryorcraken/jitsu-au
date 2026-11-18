@@ -733,7 +733,8 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   `list_message_people` / `get_club_message_audience` /
   `send_club_message_test` / `send_club_message` (`"37"`, with
   `list_message_people`, `person_ids`, the separate `lapsed` group and
-  contact-form leads in `"39"`) — club notices, the agent's equivalent of
+  contact-form leads in `"39"`, and the test send's `text` and `warnings` in
+  `"40"`) — club notices, the agent's equivalent of
   `/manager/messages`. The screen's two lists (people by group, and leads)
   come from `listMessageRecipients`; the API reports the same rows through
   `list_message_people` and `list_message_leads`.
@@ -746,7 +747,13 @@ image_rejected` (will never work) and `502 image_fetch_failed` (the address
   the same id with different words is `409 submission_conflict`.
   `422 no_recipients` when nobody ticked can be emailed, `404 not_found` from
   `get_club_message`. The manifest tells the agent to read the count back and
-  get a yes first, and that a notice is facts only. Product rules:
+  get a yes first, that a notice is facts only, what the template adds around
+  the body (heading, greeting, footer, kept in step with the template by a test
+  in `manager-agent.test.ts`), and that the email service's own unsubscribe
+  link is the one way out of a notice and invisible to the site.
+  `send_club_message_test` returns `{ sent, to, text, warnings }`: the email as
+  plain text and `greetingWarning`'s finding, the same hint the screen shows.
+  Product rules:
   `docs/club-messages.md`.
 
 - `list_check_in_classes` / `list_attendance` / `get_check_in_preview` /
@@ -935,7 +942,7 @@ wrapper never needs hand-syncing beyond the human-readable docs above.
 changes**, not only when an action is added or removed. A guard that starts
 refusing a call that used to succeed, or a new field in a response, is exactly
 what a client needs the version to tell it about. The version is pinned by a
-test so the bump is a deliberate edit, and the current value is `"39"`.
+test so the bump is a deliberate edit, and the current value is `"40"`.
 
 **Responses carry `version` too**, not just the manifest, so a client that
 cached the manifest at the start of a long run can notice a bump per call
