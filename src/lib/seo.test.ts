@@ -14,6 +14,7 @@ import {
   buildClubJsonLd,
   buildPageMeta,
   buildRobotsTxt,
+  blogListPath,
   blogPostSitemapPages,
   buildSitemapXml,
   canonicalUrl,
@@ -335,6 +336,18 @@ describe("buildSitemapXml", () => {
   });
 });
 
+describe("blogListPath", () => {
+  it("gives page one as plain /blog, the address the sitemap lists", () => {
+    expect(blogListPath(1)).toBe("/blog");
+    expect(PUBLIC_PAGES.map((p) => p.path)).toContain(blogListPath(1));
+  });
+
+  it("gives every later page its own address, not page one's", () => {
+    expect(blogListPath(2)).toBe("/blog?page=2");
+    expect(canonicalUrl(blogListPath(3))).toBe("https://utsjitsu.com.au/blog?page=3");
+  });
+});
+
 describe("blogPostSitemapPages", () => {
   it("lists each post at its canonical path, dated by its last edit", () => {
     expect(
@@ -351,13 +364,13 @@ describe("blogPostSitemapPages", () => {
     ]);
   });
 
-  it("uses the same path the post page uses for its canonical, slug untouched", () => {
-    // The post page's canonical is canonicalUrl(`/blog/${params.slug}`). Re-encoding
-    // the slug here would make the two disagree for any slug encoding changes.
-    const slug = "caf\u00e9-night";
+  it("uses the same path the post page builds its canonical from", () => {
+    // The post page's canonical is canonicalUrl(`/blog/${params.slug}`). Slugs
+    // are lowercase letters, digits and hyphens (validation.ts), so the path
+    // needs no encoding and must not get any.
+    const slug = "2026-11-11-wednesday-session-log";
     const [page] = blogPostSitemapPages([{ slug, updated_at: "2026-01-01T00:00:00Z" }]);
     expect(page.path).toBe(`/blog/${slug}`);
-    expect(canonicalUrl(page.path)).toBe(canonicalUrl(`/blog/${slug}`));
   });
 
   it("lists nothing when there are no posts", () => {
@@ -644,10 +657,15 @@ describe("sitemap coverage of the route files", () => {
   });
 
   it("matches each page's own canonical link", () => {
+    // `/blog` is paged, so its canonical is computed per page by blogListPath,
+    // whose page one is pinned to "/blog" in its own describe block below.
+    const computed: Record<string, string> = { "/blog": "canonicalUrl(blogListPath(page))" };
     for (const page of PUBLIC_PAGES) {
       const file = routeFiles.find((r) => r.path === page.path);
       expect(file, `no route file serves ${page.path}`).toBeDefined();
-      expect(file!.source).toContain(`rel: "canonical", href: canonicalUrl("${page.path}")`);
+      expect(file!.source).toContain(
+        `rel: "canonical", href: ${computed[page.path] ?? `canonicalUrl("${page.path}")`}`,
+      );
     }
   });
 

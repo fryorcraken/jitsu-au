@@ -294,6 +294,12 @@ canonical) answers with the page rather than a redirect, and an old `?page=1`
 link redirects to `/blog`. Before November 2026 it was the other way round, and
 Search Console reported `/blog` as "Page with redirect".
 
+**Every later page of the list names itself.** `/blog?page=2` has its own
+canonical and its own title (`blogListPath` in `src/lib/seo.ts`); until November
+2026 every page pointed at `/blog`, which told search engines page two was a
+copy of page one. A page past the end ("That page doesn't exist") still points
+at `/blog`, so an empty page is never offered for indexing.
+
 ## Future features (out of scope today)
 
 - **Showing an author their own hidden comment.** `listComments` filters

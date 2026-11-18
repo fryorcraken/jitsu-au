@@ -5,7 +5,7 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { formatDate } from "@/lib/dates";
 import { blogListSearchSchema } from "@/lib/validation";
 import { listPublishedBlogPosts } from "@/lib/blog.functions";
-import { buildPageMeta, canonicalUrl } from "@/lib/seo";
+import { blogListPath, buildPageMeta, canonicalUrl } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
 type ListResult = Awaited<ReturnType<typeof listPublishedBlogPosts>>;
@@ -34,15 +34,30 @@ export const Route = createFileRoute("/blog/")({
       return { result: null, error: true };
     }
   },
-  head: () => ({
-    meta: buildPageMeta({
-      title: "Blog: training and club news | UTS Jitsu",
-      description:
-        "Articles on training and self-defence, and the latest club news from UTS Jitsu, Japanese Jiu-Jitsu at UTS Ultimo, Sydney.",
-      path: "/blog",
-    }),
-    links: [{ rel: "canonical", href: canonicalUrl("/blog") }],
-  }),
+  // Each page of the list is its own page to a search engine: its own
+  // canonical (`blogListPath`) and its own title, so page two is not read as
+  // a copy of page one.
+  //
+  // A page past the end ("That page doesn't exist") keeps pointing at `/blog`,
+  // as every page did before: naming itself would offer search engines an
+  // empty page to index, which they report as a "soft 404".
+  head: ({ match, loaderData }) => {
+    const requested = match.search.page;
+    const result = loaderData?.result ?? null;
+    const page = result && requested > pageCount(result) ? 1 : requested;
+    return {
+      meta: buildPageMeta({
+        title:
+          page > 1
+            ? `Blog: training and club news, page ${page} | UTS Jitsu`
+            : "Blog: training and club news | UTS Jitsu",
+        description:
+          "Articles on training and self-defence, and the latest club news from UTS Jitsu, Japanese Jiu-Jitsu at UTS Ultimo, Sydney.",
+        path: blogListPath(page),
+      }),
+      links: [{ rel: "canonical", href: canonicalUrl(blogListPath(page)) }],
+    };
+  },
   component: BlogIndex,
 });
 
@@ -130,15 +145,18 @@ function UpdateRow({ post }: { post: Update }) {
   );
 }
 
+/** How many pages the list of updates spans; always at least one. */
+function pageCount(result: ListResult | null): number {
+  return Math.max(1, Math.ceil((result?.total ?? 0) / (result?.pageSize ?? 10)));
+}
+
 function BlogIndex() {
   const { page } = Route.useSearch();
   const { result, error } = Route.useLoaderData() as LoaderData;
 
   const articles = result?.articles ?? [];
   const posts = result?.posts ?? [];
-  const total = result?.total ?? 0;
-  const pageSize = result?.pageSize ?? 10;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = pageCount(result);
   // Past the last page of updates. With no updates at all that is any page
   // after the first, which would otherwise say the blog is empty while its
   // articles sit on page one.

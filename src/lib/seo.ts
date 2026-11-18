@@ -302,6 +302,18 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
+/**
+ * The address of one page of the blog list, as its canonical gives it.
+ *
+ * Page one is `/blog` (the route strips the default `page` from the address,
+ * so `/blog?page=1` redirects there). Every later page names ITSELF, not page
+ * one: a later page holds different posts, and pointing its canonical at
+ * `/blog` told search engines it was a copy of page one, so they dropped it.
+ */
+export function blogListPath(page: number): string {
+  return page > 1 ? `/blog?page=${page}` : "/blog";
+}
+
 /** A published blog post, as much of it as the sitemap needs. */
 export type SitemapBlogPost = { slug: string; updated_at: string };
 
