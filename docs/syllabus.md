@@ -118,7 +118,9 @@ The belt pages live in one knowledge base section whose **kind** is
   out. The manager editor will not show anything being dragged into it, and a
   new article never defaults into it;
 - the section cannot be deleted, only renamed;
-- in the sidebar it opens with a link to the syllabus by topic.
+- in the sidebar it opens with a link to the syllabus by topic, and the `/kb`
+  index offers the same link as a "Preparing for a grading?" row under its
+  reading-order panel, shown whenever the reader can open a belt page.
 
 ## Reading it by topic: `/kb/syllabus`
 

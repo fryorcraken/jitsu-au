@@ -5,7 +5,7 @@
 // to a crawler that cannot read any of them. See docs/knowledge-base.md ("SEO")
 // for what making one article indexable would take.
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Check, ExternalLink, RefreshCw } from "lucide-react";
+import { ArrowRight, Check, ExternalLink, ListTree, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LoadFailure } from "@/components/site/LoadFailure";
 import { StaleNotice } from "@/components/site/StaleNotice";
@@ -33,6 +33,13 @@ function KnowledgeBaseIndex() {
   // onboarding path, so there is nothing else to point a new member at.
   const target = progress.next ?? flattenKbNav(nav)[0] ?? null;
   const finished = started && !progress.next;
+  // The syllabus by topic is the page a member preparing for a grading wants,
+  // and until it was offered here the only way to it was the sidebar, which on
+  // a phone is folded away behind the menu button. Shown only when the reader
+  // has a syllabus section at all: an empty section never reaches the nav, so
+  // this is exactly "there is at least one belt page you can open", the same
+  // rule the view itself filters on.
+  const hasSyllabus = nav.some((section) => section.kind === "syllabus");
 
   return (
     <section className="mx-auto max-w-3xl">
@@ -115,6 +122,26 @@ function KnowledgeBaseIndex() {
             />
           </div>
         </div>
+      )}
+
+      {/* Below the reading-order panel rather than above it: that panel is the
+          onboarding path and stays the first thing a new member is handed. This
+          one is a lookup, so it is a single row, still on the first screen of
+          a phone. */}
+      {hasSyllabus && (
+        <Link
+          to="/kb/syllabus"
+          className="mt-6 flex items-center gap-3 rounded-xl border px-5 py-4 hover:bg-muted/60"
+        >
+          <ListTree className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">Preparing for a grading?</span>
+            <span className="block text-sm text-muted-foreground">
+              See the syllabus topic by topic, for every belt up to yours.
+            </span>
+          </span>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
       )}
 
       {loading && <Loading className="mt-10" />}

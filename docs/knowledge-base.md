@@ -92,7 +92,9 @@ The belt pages (`/kb/yellow-belt` and the rest) live in a section of their own
 whose kind is `syllabus`. Their text is not written here: it is assembled from
 the syllabus, which is kept as one block per belt per topic, and republished
 when the syllabus changes. The same syllabus is readable topic by topic, up to
-any belt, at `/kb/syllabus`, which the section links to at its top. The editor
+any belt, at `/kb/syllabus`, which the section links to at its top and the
+`/kb` index offers near its top (on a phone the sidebar is folded away behind
+the menu button, so the index is the only place a member would see it). The editor
 shows a belt page's settings only, without a drag handle, and the API refuses
 text for one. All of that is **`docs/syllabus.md`**.
 

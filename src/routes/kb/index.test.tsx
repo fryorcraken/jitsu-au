@@ -10,7 +10,7 @@ const mockUseKbNav = vi.fn();
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (opts: Record<string, unknown>) => opts,
-  Link: ({ children }: { children: ReactNode }) => <a>{children}</a>,
+  Link: ({ children, to }: { children: ReactNode; to?: string }) => <a href={to}>{children}</a>,
 }));
 vi.mock("@/hooks/useKbNav", () => ({ useKbNav: () => mockUseKbNav() }));
 // The list starts fetching an article on hover. That is behaviour of its own,
@@ -50,5 +50,35 @@ describe("/kb index", () => {
     render(<KnowledgeBaseIndex />);
 
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+  });
+
+  // The by-topic view used to be reachable only from the sidebar, which a phone
+  // folds away behind the menu button, so the front page offers it too.
+  it("offers the syllabus by topic when there is a syllabus section", () => {
+    mockUseKbNav.mockReturnValue({
+      nav: [
+        { slug: "syllabus", title: "Syllabus", kind: "syllabus", entries: [] },
+        { slug: "start", title: "Start here", kind: "standard", entries: [] },
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<KnowledgeBaseIndex />);
+
+    const link = screen.getByRole("link", { name: /preparing for a grading/i });
+    expect(link).toHaveAttribute("href", "/kb/syllabus");
+  });
+
+  it("does not offer the syllabus to a reader who has no belt page to open", () => {
+    mockUseKbNav.mockReturnValue({
+      nav: [{ slug: "start", title: "Start here", kind: "standard", entries: [] }],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<KnowledgeBaseIndex />);
+
+    expect(screen.queryByRole("link", { name: /preparing for a grading/i })).toBeNull();
   });
 });
